@@ -4,8 +4,8 @@ use super::Tag;
 use crate::Id;
 
 impl Id<Tag> {
-    /// The tag right above it: `damage.elemental` for
-    /// `damage.elemental.fire`. `None` at the top.
+    /// The tag right above it: `damage.elemental` for `damage.elemental.fire`.
+    /// `None` at the top.
     #[must_use]
     pub fn parent(&self) -> Option<Id<Tag>> {
         let (parent, _) = self.as_str().rsplit_once('.')?;
@@ -19,9 +19,8 @@ impl Id<Tag> {
     }
 
     /// Whether it's `tag` or under it: `damage.elemental.fire` is within
-    /// `damage.elemental` and `damage`, not `damage.fire`. What has a tag
-    /// has every tag above it, so a rule on `damage.elemental` holds for
-    /// fire.
+    /// `damage.elemental` and `damage`, not `damage.fire`. What has a tag has
+    /// every tag above it, so a rule on `damage.elemental` holds for fire.
     #[must_use]
     pub fn is_within(&self, tag: &Id<Tag>) -> bool {
         let (it, above) = (self.as_str(), tag.as_str());
@@ -29,8 +28,8 @@ impl Id<Tag> {
             .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
     }
 
-    /// Whether it's a path: words of `a` to `z`, `0` to `9` and `_`,
-    /// joined by `.`.
+    /// Whether it's a path: words of `a` to `z`, `0` to `9` and `_`, joined by
+    /// `.`.
     pub(crate) fn is_path(&self) -> bool {
         self.as_str().split('.').all(|word| {
             !word.is_empty()

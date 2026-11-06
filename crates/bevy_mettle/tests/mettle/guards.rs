@@ -1,7 +1,7 @@
 //! Guards: attributes and owned tags, as `bevy_arbor` reads them.
 
 use bevy::ecs::system::RunSystemOnce;
-use bevy_mettle::attribute::guards::{attribute_above, attribute_below};
+use bevy_mettle::attribute::read::{attribute_above, attribute_below};
 use bevy_mettle::core::tag::owns;
 use bevy_mettle::prelude::*;
 

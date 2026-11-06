@@ -6,8 +6,9 @@ use bevy_mettle_core::tag::Tag;
 
 use crate::Ability;
 
-/// A gameplay event sent to an actor: a tag, and who and how much. What
-/// abilities with an `Event` trigger activate on, with it; and an entity
+/// A gameplay event sent to an actor: a tag, and who and how much.
+///
+/// What abilities with an `Event` trigger activate on, with it; and an entity
 /// event of its own, for the game to observe. Unreal's
 /// `SendGameplayEventToActor`.
 #[derive(EntityEvent, Debug, Clone, PartialEq)]
@@ -38,7 +39,7 @@ impl GameplayEvent {
     }
 }
 
-/// An ability activated for an actor.
+/// Triggered on an actor as one of its abilities activates.
 #[derive(EntityEvent, Debug, Clone, PartialEq, Eq)]
 pub struct AbilityActivated {
     /// The actor.
@@ -88,8 +89,7 @@ pub enum Failure {
     Requirement,
 }
 
-/// An ability that was active for an actor, ended: by its behaviour, or
-/// cancelled.
+/// Triggered on an actor as one of its abilities ends, or is cancelled.
 #[derive(EntityEvent, Debug, Clone, PartialEq, Eq)]
 pub struct AbilityEnded {
     /// The actor.

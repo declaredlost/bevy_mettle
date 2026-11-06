@@ -1,6 +1,4 @@
-//! When something counts: an expression over the read's tags, the tags
-//! its owner and target own, and the facts a read supplies, weighed from
-//! 0 to 1.
+//! The condition language: expressions over tags and facts, weighed 0 to 1.
 
 mod check;
 mod context;
@@ -15,10 +13,11 @@ pub use self::context::Context;
 use crate::Id;
 use crate::tag::Tag;
 
-/// When something counts, and how much: from 0 (not at all) to 1 (in
-/// full). Most terms hold or don't; [`FactRamp`](Self::FactRamp) holds in part,
-/// and so do the combinators built on it. What a modifier counts while, an
-/// effect needs to apply, an ability needs to activate.
+/// When something counts, and how much: from 0 (not at all) to 1 (in full).
+///
+/// Most terms hold or don't; [`FactRamp`](Self::FactRamp) holds in part, and so
+/// do the combinators built on it. What a modifier counts while, an effect
+/// needs to apply, an ability needs to activate.
 ///
 /// ```ron
 /// All([
@@ -29,9 +28,9 @@ use crate::tag::Tag;
 /// ```
 ///
 /// A tag term holds for the tag or any under it. A fact is a number a read
-/// supplies, named by a tag (`fact.flown`); one the read didn't supply
-/// isn't there: [`FactSet`](Self::FactSet) and the comparisons don't hold, so a
-/// read with no hit gets no hit bonuses.
+/// supplies, named by a tag (`fact.flown`); one the read didn't supply isn't
+/// there: [`FactSet`](Self::FactSet) and the comparisons don't hold, so a read
+/// with no hit gets no hit bonuses.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Condition {
     /// Every one holds: the product of their weights.
@@ -65,9 +64,9 @@ pub enum Condition {
         value: f32,
     },
     /// In full where the fact is `full`, not at all where it's `none`, in
-    /// proportion between, and as at the nearer end beyond: a falloff by
-    /// how far a projectile flew. `full` below `none` fades as the fact
-    /// grows (point blank), above it builds up (far shot).
+    /// proportion between, and as at the nearer end beyond: a falloff by how
+    /// far a projectile flew. `full` below `none` fades as the fact grows
+    /// (point blank), above it builds up (far shot).
     FactRamp {
         /// The fact.
         fact: Id<Tag>,
@@ -76,8 +75,8 @@ pub enum Condition {
         /// Where it doesn't hold at all.
         none: f32,
     },
-    /// The fact, a count, is a whole multiple of `n`: every sixth hit.
-    /// Holds for counts of 1 and up.
+    /// The fact, a count, is a whole multiple of `n`: every sixth hit. Holds
+    /// for counts of 1 and up.
     FactEvery {
         /// The fact: a count.
         fact: Id<Tag>,
@@ -238,8 +237,8 @@ impl Condition {
         }
     }
 
-    /// Whether it holds in full in `context`: what an effect's or an
-    /// ability's requirement asks.
+    /// Whether it holds in full in `context`: what an effect's or an ability's
+    /// requirement asks.
     pub fn holds(&self, context: &(impl Context + ?Sized)) -> bool {
         self.weight(context) >= 1.0
     }

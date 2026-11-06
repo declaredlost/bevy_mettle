@@ -1,5 +1,5 @@
-//! Abilities: granted, activated, paid for, cooled down, blocked,
-//! cancelled, triggered, committed by hand, and granted by effects.
+//! Abilities: granted, activated, paid for, cooled down, blocked, cancelled,
+//! triggered, committed by hand, and granted by effects.
 
 use bevy::prelude::*;
 use bevy_harness::TestApp;
@@ -62,8 +62,8 @@ fn channel() -> Ability {
         .blocks("ability.spell")
 }
 
-/// An app with abilities `abilities` (and `channel`, which the staff
-/// grants), and the effects they name.
+/// An app with abilities `abilities` (and `channel`, which the staff grants),
+/// and the effects they name.
 fn app(abilities: &[Ability]) -> TestApp {
     let mut abilities = abilities.to_vec();
     if !abilities

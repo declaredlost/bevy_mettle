@@ -55,6 +55,16 @@ fn health_bars(lives: Query<&Current<Life>, Changed<Current<Life>>>) {
 }
 ```
 
+At the root: [`Attribute`] (and its derive), [`AttributePlugin`],
+[`AttributeSystems`], [`AttributeApp`], [`Base`] and [`Current`]. The rest is
+in three modules, and [`prelude`] brings in what using attributes takes:
+
+| Module | What's in it |
+|---|---|
+| [`modifier`] | `Modifier`, `Modifiers` and the sources they sit on, `Operation`, `Per` |
+| [`read`] | Reads in context: `AttributeContext`, `AttributeReader`, `AttributeWorld`, `Breakdown`, guards |
+| [`registry`] | The untyped layer: `AttributeRegistry`, `AnyAttribute`, `Limit`, `Rounding`, `AttributeState`, `AttributeChanged` |
+
 ## Attributes
 
 An attribute is a marker type: [`#[derive(Attribute)]`](Attribute), its
@@ -98,7 +108,7 @@ can name it, and actors with its [`Base`] have its [`Current`] kept.
 - [`Current<A>`]: the value with every modifier that counts with nothing
   in play, kept within its limits. Written only when it changes, so
   `Changed<Current<Life>>` is life changing.
-- [`AttributeChanged<A>`]: an entity event as its current value changes
+- [`AttributeChanged<A>`](registry::AttributeChanged): an entity event as its current value changes
   (what it was, what it is): `On<AttributeChanged<Life>>`. What only
   some reads see (a fire hit's resistance) isn't told.
 
@@ -146,7 +156,7 @@ tells them coming and going (`TagAdded`, `TagRemoved`) in
 
 ## Reading in context
 
-[`AttributeReader`] reads in an [`AttributeContext`]: the read's tags (a
+[`AttributeReader`] reads in an [`AttributeContext`](read::AttributeContext): the read's tags (a
 hit's), the target's owned tags (`target_tags`, `target_tag`), the
 source's (`source_tags`, `source_tag`), the facts it supplies (numbers
 named by tags: `fact.flown`), and the source involved (`source`).
@@ -166,5 +176,10 @@ instant effect does, kept within its limits.
 
 ## Guards
 
-[`guards`]: `attribute_above::<A>` and `attribute_below::<A>`, for
+[`read`]: `attribute_above::<A>` and `attribute_below::<A>`, for
 `bevy_arbor`; the one on owned tags, `owns`, is core's.
+
+[`AttributeReader`]: read::AttributeReader
+[`AttributeWorld`]: read::AttributeWorld
+[`ModifierOf`]: modifier::ModifierOf
+[`Modifiers`]: modifier::Modifiers

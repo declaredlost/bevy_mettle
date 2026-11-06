@@ -1,4 +1,4 @@
-//! Effects on their targets.
+//! Effects on their targets: each an entity of its own, related to its target.
 
 use std::sync::Arc;
 
@@ -10,11 +10,12 @@ use bevy_mettle_core::tag::{OwnedTags, TagCounts, Tags};
 
 use crate::{Effect, EffectSpec};
 
-/// An effect on its target (Unreal's active gameplay effect): an entity
-/// of its own, [`EffectOf`] the target. While it counts, it carries its
-/// modifiers as [`Modifiers`](bevy_mettle_attribute::Modifiers)
-/// [`ModifierOf`](bevy_mettle_attribute::ModifierOf) the target, and the
-/// target owns the tags it grants; while it's inhibited, neither, and its
+/// An effect on its target: an entity of its own, [`EffectOf`] the target.
+///
+/// Unreal's active gameplay effect. While it counts, it carries its modifiers
+/// as [`Modifiers`](bevy_mettle_attribute::modifier::Modifiers)
+/// [`ModifierOf`](bevy_mettle_attribute::modifier::ModifierOf) the target, and
+/// the target owns the tags it grants; while it's inhibited, neither, and its
 /// time stands still.
 #[derive(Component, Debug)]
 #[component(on_discard = take_back)]
@@ -73,8 +74,8 @@ impl ActiveEffect {
     }
 }
 
-/// Takes back the tags `ActiveEffect` granted, as it's taken off its
-/// entity however: despawned with its target, or replicated away.
+/// Takes back the tags `ActiveEffect` granted, as it's taken off its entity
+/// however: despawned with its target, or replicated away.
 fn take_back(mut world: DeferredWorld, context: HookContext) {
     let Some(active) = world.get::<ActiveEffect>(context.entity) else {
         return;
@@ -91,7 +92,7 @@ fn take_back(mut world: DeferredWorld, context: HookContext) {
     }
 }
 
-/// On an active effect: its target.
+/// On an active effect: the actor it's on, as a Bevy relationship.
 #[derive(
     Component,
     Debug,
@@ -105,8 +106,9 @@ fn take_back(mut world: DeferredWorld, context: HookContext) {
 #[relationship(relationship_target = ActiveEffects)]
 pub struct EffectOf(pub Entity);
 
-/// On an actor: the effects on it. Kept by [`EffectOf`]; despawning the
-/// actor despawns them.
+/// On an actor: the effects on it, kept by [`EffectOf`].
+///
+/// Despawning the actor despawns them.
 #[derive(Component, Debug, Default)]
 #[relationship_target(relationship = EffectOf, linked_spawn)]
 pub struct ActiveEffects(Vec<Entity>);

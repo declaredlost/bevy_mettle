@@ -7,12 +7,13 @@ use bevy::prelude::*;
 
 use crate::Attribute;
 
-/// An actor's attribute `A` changed, with nothing in play: a modifier came
-/// or went, its base was set, a tag it counts while came or went. Told to
-/// observers of the actor (`commands.entity(hero).observe(..)`) and to
-/// global ones (`On<AttributeChanged<Life>>`), as
-/// [`AttributeSystems`](crate::AttributeSystems) runs. Values that only
-/// differ for some reads (a hit's bonus) aren't told.
+/// Triggered as an actor's attribute `A` changes, with nothing in play.
+///
+/// A modifier came or went, its base was set, a tag it counts while came or
+/// went. Told to observers of the actor (`commands.entity(hero).observe(..)`)
+/// and to global ones (`On<AttributeChanged<Life>>`), as
+/// [`AttributeSystems`](crate::AttributeSystems) runs. Values that only differ
+/// for some reads (a hit's bonus) aren't told.
 #[derive(EntityEvent)]
 pub struct AttributeChanged<A: Attribute> {
     /// The actor.

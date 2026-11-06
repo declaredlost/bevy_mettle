@@ -4,16 +4,18 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use bevy::prelude::*;
-use bevy_mettle_attribute::{
-    AnyAttribute, Attribute, AttributeContext, AttributeWorld, Breakdown, Operation,
-};
+use bevy_mettle_attribute::Attribute;
+use bevy_mettle_attribute::modifier::Operation;
+use bevy_mettle_attribute::read::{AttributeContext, AttributeWorld, Breakdown};
+use bevy_mettle_attribute::registry::AnyAttribute;
 use bevy_mettle_core::tag::{OwnedTags, Tag};
 use bevy_mettle_core::{Id, IdTarget};
 
 use crate::EffectSpec;
 
-/// What an execution or a calculation sees: the world (read only), the
-/// target, the spec, and how many stacks there are.
+/// What an execution or a calculation sees: the world, the target, the spec.
+///
+/// The world read only, and how many stacks there are.
 pub struct EffectContext<'a> {
     /// The world.
     pub world: &'a World,
@@ -67,8 +69,8 @@ impl EffectContext<'_> {
         self.world.value_at(entity, attribute, context)
     }
 
-    /// `entity`'s `A`'s modifiers in `context`, summed but not applied, if
-    /// it has it: for a source's and a target's to be combined.
+    /// `entity`'s `A`'s modifiers in `context`, summed but not applied, if it
+    /// has it: for a source's and a target's to be combined.
     #[must_use]
     pub fn breakdown<A: Attribute>(
         &self,
@@ -78,8 +80,8 @@ impl EffectContext<'_> {
         self.world.breakdown_at(entity, &A::ID, context)
     }
 
-    /// `entity`'s `attribute`'s modifiers in `context`, summed but not
-    /// applied, if it has it.
+    /// `entity`'s `attribute`'s modifiers in `context`, summed but not applied,
+    /// if it has it.
     #[must_use]
     pub fn breakdown_at(
         &self,
@@ -91,8 +93,7 @@ impl EffectContext<'_> {
     }
 }
 
-/// A change an execution makes to the target's base: as an instant
-/// modifier does.
+/// A change an execution makes to its target's base, as an instant modifier.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BaseChange {
     /// The attribute.
@@ -121,8 +122,9 @@ pub type ExecutionFn = Arc<dyn Fn(&EffectContext) -> Vec<BaseChange> + Send + Sy
 /// A calculation: a magnitude, worked out in code.
 pub type CalculationFn = Arc<dyn Fn(&EffectContext) -> f32 + Send + Sync>;
 
-/// What effects run in code, by name: executions and calculations, which
-/// effects' data names, and their registry is checked against.
+/// What effects run in code, by name: their executions and calculations.
+///
+/// What effects' data names, and their registry is checked against.
 #[derive(Clone, Default)]
 pub struct EffectCode {
     pub(crate) executions: HashMap<Id<Execution>, ExecutionFn>,
@@ -159,8 +161,9 @@ impl EffectCode {
     }
 }
 
-/// An execution: a formula in code, run as an instant or periodic effect
-/// executes (damage), named by an `Id<Execution>`.
+/// An execution: a formula in code run as an effect executes, such as damage.
+///
+/// Run as an instant or periodic effect executes; named by an `Id<Execution>`.
 #[derive(IdTarget)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Execution {}

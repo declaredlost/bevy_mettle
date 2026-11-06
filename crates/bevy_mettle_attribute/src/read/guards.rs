@@ -1,6 +1,6 @@
-//! Guards on attributes: read-only systems taking an agent and a
-//! parameter, as `bevy_arbor` takes them. The guard on owned tags is
-//! core's: `bevy_mettle_core::tag::owns`.
+//! Guards on attributes: read-only systems taking an agent and a parameter, as
+//! `bevy_arbor` takes them. The guard on owned tags is core's:
+//! `bevy_mettle_core::tag::owns`.
 //!
 //! ```ignore
 //! behaviour_tree! {
@@ -15,8 +15,9 @@ use bevy::prelude::*;
 
 use crate::{Attribute, Current};
 
-/// Whether the agent's `A` is above `value`, with nothing in play. No for
-/// an agent without it.
+/// A guard: whether the agent's `A` is above `value`, with nothing in play.
+///
+/// No for an agent without it.
 #[must_use]
 pub fn attribute_above<A: Attribute>(
     In((agent, value)): In<(Entity, f32)>,
@@ -25,8 +26,9 @@ pub fn attribute_above<A: Attribute>(
     actors.get(agent).is_ok_and(|current| current.get() > value)
 }
 
-/// Whether the agent's `A` is below `value`, with nothing in play. No for
-/// an agent without it.
+/// A guard: whether the agent's `A` is below `value`, with nothing in play.
+///
+/// No for an agent without it.
 #[must_use]
 pub fn attribute_below<A: Attribute>(
     In((agent, value)): In<(Entity, f32)>,

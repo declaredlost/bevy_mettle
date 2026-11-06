@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Id, IdTarget, MettleError, MettleErrors};
 
-/// How a curve goes between its keys.
+/// How a curve goes between its keys: held, straight, or eased.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub enum Interpolation {
     /// Each key's value until the next.
@@ -20,12 +20,13 @@ pub enum Interpolation {
     /// A straight line from each key to the next.
     #[default]
     Linear,
-    /// From each key to the next as one of Bevy's easing functions goes
-    /// from 0 to 1: `Ease(SineInOut)`, `Ease(ExponentialIn)`.
+    /// From each key to the next as one of Bevy's easing functions goes from 0
+    /// to 1: `Ease(SineInOut)`, `Ease(ExponentialIn)`.
     Ease(EaseFunction),
 }
 
-/// A curve: a value by level, its keys `(level, value)`, levels rising.
+/// A curve: a value by level, from keys `(level, value)` with levels rising.
+///
 /// What an effect's magnitude scales by, as Unreal's `ScalableFloat` does;
 /// defined in data, and named by an `Id<LevelCurve>`.
 ///
@@ -42,8 +43,8 @@ pub struct LevelCurve {
     /// How it goes between keys: linearly, unless it says.
     #[serde(default)]
     pub interpolation: Interpolation,
-    /// Its keys, `(level, value)`, levels rising. Before the first and
-    /// past the last, it's as at that one.
+    /// Its keys, `(level, value)`, levels rising. Before the first and past the
+    /// last, it's as at that one.
     pub keys: Vec<(f32, f32)>,
 }
 
@@ -51,8 +52,8 @@ pub struct LevelCurve {
 type Built = dyn BevyCurve<f32> + Send + Sync;
 
 impl LevelCurve {
-    /// It as one of Bevy's curves, its keys checked: kept as at its ends
-    /// beyond them.
+    /// It as one of Bevy's curves, its keys checked: kept as at its ends beyond
+    /// them.
     fn build(&self) -> Result<Arc<Built>, &'static str> {
         let keys = &self.keys;
         if keys.is_empty() {
@@ -90,8 +91,9 @@ impl LevelCurve {
     }
 }
 
-/// The curves there are, checked (each with keys, all finite, levels
-/// rising) and built as Bevy's curves. Cheap to clone; empty by default.
+/// The curves there are, checked and built as Bevy's curves.
+///
+/// Each with keys, all finite, levels rising. Cheap to clone; empty by default.
 #[derive(Clone, Default)]
 pub struct CurveTable(Arc<HashMap<Id<LevelCurve>, Arc<Built>>>);
 
@@ -143,8 +145,8 @@ impl CurveTable {
         self.0.get(curve).map(|built| built.sample_clamped(level))
     }
 
-    /// `curve`, as one of Bevy's curves: for graphs, tooling, and Bevy's
-    /// curve adaptors.
+    /// `curve`, as one of Bevy's curves: for graphs, tooling, and Bevy's curve
+    /// adaptors.
     #[must_use]
     pub fn curve(&self, curve: &Id<LevelCurve>) -> Option<&(dyn BevyCurve<f32> + Send + Sync)> {
         self.0.get(curve).map(AsRef::as_ref)

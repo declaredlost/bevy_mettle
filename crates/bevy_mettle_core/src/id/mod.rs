@@ -1,5 +1,5 @@
-//! Ids: what everything defined in data is named by, in data and in code
-//! alike, and the kinds of thing they name.
+//! Ids: what everything defined in data is named by, in data and in code alike,
+//! and the kinds of thing they name.
 
 use std::borrow::Borrow;
 use std::cmp::Ordering;
@@ -14,12 +14,13 @@ pub use self::target::IdTarget;
 
 mod target;
 
-/// The id of something of [`IdTarget`](trait@IdTarget) `T` defined in data: its
-/// name, and what kind of thing it names, so a tag's id can't stand in for an
-/// item's.
+/// The id of something defined in data: its name, typed by what it names.
 ///
-/// Cheap to clone: a name up to 23 bytes is held inline, a longer one
-/// shared. Written in data as its name (`"fire_resistance"`).
+/// Something of [`IdTarget`](trait@IdTarget) `T`, so a tag's id can't stand in
+/// for an item's.
+///
+/// Cheap to clone: a name up to 23 bytes is held inline, a longer one shared.
+/// Written in data as its name (`"fire_resistance"`).
 pub struct Id<T: IdTarget> {
     name: SmolStr,
     kind: PhantomData<fn() -> T>,

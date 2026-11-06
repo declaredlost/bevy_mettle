@@ -1,16 +1,19 @@
-//! Playing over a network: who decides, what's predicted, and what's
-//! replicated. Transport-agnostic: the game (or an adapter) ships
-//! [`EffectReplica`]s from the server to its clients.
+//! Playing over a network: who decides, what's predicted, what's replicated.
+//!
+//! Transport-agnostic: the game (or an adapter) ships [`EffectReplica`]s from
+//! the server to its clients.
 
 use std::collections::HashMap;
 
 use bevy::prelude::*;
-use bevy_mettle_attribute::{AttributeWorld, Modifier, ModifierOf, Modifiers, Operation};
+use bevy_mettle_attribute::modifier::{Modifier, ModifierOf, Modifiers, Operation};
+use bevy_mettle_attribute::read::AttributeWorld;
 use serde::{Deserialize, Serialize};
 
-use crate::{ActiveEffect, EffectOf, EffectRegistry, EffectSpec, engine};
+use crate::active::{ActiveEffect, EffectOf};
+use crate::{EffectRegistry, EffectSpec, engine};
 
-/// What this world is, playing over a network.
+/// What this world is over a network: standalone, the server, or a client.
 #[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum NetRole {
     /// Playing alone: everything decided here, nothing replicated.
@@ -19,26 +22,29 @@ pub enum NetRole {
     /// The server: everything decided here; active effects keep an
     /// [`EffectReplica`] for clients.
     Server,
-    /// A client: effects the server owns are shown from their replicas,
-    /// not ticked; what's applied under an activation is predicted, kept
-    /// until the server confirms it or undone when it rejects it. A
-    /// predicted instant change is shown as a modifier, never written to a
-    /// base: the server owns bases, and its own replace it either way.
+    /// A client: effects the server owns are shown from their replicas, not
+    /// ticked; what's applied under an activation is predicted, kept until the
+    /// server confirms it or undone when it rejects it. A predicted instant
+    /// change is shown as a modifier, never written to a base: the server owns
+    /// bases, and its own replace it either way.
     Client,
 }
 
-/// On a client's active effect: predicted, under this activation, until
-/// the server's own arrives or rejects it.
+/// On a client's active effect: predicted under an activation, until settled.
+///
+/// Until the server's own arrives or rejects it.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PredictedUnder(pub u64);
 
-/// On a client's active effect: the server's, shown from its replica. Not
-/// ticked here: the server's replica says how it stands.
+/// On a client's active effect: the server's, shown from its replica.
+///
+/// Not ticked here: the server's replica says how it stands.
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Proxy;
 
-/// On a server's active effect: what a client needs to show it, for the
-/// game to replicate with its [`EffectOf`]. Its definition is data both
+/// On a server's active effect: what a client needs to show it.
+///
+/// For the game to replicate with its [`EffectOf`]. Its definition is data both
 /// sides have, so it's named, not sent.
 #[derive(Component, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EffectReplica {
@@ -59,8 +65,8 @@ enum Undo {
     Effect(Entity),
     /// A stack added to an effect.
     Stack(Entity),
-    /// Instant changes to `actor`'s bases, shown as modifiers on this
-    /// entity until the server's bases arrive.
+    /// Instant changes to `actor`'s bases, shown as modifiers on this entity
+    /// until the server's bases arrive.
     Overlay { actor: Entity, overlay: Entity },
 }
 
@@ -101,13 +107,13 @@ pub(crate) fn stacked(world: &mut World, activation: u64, effect: Entity) {
 }
 
 /// Changes `actor`'s base as an instant effect does; predicted under
-/// `activation`, shown as a modifier instead: the server owns bases, and
-/// sends its own.
+/// `activation`, shown as a modifier instead: the server owns bases, and sends
+/// its own.
 pub(crate) fn change_base(
     world: &mut World,
     activation: Option<u64>,
     actor: Entity,
-    change: &crate::BaseChange,
+    change: &crate::code::BaseChange,
 ) {
     let Some(activation) = activation else {
         world.apply_to_base(actor, &change.attribute, change.op, change.value);
@@ -148,8 +154,8 @@ pub(crate) fn change_base(
 }
 
 /// The server confirmed `activation`: the effects predicted under it stay,
-/// until the server's own replace them; its instant changes, shown until
-/// now, give way to the server's bases.
+/// until the server's own replace them; its instant changes, shown until now,
+/// give way to the server's bases.
 pub(crate) fn confirm(world: &mut World, activation: u64) {
     let undo = world
         .get_resource_mut::<Predictions>()
@@ -168,8 +174,8 @@ fn despawn(world: &mut World, entity: Entity) {
     }
 }
 
-/// The server rejected `activation`: everything predicted under it undone,
-/// last first.
+/// The server rejected `activation`: everything predicted under it undone, last
+/// first.
 pub(crate) fn rollback(world: &mut World, activation: u64) {
     let undo = world
         .get_resource_mut::<Predictions>()
@@ -212,8 +218,8 @@ type Arrived = (Entity, &'static EffectReplica, &'static EffectOf);
 /// Shown effects whose replicas changed.
 type Restated = (With<Proxy>, Changed<EffectReplica>);
 
-/// On a client: shows each effect the server's replica arrived for, and
-/// keeps it as its replica says; a predicted one it stands for, taken off.
+/// On a client: shows each effect the server's replica arrived for, and keeps
+/// it as its replica says; a predicted one it stands for, taken off.
 pub(crate) fn show_replicas(
     world: &mut World,
     arrived: &mut QueryState<Arrived, Without<ActiveEffect>>,

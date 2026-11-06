@@ -4,26 +4,27 @@
 use std::sync::Arc;
 
 use bevy::prelude::*;
-use bevy_mettle_attribute::{AttributeContext, Modifier, ModifierOf, Modifiers};
+use bevy_mettle_attribute::modifier::{Modifier, ModifierOf, Modifiers};
+use bevy_mettle_attribute::read::AttributeContext;
 use bevy_mettle_core::Id;
 use bevy_mettle_core::condition::Context;
 use bevy_mettle_core::tag::{OwnedTags, Tag, TagCounts, Tags};
 
+use crate::active::{ActiveEffect, ActiveEffects, EffectOf};
 use crate::code::{BaseChange, EffectContext};
-use crate::net::{self, EffectReplica};
-use crate::{
-    ActiveEffect, ActiveEffects, Blocked, Capture, Effect, EffectApplied, EffectBlocked,
-    EffectDuration, EffectExecuted, EffectOf, EffectRegistry, EffectRemoved, EffectSpec,
-    EffectStacked, Expire, Magnitude, Reapply, StackBy, Stacking,
+use crate::data::{Capture, EffectDuration, Expire, Magnitude, Reapply, StackBy, Stacking};
+use crate::events::{
+    Blocked, EffectApplied, EffectBlocked, EffectExecuted, EffectRemoved, EffectStacked,
 };
+use crate::net::{self, EffectReplica};
+use crate::{Effect, EffectRegistry, EffectSpec};
 
 /// How deep effects applying effects go before it's taken for a loop.
 const DEPTH: u32 = 16;
 
-/// What an effect's requirements and executing modifiers are weighed in:
-/// its own tags, its target's (as `OwnerHas` and `TargetHas`), and its
-/// source's
-/// as it applied.
+/// What an effect's requirements and executing modifiers are weighed in: its
+/// own tags, its target's (as `OwnerHas` and `TargetHas`), and its source's as
+/// it applied.
 struct Check<'a> {
     tags: &'a Tags,
     owner: &'a TagCounts,
@@ -238,8 +239,8 @@ fn immune(world: &World, target: Entity, tags: &Tags) -> bool {
     })
 }
 
-/// The active effect on `target` that applying `id` from `source` stacks
-/// onto, if there is one.
+/// The active effect on `target` that applying `id` from `source` stacks onto,
+/// if there is one.
 fn stack_of(
     world: &World,
     target: Entity,
@@ -348,8 +349,8 @@ fn resolve(context: &EffectContext, registry: &EffectRegistry, magnitude: &Magni
     }
 }
 
-/// What executing `def` on `target` would change, without changing it:
-/// its modifiers and executions, worked out.
+/// What executing `def` on `target` would change, without changing it: its
+/// modifiers and executions, worked out.
 fn changes(
     world: &World,
     registry: &EffectRegistry,
@@ -415,8 +416,7 @@ pub(crate) fn preview(world: &World, target: Entity, spec: &EffectSpec) -> Optio
     Some(changes(world, registry, target, spec, def, 1, &source_tags))
 }
 
-/// Executes `def` on `target`: its modifiers and executions, changing
-/// bases.
+/// Executes `def` on `target`: its modifiers and executions, changing bases.
 fn execute(
     world: &mut World,
     registry: &EffectRegistry,
@@ -496,8 +496,8 @@ fn holds_ongoing(world: &World, effect: Entity) -> bool {
     })
 }
 
-/// Makes `effect` count: its tags granted, its modifiers on its target
-/// (unless it's periodic: it executes instead).
+/// Makes `effect` count: its tags granted, its modifiers on its target (unless
+/// it's periodic: it executes instead).
 pub(crate) fn activate(world: &mut World, registry: &EffectRegistry, effect: Entity) {
     let (Some(active), Some(of)) = (
         world.get::<ActiveEffect>(effect),
@@ -523,8 +523,8 @@ pub(crate) fn activate(world: &mut World, registry: &EffectRegistry, effect: Ent
     }
 }
 
-/// Makes `effect` stop counting: its tags taken back, its modifiers off
-/// its target.
+/// Makes `effect` stop counting: its tags taken back, its modifiers off its
+/// target.
 pub(crate) fn deactivate(world: &mut World, effect: Entity) {
     let Some(target) = world.get::<EffectOf>(effect).map(|of| of.0) else {
         return;
@@ -540,8 +540,7 @@ pub(crate) fn deactivate(world: &mut World, effect: Entity) {
     world.entity_mut(effect).remove::<(Modifiers, ModifierOf)>();
 }
 
-/// Resolves `effect`'s modifiers again, if they count: as its stacks
-/// change.
+/// Resolves `effect`'s modifiers again, if they count: as its stacks change.
 fn refresh(world: &mut World, registry: &EffectRegistry, effect: Entity) {
     let counts = world
         .get::<ActiveEffect>(effect)
@@ -717,8 +716,8 @@ fn expire(world: &mut World, registry: &EffectRegistry, effect: Entity, def: &Ar
     }
 }
 
-/// Gives every active effect its definition from `registry`, as it's
-/// replaced: one whose effect is gone is taken off.
+/// Gives every active effect its definition from `registry`, as it's replaced:
+/// one whose effect is gone is taken off.
 pub(crate) fn relink(world: &mut World, registry: &EffectRegistry, effect: Entity) {
     let Some(active) = world.get::<ActiveEffect>(effect) else {
         return;
@@ -742,8 +741,8 @@ pub(crate) fn relink(world: &mut World, registry: &EffectRegistry, effect: Entit
     }
 }
 
-/// Takes `effect` off its target with nothing told and nothing chained:
-/// a prediction undone, or replaced by the server's own.
+/// Takes `effect` off its target with nothing told and nothing chained: a
+/// prediction undone, or replaced by the server's own.
 pub(crate) fn remove_quietly(world: &mut World, effect: Entity) {
     let Some(active) = world.get::<ActiveEffect>(effect) else {
         return;
@@ -768,8 +767,8 @@ pub(crate) fn unstack(world: &mut World, registry: &EffectRegistry, effect: Enti
 }
 
 /// Shows, on a client, the server's effect `entity` on `target` from its
-/// replica: counting as it does there, but not ticked here. A predicted
-/// effect it stands for is taken off.
+/// replica: counting as it does there, but not ticked here. A predicted effect
+/// it stands for is taken off.
 pub(crate) fn show(
     world: &mut World,
     registry: &EffectRegistry,

@@ -3,7 +3,9 @@
 mod magnitude;
 mod stacking;
 
-use bevy_mettle_attribute::{AnyAttribute, Attribute, Operation, Per};
+use bevy_mettle_attribute::Attribute;
+use bevy_mettle_attribute::modifier::{Operation, Per};
+use bevy_mettle_attribute::registry::AnyAttribute;
 use bevy_mettle_core::condition::Condition;
 use bevy_mettle_core::tag::{Tag, Tags};
 use bevy_mettle_core::{Id, IdTarget};
@@ -11,12 +13,12 @@ use serde::{Deserialize, Serialize};
 
 pub use self::magnitude::{Capture, Magnitude};
 pub use self::stacking::{Expire, Reapply, StackBy, Stacking};
-use crate::Execution;
+use crate::code::Execution;
 
-/// An effect, as data (Unreal's `GameplayEffect`): what it changes, for
-/// how long, what it grants its target while it lasts, what it needs, and
-/// how it stacks. Named by an `Id<Effect>`, its `id`; what's applied is a
-/// spec naming it.
+/// An effect, as data: what it changes, for how long, and what it grants.
+///
+/// Unreal's `GameplayEffect`: also what it needs, and how it stacks. Named by
+/// an `Id<Effect>`, its `id`; what's applied is a spec naming it.
 ///
 /// ```ron
 /// (
@@ -42,8 +44,8 @@ pub struct Effect {
     pub tags: Tags,
     /// How long it lasts.
     pub duration: EffectDuration,
-    /// That it executes every so often while it lasts, instead of its
-    /// modifiers counting all along: damage over time.
+    /// That it executes every so often while it lasts, instead of its modifiers
+    /// counting all along: damage over time.
     #[serde(
         default,
         with = "bevy_mettle_core::optional",
@@ -88,8 +90,8 @@ pub struct Effect {
     /// Effects with any of these tags can't apply while it lasts.
     #[serde(default, skip_serializing_if = "Tags::is_empty")]
     pub immunity: Tags,
-    /// How applying it again stacks: a new active effect each time, unless
-    /// it says.
+    /// How applying it again stacks: a new active effect each time, unless it
+    /// says.
     #[serde(
         default,
         with = "bevy_mettle_core::optional",
@@ -107,7 +109,7 @@ pub struct Effect {
     pub on_expire: Vec<Id<Effect>>,
 }
 
-/// How long an effect lasts.
+/// How long an effect lasts: an instant, for a while, or until it's removed.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EffectDuration {
     /// Not at all: it executes once, changing bases, and is gone.
@@ -118,7 +120,7 @@ pub enum EffectDuration {
     For(Magnitude),
 }
 
-/// How often an effect executes while it lasts.
+/// How often a lasting effect executes, and whether on apply too.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Period {
@@ -129,8 +131,7 @@ pub struct Period {
     pub on_apply: bool,
 }
 
-/// A modifier in an effect's definition: an attribute, how, by how much,
-/// when, and per what.
+/// A modifier in an effect: its attribute, how, how much, when, and per what.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EffectModifier {
@@ -140,20 +141,19 @@ pub struct EffectModifier {
     pub op: Operation,
     /// By how much.
     pub value: Magnitude,
-    /// When it counts, and how much. In a lasting effect, it's a modifier
-    /// of its target's, weighed on each read: `ReadTagged` the read's tags
-    /// (+20% damage with fire hits), `OwnerHas` the target's owned tags,
-    /// `TargetHas` the read's target's, `SourceHas` as the effect's source
-    /// was when it applied. As an effect executes, `ReadTagged` is the
-    /// effect's own tags, and `OwnerHas` and `TargetHas` its target's.
+    /// When it counts, and how much. In a lasting effect, it's a modifier of
+    /// its target's, weighed on each read: `ReadTagged` the read's tags (+20%
+    /// damage with fire hits), `OwnerHas` the target's owned tags, `TargetHas`
+    /// the read's target's, `SourceHas` as the effect's source was when it
+    /// applied. As an effect executes, `ReadTagged` is the effect's own tags,
+    /// and `OwnerHas` and `TargetHas` its target's.
     #[serde(
         default,
         with = "bevy_mettle_core::optional",
         skip_serializing_if = "Option::is_none"
     )]
     pub condition: Option<Condition>,
-    /// That it counts once for each whole so much of the target's
-    /// attribute.
+    /// That it counts once for each whole so much of the target's attribute.
     #[serde(
         default,
         with = "bevy_mettle_core::optional",
@@ -203,8 +203,8 @@ impl EffectModifier {
 }
 
 impl Effect {
-    /// An effect called `id` lasting `duration`, doing nothing yet: for
-    /// effects defined in code.
+    /// An effect called `id` lasting `duration`, doing nothing yet: for effects
+    /// defined in code.
     #[must_use]
     pub fn new(id: impl Into<Id<Effect>>, duration: EffectDuration) -> Self {
         Self {

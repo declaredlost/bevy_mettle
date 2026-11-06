@@ -1,22 +1,26 @@
-//! Abilities over a network: a client predicts its own, the server
-//! decides. Transport-agnostic: the game (or an adapter) ships
-//! [`AbilityRequest`]s to the server, [`AbilityReply`]s back, and
-//! [`AbilityReplica`]s with their [`AbilityOf`](crate::AbilityOf).
+//! Abilities over a network: a client predicts its own, the server decides.
+//!
+//! Transport-agnostic: the game (or an adapter) ships [`AbilityRequest`]s to
+//! the server, [`AbilityReply`]s back, and [`AbilityReplica`]s with their
+//! [`AbilityOf`](crate::active::AbilityOf).
 
 use std::collections::HashMap;
 
 use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::prelude::*;
 use bevy_mettle_core::Id;
-use bevy_mettle_effect::{EffectWorld, NetRole};
+use bevy_mettle_effect::EffectWorld;
+use bevy_mettle_effect::net::NetRole;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    Ability, AbilityFailed, AbilityRegistry, ActiveAbility, Failure, GrantedAbility, engine,
-};
+use crate::active::{ActiveAbility, GrantedAbility};
+use crate::events::{AbilityFailed, Failure};
+use crate::{Ability, AbilityRegistry, engine};
 
-/// A client's ask that the server activate `ability` for `actor`, as the
-/// client already has under `activation`.
+/// A client's ask that the server activate an ability it already predicts.
+///
+/// It asks for `ability` on `actor`, which the client activated under
+/// `activation`.
 #[derive(Message, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AbilityRequest {
     /// The actor.
@@ -33,8 +37,7 @@ impl MapEntities for AbilityRequest {
     }
 }
 
-/// The server's answer to an [`AbilityRequest`]: whether it activated, and
-/// if not, why.
+/// The server's answer to an [`AbilityRequest`]: activated, or why not.
 #[derive(Message, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AbilityReply {
     /// The actor.
@@ -53,8 +56,9 @@ impl MapEntities for AbilityReply {
     }
 }
 
-/// On a server's granted ability: what a client needs to have it too, for
-/// the game to replicate with its `AbilityOf`.
+/// On a server's granted ability: what a client needs to have it too.
+///
+/// For the game to replicate with its `AbilityOf`.
 #[derive(Component, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AbilityReplica {
     /// The ability.
@@ -77,8 +81,7 @@ pub(crate) fn defers(world: &World) -> bool {
     role(world) == NetRole::Client
 }
 
-/// Activates `id` for `actor`: on a client, predicted, and asked of the
-/// server.
+/// Activates `id` for `actor`: on a client, predicted, and asked of the server.
 pub(crate) fn predict(
     world: &mut World,
     actor: Entity,
@@ -101,8 +104,8 @@ pub(crate) fn predict(
     Ok(ability)
 }
 
-/// On a server: activates what clients ask for, under their activations,
-/// and answers.
+/// On a server: activates what clients ask for, under their activations, and
+/// answers.
 pub(crate) fn serve(mut requests: MessageReader<AbilityRequest>, mut commands: Commands) {
     for request in requests.read().cloned() {
         commands.queue(move |world: &mut World| {
@@ -123,8 +126,7 @@ pub(crate) fn serve(mut requests: MessageReader<AbilityRequest>, mut commands: C
     }
 }
 
-/// On a client: keeps what the server confirmed, and undoes what it
-/// rejected.
+/// On a client: keeps what the server confirmed, and undoes what it rejected.
 pub(crate) fn resolve(mut replies: MessageReader<AbilityReply>, mut commands: Commands) {
     for reply in replies.read().cloned() {
         commands.queue(move |world: &mut World| {

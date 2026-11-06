@@ -4,19 +4,20 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use bevy::prelude::*;
-use bevy_mettle_attribute::AttributeRegistry;
+use bevy_mettle_attribute::registry::AttributeRegistry;
 use bevy_mettle_core::curve::CurveTable;
 use bevy_mettle_core::tag::TagTree;
 use bevy_mettle_core::{Id, MettleError, MettleErrors};
 
-use crate::code::{CalculationFn, ExecutionFn};
-use crate::{Calculation, Effect, EffectCode, EffectDuration, Execution, Magnitude};
+use crate::Effect;
+use crate::code::{Calculation, CalculationFn, EffectCode, Execution, ExecutionFn};
+use crate::data::{EffectDuration, Magnitude};
 
-/// The effects there are, built from their definitions and checked
-/// against the tag tree, the curves and the code effects run: every name
-/// they use defined, every number one that can be. Insert it as a
-/// resource; insert another (a hot reload, a mod) and active effects take
-/// their new definitions.
+/// The effects there are, checked against the tags, curves and effect code.
+///
+/// Built from their definitions: every name they use defined, every number one
+/// that can be. Insert it as a resource; insert another (a hot reload, a mod)
+/// and active effects take their new definitions.
 #[derive(Resource, Clone, Default)]
 pub struct EffectRegistry {
     effects: Arc<HashMap<Id<Effect>, Arc<Effect>>>,
@@ -43,15 +44,14 @@ impl std::fmt::Debug for EffectRegistry {
 }
 
 impl EffectRegistry {
-    /// Checks `definitions` against `tags`, `curves`, the attributes there
-    /// are and `code`.
+    /// Checks `definitions` against `tags`, `curves`, the attributes there are
+    /// and `code`.
     ///
     /// # Errors
     ///
     /// Everything wrong with them, at once: effects defined twice; tags,
     /// curves, attributes, effects, executions and calculations named that
-    /// aren't; numbers that can't be; and what an instant effect can't
-    /// have.
+    /// aren't; numbers that can't be; and what an instant effect can't have.
     pub fn build<'a>(
         definitions: impl IntoIterator<Item = &'a Effect>,
         tags: &TagTree,

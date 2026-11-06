@@ -1,4 +1,4 @@
-//! What using `bevy_mettle_core` takes.
+//! What using `bevy_mettle_core` takes: `use bevy_mettle_core::prelude::*`.
 
 pub use crate::condition::{Condition, Context};
 pub use crate::curve::{CurveTable, Interpolation, LevelCurve};

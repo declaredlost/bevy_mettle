@@ -1,5 +1,6 @@
-//! Abilities as data: what one is, what it costs, what blocks it, what
-//! activates it.
+//! Abilities as data, what effects grant, and the behaviours that run them.
+
+mod behaviour;
 
 use bevy_mettle_core::condition::Condition;
 use bevy_mettle_core::tag::{Tag, Tags};
@@ -7,11 +8,12 @@ use bevy_mettle_core::{Id, IdTarget};
 use bevy_mettle_effect::Effect;
 use serde::{Deserialize, Serialize};
 
-use crate::Behaviour;
+pub use self::behaviour::{Behaviour, BehaviourApp, Behaviours};
 
-/// An ability, as data (Unreal's `GameplayAbility`, its properties): what
-/// it is, the behaviour in code that runs it, what it costs, what it needs,
-/// and what activates it. Named by an `Id<Ability>`, its `id`.
+/// An ability, as data: what runs it, what it costs, and what activates it.
+///
+/// Unreal's `GameplayAbility`, its properties. Named by an `Id<Ability>`, its
+/// `id`.
 ///
 /// ```ron
 /// (
@@ -38,16 +40,16 @@ pub struct Ability {
     pub tags: Tags,
     /// The behaviour that runs it, registered in code.
     pub behaviour: Id<Behaviour>,
-    /// An instant effect it costs, applied to its owner as it commits: it
-    /// can't activate if paying would take an attribute below 0.
+    /// An instant effect it costs, applied to its owner as it commits: it can't
+    /// activate if paying would take an attribute below 0.
     #[serde(
         default,
         with = "bevy_mettle_core::optional",
         skip_serializing_if = "Option::is_none"
     )]
     pub cost: Option<Id<Effect>>,
-    /// A lasting effect applied to its owner as it commits: it can't
-    /// activate while its owner owns what that effect grants.
+    /// A lasting effect applied to its owner as it commits: it can't activate
+    /// while its owner owns what that effect grants.
     #[serde(
         default,
         with = "bevy_mettle_core::optional",
@@ -77,8 +79,7 @@ pub struct Ability {
     /// What activates it besides being asked to.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub triggers: Vec<Trigger>,
-    /// When its cost and cooldown are applied: as it activates, unless it
-    /// says.
+    /// When its cost and cooldown are applied: as it activates, unless it says.
     #[serde(default)]
     pub commit: Commit,
 }
@@ -91,8 +92,8 @@ pub enum Trigger {
     Event(Id<Tag>),
     /// Its owner coming to own this tag.
     TagAdded(Id<Tag>),
-    /// Its owner owning this tag: activated as it comes to, cancelled as
-    /// it no longer does.
+    /// Its owner owning this tag: activated as it comes to, cancelled as it no
+    /// longer does.
     TagPresent(Id<Tag>),
 }
 
@@ -112,8 +113,8 @@ pub enum Commit {
     /// As it activates.
     #[default]
     OnActivate,
-    /// When its behaviour commits it (after a cast time, say): cancelled
-    /// if it can't pay then.
+    /// When its behaviour commits it (after a cast time, say): cancelled if it
+    /// can't pay then.
     Manual,
 }
 
@@ -209,10 +210,11 @@ impl Ability {
     }
 }
 
-/// What an effect grants while it lasts: the ability crate's part of an
-/// effect, as Unreal's abilities component is (an effect knows nothing of
-/// abilities). Equipping a staff applies its effect, which grants its
-/// skills; taking it off takes them away.
+/// What an effect grants while it lasts: the abilities it gives its target.
+///
+/// The ability crate's part of an effect, as Unreal's abilities component is
+/// (an effect knows nothing of abilities). Equipping a staff applies its
+/// effect, which grants its skills; taking it off takes them away.
 ///
 /// ```ron
 /// [(effect: "staff", abilities: ["channel"])]

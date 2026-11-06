@@ -5,9 +5,10 @@ use bevy_mettle_core::Id;
 use bevy_mettle_core::condition::Context;
 use bevy_mettle_core::tag::{OwnedTags, Tag, TagCounts, Tags};
 
-/// The context an attribute is read in: the read's tags (the hit's, the
-/// ability's), the target's owned tags, the facts the read supplies, and
-/// the source involved. What a modifier's
+/// The context an attribute is read in: a hit's tags, its target, its source.
+///
+/// The read's tags (the hit's, the ability's), the target's owned tags, the
+/// facts the read supplies, and the source involved. What a modifier's
 /// [`Condition`](bevy_mettle_core::condition::Condition) is weighed in, with
 /// the owner's owned tags; a local modifier counts only if its source is the
 /// one named. Borrows the tag sets it's given, so a read per hit copies
@@ -80,8 +81,8 @@ impl<'a> AttributeContext<'a> {
         self
     }
 
-    /// `fact` (a tag: `fact.flown`) is `value` for this read. Supplying
-    /// one again replaces it.
+    /// `fact` (a tag: `fact.flown`) is `value` for this read. Supplying one
+    /// again replaces it.
     #[must_use]
     pub fn fact(mut self, fact: impl Into<Id<Tag>>, value: f32) -> Self {
         let fact = fact.into();
@@ -113,8 +114,8 @@ impl<'a> AttributeContext<'a> {
         self
     }
 
-    /// Whether it's for nothing in particular: what an actor's cached
-    /// values are read for.
+    /// Whether it's for nothing in particular: what an actor's cached values
+    /// are read for.
     pub(crate) fn is_empty(&self) -> bool {
         self.tags.is_none_or(Tags::is_empty)
             && self.more_tags.is_empty()

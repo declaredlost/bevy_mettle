@@ -1,7 +1,6 @@
-//! mettle over lightyear, end to end: a server and a client in one
-//! process, over crossbeam. The client predicts its mage's fireball; the
-//! server decides; lightyear carries the request, the reply, the replicas
-//! and the mana.
+//! mettle over lightyear, end to end: a server and a client in one process,
+//! over crossbeam. The client predicts its mage's fireball; the server decides;
+//! lightyear carries the request, the reply, the replicas and the mana.
 
 use core::net::{Ipv4Addr, SocketAddr};
 use core::time::Duration;
@@ -283,10 +282,10 @@ impl Net {
             .map(|effect| {
                 (
                     app.world()
-                        .get::<bevy_mettle_effect::PredictedUnder>(effect)
+                        .get::<bevy_mettle_effect::net::PredictedUnder>(effect)
                         .is_some(),
                     app.world()
-                        .get::<bevy_mettle_effect::Proxy>(effect)
+                        .get::<bevy_mettle_effect::net::Proxy>(effect)
                         .is_some(),
                 )
             })

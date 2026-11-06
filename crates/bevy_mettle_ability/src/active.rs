@@ -9,9 +9,10 @@ use bevy_mettle_core::tag::Tags;
 use crate::Ability;
 use crate::events::GameplayEvent;
 
-/// An ability granted to an actor (Unreal's `GameplayAbilitySpec`): an
-/// entity of its own, [`AbilityOf`] the actor. While it's active, it
-/// carries [`ActiveAbility`] and its behaviour's component.
+/// An ability granted to an actor: an entity of its own, [`AbilityOf`] it.
+///
+/// Unreal's `GameplayAbilitySpec`. While it's active, it carries
+/// [`ActiveAbility`] and its behaviour's component.
 #[derive(Component, Debug)]
 pub struct GrantedAbility {
     pub(crate) def: Arc<Ability>,
@@ -65,14 +66,13 @@ impl GrantedAbility {
     }
 }
 
-/// On a granted ability: that it's active, and how. Its behaviour's
-/// systems read it.
+/// On a granted ability: that it's active, and how; its behaviour reads it.
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct ActiveAbility {
     /// Who it's active for.
     pub actor: Entity,
-    /// This activation: what its cost and cooldown are applied under, and
-    /// what a rejected prediction takes back.
+    /// This activation: what its cost and cooldown are applied under, and what
+    /// a rejected prediction takes back.
     pub activation: u64,
     /// Its level.
     pub level: f32,
@@ -80,7 +80,7 @@ pub struct ActiveAbility {
     pub event: Option<GameplayEvent>,
 }
 
-/// On a granted ability: its actor.
+/// On a granted ability: the actor it's granted to, as a Bevy relationship.
 #[derive(
     Component,
     Debug,
@@ -94,8 +94,9 @@ pub struct ActiveAbility {
 #[relationship(relationship_target = Abilities)]
 pub struct AbilityOf(pub Entity);
 
-/// On an actor: the abilities granted to it. Kept by [`AbilityOf`];
-/// despawning the actor despawns them.
+/// On an actor: the abilities granted to it, kept by [`AbilityOf`].
+///
+/// Despawning the actor despawns them.
 #[derive(Component, Debug, Default)]
 #[relationship_target(relationship = AbilityOf, linked_spawn)]
 pub struct Abilities(Vec<Entity>);

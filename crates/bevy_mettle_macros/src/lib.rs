@@ -1,6 +1,6 @@
 //! `#[derive(IdTarget)]`, re-exported by `bevy_mettle_core`, and
-//! `#[derive(Attribute)]`, by `bevy_mettle_attribute`: their documentation
-//! is there.
+//! `#[derive(Attribute)]`, by `bevy_mettle_attribute`: their documentation is
+//! there.
 
 use proc_macro::TokenStream;
 use proc_macro_crate::{FoundCrate, crate_name};
@@ -26,8 +26,9 @@ pub fn derive_attribute(input: TokenStream) -> TokenStream {
         .into()
 }
 
-/// What an `Id` can name, named in messages as the type is in
-/// `snake_case`, unless `#[id_target(name = "..")]` says otherwise.
+/// Derives `IdTarget`: named as the type is in `snake_case`, unless overridden.
+///
+/// Override with `#[id_target(name = "..")]`.
 ///
 /// ```ignore
 /// #[derive(IdTarget)]
@@ -110,13 +111,13 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         let which = format_ident!("{which}");
         limit.map(|limit| {
             let limit = match limit {
-                Limit::Value(value) => quote!(#krate::Limit::Value(#value)),
+                Limit::Value(value) => quote!(#krate::registry::Limit::Value(#value)),
                 Limit::Attribute(other) => {
-                    quote!(#krate::Limit::Attribute(<#other as #krate::Attribute>::ID))
+                    quote!(#krate::registry::Limit::Attribute(<#other as #krate::Attribute>::ID))
                 }
             };
             quote! {
-                const #which: ::core::option::Option<#krate::Limit> =
+                const #which: ::core::option::Option<#krate::registry::Limit> =
                     ::core::option::Option::Some(#limit);
             }
         })
@@ -125,8 +126,8 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let max = limit("MAX", settings.max);
     let rounding = settings.rounding.map(|rounding| {
         quote! {
-            const ROUNDING: ::core::option::Option<#krate::Rounding> =
-                ::core::option::Option::Some(#krate::Rounding::#rounding);
+            const ROUNDING: ::core::option::Option<#krate::registry::Rounding> =
+                ::core::option::Option::Some(#krate::registry::Rounding::#rounding);
         }
     });
     Ok(quote! {
@@ -210,8 +211,8 @@ fn number(expr: &Expr) -> syn::Result<Literal> {
     Ok(Literal::f32_suffixed(if negative { -value } else { value }))
 }
 
-/// Where `krate` is, where a derive's used: itself if it's a dependency,
-/// else its `module` in the `bevy_mettle` facade.
+/// Where `krate` is, where a derive's used: itself if it's a dependency, else
+/// its `module` in the `bevy_mettle` facade.
 fn path(krate: &str, module: &str) -> proc_macro2::TokenStream {
     let ident = |name: &str| format_ident!("{}", name.replace('-', "_"));
     match crate_name(krate) {

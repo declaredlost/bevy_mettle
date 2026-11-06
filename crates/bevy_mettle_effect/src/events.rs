@@ -1,5 +1,6 @@
-//! What's told as effects apply, execute, stack and come off: what cues
-//! and abilities observe.
+//! What's told as effects apply, execute, stack and come off.
+//!
+//! What cues and abilities observe.
 
 use bevy::prelude::*;
 use bevy_mettle_core::Id;
@@ -17,8 +18,10 @@ pub struct EffectApplied {
     pub id: Id<Effect>,
 }
 
-/// An effect applied to an actor, stacking onto one already on it, or
-/// losing a stack as it ran out of time.
+/// Triggered as an effect on an actor gains a stack, or loses one.
+///
+/// Applied again onto one already on it, or losing a stack as it ran out of
+/// time.
 #[derive(EntityEvent, Debug, Clone, PartialEq, Eq)]
 pub struct EffectStacked {
     /// The actor.
@@ -31,7 +34,7 @@ pub struct EffectStacked {
     pub stacks: u32,
 }
 
-/// An effect that didn't apply to an actor.
+/// Triggered on an actor as an effect fails to apply to it, with why.
 #[derive(EntityEvent, Debug, Clone, PartialEq, Eq)]
 pub struct EffectBlocked {
     /// The actor.
@@ -42,7 +45,7 @@ pub struct EffectBlocked {
     pub reason: Blocked,
 }
 
-/// Why an effect didn't apply.
+/// Why an effect didn't apply: a requirement, an immunity, or a stack limit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Blocked {
     /// Its requirement didn't hold.
@@ -53,8 +56,9 @@ pub enum Blocked {
     StackLimit,
 }
 
-/// An effect executed on an actor: an instant one applied, or a periodic
-/// one's period come round. Its bases are changed.
+/// Triggered as an effect executes on an actor, its bases changed.
+///
+/// An instant one applied, or a periodic one's period come round.
 #[derive(EntityEvent, Debug, Clone, PartialEq, Eq)]
 pub struct EffectExecuted {
     /// The actor.

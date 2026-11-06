@@ -1,8 +1,8 @@
 //! Optional fields written bare: `condition: ReadTagged("fire")`, not
 //! `condition: Some(ReadTagged("fire"))`; left out when there's nothing. For a
-//! field with `#[serde(default, with = "optional", skip_serializing_if =
-//! "Option::is_none")]`. Shared by the crates whose data has optional
-//! fields.
+//! field with
+//! `#[serde(default, with = "optional", skip_serializing_if =
+//! "Option::is_none")]`. Shared by the crates whose data has optional fields.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 

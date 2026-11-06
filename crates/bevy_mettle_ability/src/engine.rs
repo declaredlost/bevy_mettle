@@ -1,24 +1,24 @@
 //! Granting, activating, committing and ending abilities, on the world.
 
 use bevy::prelude::*;
-use bevy_mettle_attribute::{AttributeContext, AttributeWorld, Operation};
+use bevy_mettle_attribute::modifier::Operation;
+use bevy_mettle_attribute::read::{AttributeContext, AttributeWorld};
 use bevy_mettle_core::Id;
 use bevy_mettle_core::condition::Context;
 use bevy_mettle_core::tag::{OwnedTags, Tag, TagCounts, Tags};
 use bevy_mettle_effect::{EffectRegistry, EffectSpec, EffectWorld};
 
-use crate::{
-    Abilities, Ability, AbilityActivated, AbilityEnded, AbilityFailed, AbilityOf, AbilityRegistry,
-    ActiveAbility, Behaviours, Commit, Failure, GameplayEvent, GrantedAbility, Trigger,
-};
+use crate::active::{Abilities, AbilityOf, ActiveAbility, GrantedAbility};
+use crate::data::{Behaviours, Commit, Trigger};
+use crate::events::{AbilityActivated, AbilityEnded, AbilityFailed, Failure, GameplayEvent};
+use crate::{Ability, AbilityRegistry};
 
 /// The next activation's number.
 #[derive(Resource, Default)]
 pub(crate) struct Activations(u64);
 
-/// What an ability's requirement is weighed in: its own tags, and its
-/// owner's (as `OwnerHas`, `TargetHas` and `SourceHas`: it's its own
-/// source).
+/// What an ability's requirement is weighed in: its own tags, and its owner's
+/// (as `OwnerHas`, `TargetHas` and `SourceHas`: it's its own source).
 struct Check<'a> {
     tags: &'a Tags,
     owner: &'a TagCounts,
@@ -54,8 +54,8 @@ fn abilities_of(world: &World, actor: Entity) -> Vec<Entity> {
         .unwrap_or_default()
 }
 
-/// Grants `id` to `actor` at `level`, from `source` if an effect grants
-/// it: the granted ability's entity, if there's such an ability.
+/// Grants `id` to `actor` at `level`, from `source` if an effect grants it: the
+/// granted ability's entity, if there's such an ability.
 pub(crate) fn grant(
     world: &mut World,
     actor: Entity,
@@ -88,7 +88,7 @@ pub(crate) fn revoke(world: &mut World, ability: Entity) {
 /// The next activation's number: a server's own with the top bit set, so
 /// they're apart from those its clients predict under.
 pub(crate) fn next_activation(world: &mut World) -> u64 {
-    let server = crate::net::role(world) == bevy_mettle_effect::NetRole::Server;
+    let server = crate::net::role(world) == bevy_mettle_effect::net::NetRole::Server;
     let mut activations = world.get_resource_or_init::<Activations>();
     activations.0 += 1;
     if server {
@@ -98,8 +98,8 @@ pub(crate) fn next_activation(world: &mut World) -> u64 {
     }
 }
 
-/// Activates `id` for `actor`, under `activation` if it's given: its
-/// first granted ability of that id.
+/// Activates `id` for `actor`, under `activation` if it's given: its first
+/// granted ability of that id.
 pub(crate) fn activate_id(
     world: &mut World,
     actor: Entity,
@@ -122,8 +122,8 @@ pub(crate) fn activate_id(
     activate(world, ability, None, activation).map(|()| ability)
 }
 
-/// Activates every ability granted to `actor` tagged any of `tags`: those
-/// that did.
+/// Activates every ability granted to `actor` tagged any of `tags`: those that
+/// did.
 pub(crate) fn activate_tagged(world: &mut World, actor: Entity, tags: &Tags) -> Vec<Entity> {
     let tagged: Vec<Entity> = abilities_of(world, actor)
         .into_iter()
@@ -217,8 +217,8 @@ fn affords(world: &World, actor: Entity, granted: &GrantedAbility) -> bool {
     })
 }
 
-/// Activates `ability`, for `event` if one triggered it, under
-/// `activation` if it's given (a client's, or the server answering it).
+/// Activates `ability`, for `event` if one triggered it, under `activation` if
+/// it's given (a client's, or the server answering it).
 pub(crate) fn activate(
     world: &mut World,
     ability: Entity,
@@ -338,8 +338,8 @@ pub(crate) fn commit(world: &mut World, ability: Entity) -> bool {
     true
 }
 
-/// Ends `ability` if it's active: its behaviour taken off, the tags it
-/// granted taken back; cancelled if `cancelled`.
+/// Ends `ability` if it's active: its behaviour taken off, the tags it granted
+/// taken back; cancelled if `cancelled`.
 pub(crate) fn end(world: &mut World, ability: Entity, cancelled: bool) {
     let (Some(granted), Some(active)) = (
         world.get::<GrantedAbility>(ability),
@@ -372,8 +372,8 @@ pub(crate) fn end(world: &mut World, ability: Entity, cancelled: bool) {
     });
 }
 
-/// Sends `event` to its actor: told, and the abilities it triggers
-/// activated with it.
+/// Sends `event` to its actor: told, and the abilities it triggers activated
+/// with it.
 pub(crate) fn send(world: &mut World, event: GameplayEvent) {
     let actor = event.entity;
     let triggered: Vec<Entity> = abilities_of(world, actor)
@@ -449,7 +449,7 @@ pub(crate) fn effect_applied(world: &mut World, actor: Entity, effect: Entity) {
     if crate::net::defers(world) {
         return;
     }
-    let Some(active) = world.get::<bevy_mettle_effect::ActiveEffect>(effect) else {
+    let Some(active) = world.get::<bevy_mettle_effect::active::ActiveEffect>(effect) else {
         return;
     };
     let level = active.spec().level;

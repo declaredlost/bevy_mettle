@@ -1,4 +1,10 @@
-//! The attributes an app has: what data names, and what's checked.
+//! The untyped layer: attributes by id, their rules, and each actor's state.
+//!
+//! What data names them by, and what's told as values change.
+
+mod events;
+mod rules;
+pub(crate) mod state;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -6,10 +12,14 @@ use std::sync::Arc;
 use bevy::prelude::*;
 use bevy_mettle_core::{Id, MettleError};
 
-use crate::{AnyAttribute, Attribute, Base, Limit, Rounding};
+pub use self::events::AttributeChanged;
+pub use self::rules::{AnyAttribute, Limit, Rounding};
+pub use self::state::AttributeState;
+use crate::{Attribute, Base};
 
-/// What an app knows of one attribute: its rules, and how to reach its
-/// [`Base`] on an actor without its type.
+/// What an app knows of one attribute: its rules, and access to its base.
+///
+/// It reaches the attribute's [`Base`] on an actor without its type.
 #[derive(Clone)]
 pub struct AttributeInfo {
     /// Its id.
@@ -46,9 +56,9 @@ impl AttributeInfo {
     }
 }
 
-/// The attributes an app has, by id: added with
-/// [`add_attribute`](AttributeApp::add_attribute). What data naming
-/// attributes is checked against.
+/// The attributes an app has, by id: what data naming them is checked against.
+///
+/// Added with [`add_attribute`](AttributeApp::add_attribute).
 #[derive(Resource, Clone, Default)]
 pub struct AttributeRegistry {
     attributes: Arc<HashMap<Id<AnyAttribute>, AttributeInfo>>,
@@ -66,8 +76,8 @@ impl AttributeRegistry {
         self.attributes.values()
     }
 
-    /// Checks `attribute` is one there is, named within `within` if it's
-    /// named in something.
+    /// Checks `attribute` is one there is, named within `within` if it's named
+    /// in something.
     ///
     /// # Errors
     ///
@@ -97,11 +107,11 @@ impl AttributeRegistry {
     }
 }
 
-/// Adding attributes to an app.
+/// Adding attributes to an app: `app.add_attribute::<Life>()`.
 pub trait AttributeApp {
-    /// Adds attribute `A`: data can name it, and actors with its [`Base`]
-    /// have its [`Current`](crate::Current) kept and its changes told.
-    /// Adds [`AttributePlugin`](crate::AttributePlugin) if it isn't yet.
+    /// Adds attribute `A`: data can name it, and actors with its [`Base`] have
+    /// its [`Current`](crate::Current) kept and its changes told. Adds
+    /// [`AttributePlugin`](crate::AttributePlugin) if it isn't yet.
     fn add_attribute<A: Attribute>(&mut self) -> &mut Self;
 }
 
@@ -125,8 +135,8 @@ impl AttributeApp for App {
         self.add_systems(
             schedule,
             (
-                crate::state::sync_base::<A>.in_set(crate::plugin::Phase::Sync),
-                crate::state::publish::<A>.in_set(crate::plugin::Phase::Publish),
+                crate::registry::state::sync_base::<A>.in_set(crate::plugin::Phase::Sync),
+                crate::registry::state::publish::<A>.in_set(crate::plugin::Phase::Publish),
             ),
         )
     }

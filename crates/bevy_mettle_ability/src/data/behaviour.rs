@@ -6,8 +6,9 @@ use std::sync::Arc;
 use bevy::prelude::*;
 use bevy_mettle_core::{Id, IdTarget};
 
-/// A behaviour: what runs an ability, a component in code, registered by
-/// name. Named by an `Id<Behaviour>`.
+/// A behaviour: the component in code that runs an ability, by name.
+///
+/// Named by an `Id<Behaviour>`.
 #[derive(IdTarget)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Behaviour {}
@@ -19,9 +20,9 @@ pub(crate) struct BehaviourFns {
     pub(crate) remove: fn(&mut EntityWorldMut),
 }
 
-/// The behaviours there are, by name: added with
-/// [`add_behaviour`](BehaviourApp::add_behaviour). What abilities' data is
-/// checked against.
+/// The behaviours there are, by name: what abilities' data is checked against.
+///
+/// Added with [`add_behaviour`](BehaviourApp::add_behaviour).
 #[derive(Resource, Clone, Default)]
 pub struct Behaviours(pub(crate) Arc<HashMap<Id<Behaviour>, BehaviourFns>>);
 
@@ -33,11 +34,11 @@ impl Behaviours {
     }
 }
 
-/// Adding behaviours to an app.
+/// Adding behaviours to an app: a component registered under a name.
 pub trait BehaviourApp {
-    /// Adds the behaviour `name`: as an ability run by it activates, `B` is
-    /// put on the ability's entity, as it was by default, for the game's
-    /// systems to run; it's taken off as the ability ends.
+    /// Adds the behaviour `name`: as an ability run by it activates, `B` is put
+    /// on the ability's entity, as it was by default, for the game's systems to
+    /// run; it's taken off as the ability ends.
     fn add_behaviour<B: Component + Default>(
         &mut self,
         name: impl Into<Id<Behaviour>>,

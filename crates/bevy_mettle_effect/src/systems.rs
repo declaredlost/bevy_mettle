@@ -2,10 +2,10 @@
 
 use bevy::prelude::*;
 
-use crate::{ActiveEffect, EffectRegistry, engine};
+use crate::active::ActiveEffect;
+use crate::{EffectRegistry, engine};
 
-/// Gives active effects their new definitions, as the registry's
-/// replaced.
+/// Gives active effects their new definitions, as the registry's replaced.
 pub(crate) fn relink(world: &mut World, effects: &mut QueryState<Entity, With<ActiveEffect>>) {
     let registry = world.resource::<EffectRegistry>().clone();
     let all: Vec<Entity> = effects.iter(world).collect();

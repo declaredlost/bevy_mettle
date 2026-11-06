@@ -6,21 +6,26 @@ use std::collections::HashMap;
 use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use bevy::reflect::TypePath;
-use bevy_mettle_ability::{AbilityOf, AbilityReplica, AbilityReply, AbilityRequest, Failure};
+use bevy_mettle_ability::active::AbilityOf;
+use bevy_mettle_ability::events::Failure;
+use bevy_mettle_ability::net::{AbilityReplica, AbilityReply, AbilityRequest};
 use bevy_mettle_attribute::{Attribute, Base};
-use bevy_mettle_effect::{EffectOf, EffectReplica, NetRole};
+use bevy_mettle_effect::active::EffectOf;
+use bevy_mettle_effect::net::{EffectReplica, NetRole};
 use lightyear::prelude::server::ClientOf;
 use lightyear::prelude::*;
 
-/// The channel mettle's messages go on: reliable and ordered, so a reply
-/// never overtakes its request's effects.
+/// The channel mettle's messages go on: reliable and ordered.
+///
+/// So a reply never overtakes its request's effects.
 #[derive(TypePath)]
 pub struct MettleChannel;
 
-/// mettle over lightyear, on the server and its clients alike: what to
-/// replicate registered, and requests and replies sent. Add it after
-/// lightyear's plugins and mettle's, with mettle's [`NetRole`] set; it
-/// does what that role needs.
+/// Mettle over lightyear, on the server and its clients alike.
+///
+/// What to replicate registered, and requests and replies sent. Add it after
+/// lightyear's plugins and mettle's, with mettle's [`NetRole`] set; it does
+/// what that role needs.
 ///
 /// - The server replicates every active effect's replica and every granted
 ///   ability's to every client, with what they're of; the game replicates its
@@ -60,7 +65,7 @@ impl Plugin for MettleNetPlugin {
     }
 }
 
-/// Replicating attributes' bases.
+/// Replicating attributes' bases over lightyear: `replicate_attribute::<A>()`.
 pub trait MettleNetApp {
     /// Replicates `A`'s [`Base`] from the server: what clients' values are
     /// worked out from.
@@ -161,8 +166,7 @@ type Unreplicated = (
     Or<(With<EffectReplica>, With<AbilityReplica>)>,
 );
 
-/// On a server: replicates each new effect and granted ability to every
-/// client.
+/// On a server: replicates each new effect and granted ability to every client.
 fn replicate(mut commands: Commands, new: Query<Entity, Unreplicated>) {
     for entity in &new {
         commands

@@ -1,6 +1,6 @@
-//! Prediction: a client activates its own ability at once, the server
-//! decides, and the client keeps or undoes what it predicted. The
-//! transport is by hand here: what an adapter (lightyear's) ships.
+//! Prediction: a client activates its own ability at once, the server decides,
+//! and the client keeps or undoes what it predicted. The transport is by hand
+//! here: what an adapter (lightyear's) ships.
 
 use bevy::ecs::message::Messages;
 use bevy::prelude::*;
@@ -127,8 +127,8 @@ impl Game {
         self.server.tick();
     }
 
-    /// Ships the server's replies and the mage's state (its mana, its
-    /// effects' replicas) to the client, and runs it.
+    /// Ships the server's replies and the mage's state (its mana, its effects'
+    /// replicas) to the client, and runs it.
     fn answer(&mut self) {
         let replies: Vec<AbilityReply> = self
             .server

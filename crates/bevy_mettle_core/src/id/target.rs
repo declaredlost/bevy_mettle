@@ -1,9 +1,10 @@
 //! What an id can name.
 
-/// What an [`Id`](super::Id) can name: a [`Tag`](crate::tag::Tag), a
-/// curve, an effect, or anything else a game defines in data and names by
-/// id. Derive it, named in messages as the type is in `snake_case` unless
-/// `#[id_target(name = "..")]` says otherwise:
+/// What an [`Id`](super::Id) can name: a tag, a curve, or anything in data.
+///
+/// A [`Tag`](crate::tag::Tag), a curve, an effect, or anything else a game
+/// defines in data and names by id. Derive it, named in messages as the type is
+/// in `snake_case` unless `#[id_target(name = "..")]` says otherwise:
 ///
 /// ```
 /// use bevy_mettle_core::{Id, IdTarget};

@@ -1,13 +1,17 @@
 use bevy::prelude::*;
 use bevy_mettle_core::tag::{TagAdded, TagRemoved};
-use bevy_mettle_effect::{EffectApplied, EffectRemoved, NetRole};
+use bevy_mettle_effect::events::{EffectApplied, EffectRemoved};
+use bevy_mettle_effect::net::NetRole;
 
+use crate::data::Behaviours;
 use crate::net::{self, AbilityReply, AbilityRequest};
-use crate::{AbilityRegistry, Behaviours, engine};
+use crate::{AbilityRegistry, engine};
 
-/// Abilities: activated by their triggers as owned tags come and go, and
-/// granted and taken away with the effects that grant them. Starts with an
-/// empty registry; the game inserts one built from its data.
+/// Activates abilities by their triggers, and grants them with their effects.
+///
+/// Activated as owned tags come and go, and granted and taken away with the
+/// effects that grant them. Starts with an empty registry; the game inserts one
+/// built from its data.
 #[derive(Default)]
 pub struct AbilityPlugin;
 

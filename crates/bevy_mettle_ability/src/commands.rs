@@ -1,20 +1,19 @@
-//! Granting, activating and ending abilities: as commands, or on the
-//! world.
+//! Granting, activating and ending abilities: as commands, or on the world.
 
 use bevy::prelude::*;
 use bevy_mettle_core::Id;
 use bevy_mettle_core::tag::Tags;
 
-use crate::{Ability, Failure, GameplayEvent, engine};
+use crate::events::{Failure, GameplayEvent};
+use crate::{Ability, engine};
 
-/// Granting and activating abilities on an actor, and committing and
-/// ending a granted ability, as commands.
+/// Granting, activating, committing and ending abilities, as commands.
 pub trait AbilityCommands {
     /// Grants `ability` to this actor, at `level`.
     fn grant_ability(&mut self, ability: impl Into<Id<Ability>>, level: f32) -> &mut Self;
 
-    /// Activates this actor's `ability`: on a client, predicted, and asked
-    /// of the server.
+    /// Activates this actor's `ability`: on a client, predicted, and asked of
+    /// the server.
     fn activate_ability(&mut self, ability: impl Into<Id<Ability>>) -> &mut Self;
 
     /// Activates every ability of this actor's tagged any of `tags`.
@@ -113,11 +112,12 @@ impl AbilityCommands for EntityCommands<'_> {
     }
 }
 
-/// Granting, activating and ending abilities on the world, at once: in an
-/// exclusive system, or a test.
+/// Granting, activating and ending abilities on the world, at once.
+///
+/// In an exclusive system, or a test.
 pub trait AbilityWorld {
-    /// Grants `ability` to `actor` at `level`: the granted ability, if
-    /// there's such an ability.
+    /// Grants `ability` to `actor` at `level`: the granted ability, if there's
+    /// such an ability.
     fn grant_ability(
         &mut self,
         actor: Entity,
@@ -125,8 +125,8 @@ pub trait AbilityWorld {
         level: f32,
     ) -> Option<Entity>;
 
-    /// Activates `actor`'s `ability` (on a client, predicted, and asked of
-    /// the server): the granted ability, or why it didn't.
+    /// Activates `actor`'s `ability` (on a client, predicted, and asked of the
+    /// server): the granted ability, or why it didn't.
     ///
     /// # Errors
     ///
@@ -144,8 +144,8 @@ pub trait AbilityWorld {
     /// Why it didn't activate.
     fn activate(&mut self, ability: Entity) -> Result<(), Failure>;
 
-    /// Applies the active `ability`'s cost and cooldown: whether it could
-    /// pay. One that can't is cancelled.
+    /// Applies the active `ability`'s cost and cooldown: whether it could pay.
+    /// One that can't is cancelled.
     fn commit_ability(&mut self, ability: Entity) -> bool;
 
     /// Ends the active `ability`; cancelled if `cancelled`.

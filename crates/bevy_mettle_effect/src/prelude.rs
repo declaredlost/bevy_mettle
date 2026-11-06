@@ -1,9 +1,20 @@
-//! What using effects takes.
+//! What using effects takes: `use bevy_mettle_effect::prelude::*`.
 
+#[doc(hidden)]
+pub use crate::active::{ActiveEffect, ActiveEffects, EffectOf};
+#[doc(hidden)]
+pub use crate::code::{BaseChange, EffectCode, EffectContext};
+#[doc(hidden)]
+pub use crate::data::{
+    Capture, EffectDuration, EffectModifier, Expire, Magnitude, Reapply, StackBy, Stacking,
+};
+#[doc(hidden)]
+pub use crate::events::{
+    Blocked, EffectApplied, EffectBlocked, EffectExecuted, EffectRemoved, EffectStacked,
+};
+#[doc(hidden)]
+pub use crate::net::{EffectReplica, NetRole, PredictedUnder, Proxy};
+#[doc(hidden)]
 pub use crate::{
-    ActiveEffect, ActiveEffects, BaseChange, Blocked, Capture, Effect, EffectApplied,
-    EffectBlocked, EffectCode, EffectCommands, EffectContext, EffectDuration, EffectExecuted,
-    EffectModifier, EffectOf, EffectPlugin, EffectRegistry, EffectRemoved, EffectReplica,
-    EffectSpec, EffectStacked, EffectSystems, EffectWorld, Expire, Magnitude, NetRole,
-    PredictedUnder, Proxy, Reapply, StackBy, Stacking,
+    Effect, EffectCommands, EffectPlugin, EffectRegistry, EffectSpec, EffectSystems, EffectWorld,
 };

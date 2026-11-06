@@ -5,8 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::Effect;
 
-/// How applying an effect that's already on its target stacks: into one
-/// active effect, its modifiers' amounts counted once per stack, up to
+/// How an effect applied again onto its target stacks, up to a limit.
+///
+/// Into one active effect, its modifiers' amounts counted once per stack, up to
 /// `limit`.
 ///
 /// ```ron
@@ -20,15 +21,13 @@ pub struct Stacking {
     pub by: StackBy,
     /// The most stacks: more than 0.
     pub limit: u32,
-    /// What a new stack does to the time left: refreshes it, unless it
-    /// says.
+    /// What a new stack does to the time left: refreshes it, unless it says.
     #[serde(default)]
     pub reapply: Reapply,
     /// Whether a new stack starts the period over.
     #[serde(default)]
     pub reset_period: bool,
-    /// What running out of time does: takes every stack off, unless it
-    /// says.
+    /// What running out of time does: takes every stack off, unless it says.
     #[serde(default)]
     pub expire: Expire,
     /// Effects applied to the target in its place when it's at its limit.
@@ -36,7 +35,7 @@ pub struct Stacking {
     pub overflow: Vec<Id<Effect>>,
 }
 
-/// Whose applications stack together.
+/// Whose applications of an effect stack: everyone's, or each source's apart.
 #[derive(
     Debug,
     Clone,
@@ -56,7 +55,7 @@ pub enum StackBy {
     Source,
 }
 
-/// What a new stack does to the time left.
+/// What a new stack does to the time an effect has left: refresh or keep it.
 #[derive(
     Debug,
     Clone,

@@ -1,15 +1,16 @@
 //! How much: a number in an effect's definition.
 
-use bevy_mettle_attribute::AnyAttribute;
+use bevy_mettle_attribute::registry::AnyAttribute;
 use bevy_mettle_core::Id;
 use bevy_mettle_core::curve::LevelCurve;
 use bevy_mettle_core::tag::Tag;
 use serde::{Deserialize, Serialize};
 
-use crate::Calculation;
+use crate::code::Calculation;
 
-/// How much: a modifier's value, a duration, a period. Worked out as the
-/// effect's applied, from its spec.
+/// How much: a modifier's value, a duration or a period, from the spec.
+///
+/// Worked out as the effect's applied, from its spec.
 ///
 /// ```ron
 /// Value(4)
@@ -22,8 +23,7 @@ use crate::Calculation;
 pub enum Magnitude {
     /// This value.
     Value(f32),
-    /// `base` times `curve` at the spec's level (Unreal's
-    /// `ScalableFloat`).
+    /// `base` times `curve` at the spec's level (Unreal's `ScalableFloat`).
     Scaled {
         /// What the curve's value is multiplied by.
         base: f32,
@@ -33,8 +33,8 @@ pub enum Magnitude {
     /// What the code applying it set, by a tag (`param.damage`: Unreal's
     /// `SetByCaller`); 0, with a warning, if it didn't.
     Param(Id<Tag>),
-    /// An attribute of the source's or the target's, as it is when the
-    /// effect's applied, times `coefficient`.
+    /// An attribute of the source's or the target's, as it is when the effect's
+    /// applied, times `coefficient`.
     Attribute {
         /// The attribute.
         attribute: Id<AnyAttribute>,

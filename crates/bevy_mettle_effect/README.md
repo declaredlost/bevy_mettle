@@ -14,6 +14,18 @@ commands.entity(target).apply_effect(
 );
 ```
 
+At the root: [`EffectPlugin`], [`EffectSystems`], [`Effect`], [`EffectSpec`],
+[`EffectRegistry`], [`EffectCommands`] and [`EffectWorld`]. The rest is in
+five modules, and [`prelude`] brings in what using effects takes:
+
+| Module | What's in it |
+|---|---|
+| [`data`] | An effect's parts: `EffectDuration`, `EffectModifier`, `Magnitude`, `Stacking`, … |
+| [`active`] | Effects on their targets: `ActiveEffect`, `ActiveEffects`, `EffectOf` |
+| [`code`] | What effects run in code: `EffectCode`, `EffectContext`, `Execution`, `Calculation`, `BaseChange` |
+| [`events`] | What's told: `EffectApplied`, `EffectStacked`, `EffectBlocked`, `EffectExecuted`, `EffectRemoved` |
+| [`net`] | Over a network: `NetRole`, `PredictedUnder`, `EffectReplica`, `Proxy` |
+
 ## Definitions
 
 An effect is data, named by an `Id<Effect>`: [`Effect`].
@@ -44,13 +56,13 @@ An effect is data, named by an `Id<Effect>`: [`Effect`].
 | `stacking` | By target or source, a limit, refresh or keep the time, what running out does, overflow |
 | `on_apply`, `on_remove`, `on_expire` | Effects applied as it does |
 
-A [`Magnitude`](Magnitude) is a `Value`, a curve `Scaled` by the
+A [`Magnitude`](data::Magnitude) is a `Value`, a curve `Scaled` by the
 spec's level, a `Param` the applying code set (by a tag: `param.damage`,
 as Unreal's `SetByCaller`), an `Attribute` of the source's or target's, or
 a `Custom` calculation in code.
 
 [`EffectRegistry::build`] checks every definition against the tag tree,
-the curve table, the attributes the app added, and the code ([`EffectCode`]: executions and calculations
+the curve table, the attributes the app added, and the code ([`EffectCode`](code::EffectCode): executions and calculations
 by name), every error at once. Mettle doesn't load anything: the game
 reads its files and hands over the definitions. Insert a new registry (a
 hot reload) and active effects take their new definitions.
@@ -92,7 +104,7 @@ what it says to.
   replicate with its [`EffectOf`]. Its definition is data both sides
   have, so it's named, not sent.
 - **On a client**, an effect whose replica arrives is shown as a
-  [`Proxy`]: counting, granting its tags, but not ticked; the server's
+  [`Proxy`](net::Proxy): counting, granting its tags, but not ticked; the server's
   replica says how it stands, and its despawn takes it off.
 - **Predicting**: what a client applies under an activation is
   [`PredictedUnder`]. A lasting effect stays until the server's own replaces
@@ -101,3 +113,13 @@ what it says to.
   answers. `confirm_prediction` keeps what was predicted;
   `reject_prediction` undoes all of it. Abilities do both as the server
   answers.
+
+[`EffectApplied`]: events::EffectApplied
+[`EffectBlocked`]: events::EffectBlocked
+[`EffectExecuted`]: events::EffectExecuted
+[`EffectOf`]: active::EffectOf
+[`EffectRemoved`]: events::EffectRemoved
+[`EffectReplica`]: net::EffectReplica
+[`EffectStacked`]: events::EffectStacked
+[`NetRole`]: net::NetRole
+[`PredictedUnder`]: net::PredictedUnder

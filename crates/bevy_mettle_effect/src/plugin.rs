@@ -5,14 +5,15 @@ use bevy::prelude::*;
 use crate::net::{self, NetRole};
 use crate::{EffectRegistry, systems};
 
-/// Where active effects tick.
+/// The system set active effects tick in, in the plugin's schedule.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EffectSystems;
 
-/// Ticks active effects: their requirements weighed,
-/// periods come round, time run out; and gives them their new
-/// definitions as the [`EffectRegistry`] is replaced. Starts with an empty
-/// registry; the game inserts one built from its data.
+/// Ticks active effects: their requirements, their periods, and their time.
+///
+/// Their requirements weighed, periods come round, time run out; and gives them
+/// their new definitions as the [`EffectRegistry`] is replaced. Starts with an
+/// empty registry; the game inserts one built from its data.
 pub struct EffectPlugin {
     schedule: Interned<dyn ScheduleLabel>,
 }

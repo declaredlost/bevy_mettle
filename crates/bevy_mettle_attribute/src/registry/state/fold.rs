@@ -5,7 +5,8 @@ use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 
 use super::AttributeState;
-use crate::{AttributeRegistry, ModifierOf, ModifierSources, Modifiers};
+use crate::modifier::{ModifierOf, ModifierSources, Modifiers};
+use crate::registry::AttributeRegistry;
 
 /// The actors to fold next.
 #[derive(Resource, Default)]
@@ -50,8 +51,8 @@ type Actor<'a> = (
     Option<&'a ModifierSources>,
 );
 
-/// Folds the modifiers of every actor [`collect`] noted, or every actor's
-/// when the attributes there are change.
+/// Folds the modifiers of every actor [`collect`] noted, or every actor's when
+/// the attributes there are change.
 pub(crate) fn fold(
     registry: Res<AttributeRegistry>,
     mut dirty: ResMut<Dirty>,

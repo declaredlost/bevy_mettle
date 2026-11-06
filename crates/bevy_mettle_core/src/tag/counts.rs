@@ -5,10 +5,11 @@ use std::collections::BTreeMap;
 use super::{Tag, Tags};
 use crate::Id;
 
-/// Tags held by count, and every tag above them: what an actor owns while
-/// its states hold. Each source of a tag (an effect granting it, the game
-/// marking the actor moving) adds one and takes its one away, so two
-/// effects granting `immune.stun` keep it until both are gone.
+/// Tags held by count, and every tag above them: what an actor owns.
+///
+/// While its states hold. Each source of a tag (an effect granting it, the game
+/// marking the actor moving) adds one and takes its one away, so two effects
+/// granting `immune.stun` keep it until both are gone.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TagCounts {
     /// How many hold each tag, given or above one given.

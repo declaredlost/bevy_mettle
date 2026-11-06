@@ -25,8 +25,8 @@ pub enum MettleError {
         /// Where it was named, if in a definition: its id.
         within: Option<String>,
     },
-    /// Something that can't be: a number that isn't finite, a `per` of 0
-    /// or less, a ramp from a value to itself.
+    /// Something that can't be: a number that isn't finite, a `per` of 0 or
+    /// less, a ramp from a value to itself.
     #[error("{what}{}", context(.within.as_deref()))]
     Invalid {
         /// What's wrong, in words.

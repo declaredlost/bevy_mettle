@@ -1,6 +1,5 @@
 //! `bevy_mettle`'s tests: attributes folded and read, when modifiers count,
-//! what's told as they change, effects, guards, and what replication
-//! needs.
+//! what's told as they change, effects, guards, and what replication needs.
 
 mod abilities;
 mod common;

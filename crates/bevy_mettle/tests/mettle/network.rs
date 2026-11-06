@@ -1,5 +1,5 @@
-//! What replication needs: modifiers that serialize by name, and a
-//! source's actor mapped into another world.
+//! What replication needs: modifiers that serialize by name, and a source's
+//! actor mapped into another world.
 
 use bevy::ecs::entity::{EntityHashMap, MapEntities};
 use bevy::prelude::*;

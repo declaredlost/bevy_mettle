@@ -9,9 +9,10 @@ use fnv::FnvHasher;
 use super::Tag;
 use crate::{Id, MettleError, MettleErrors};
 
-/// The tags there are, checked: each one a path whose parent is a tag of
-/// its own, so the tree has no gaps. What data naming tags is checked
-/// against. Cheap to clone; empty by default.
+/// The tags there are, checked: each a path whose parent is a tag too.
+///
+/// So the tree has no gaps. What data naming tags is checked against. Cheap to
+/// clone; empty by default.
 #[derive(Debug, Clone, Default)]
 pub struct TagTree(Arc<BTreeSet<Id<Tag>>>);
 
@@ -20,8 +21,8 @@ impl TagTree {
     ///
     /// # Errors
     ///
-    /// Every tag defined twice, that isn't a path, or whose parent isn't a
-    /// tag of its own.
+    /// Every tag defined twice, that isn't a path, or whose parent isn't a tag
+    /// of its own.
     pub fn build<'a>(definitions: impl IntoIterator<Item = &'a Tag>) -> Result<Self, MettleErrors> {
         let mut errors = Vec::new();
         let mut tags = BTreeSet::new();
@@ -61,8 +62,8 @@ impl TagTree {
         self.0.contains(tag)
     }
 
-    /// `tag`, if it's defined, named within `within` (what names it) if
-    /// it's named in something.
+    /// `tag`, if it's defined, named within `within` (what names it) if it's
+    /// named in something.
     ///
     /// # Errors
     ///
@@ -93,9 +94,9 @@ impl TagTree {
         self.0.iter()
     }
 
-    /// A hash of the tags, the same wherever they're the same whatever
-    /// order they came in: for a client to check it has its server's.
-    /// FNV-1a over each path and its length, little-endian.
+    /// A hash of the tags, the same wherever they're the same whatever order
+    /// they came in: for a client to check it has its server's. FNV-1a over
+    /// each path and its length, little-endian.
     #[must_use]
     pub fn fingerprint(&self) -> u64 {
         let mut hash = FnvHasher::default();

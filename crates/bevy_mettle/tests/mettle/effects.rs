@@ -1,5 +1,5 @@
-//! Effects: applied, lasting, periodic, stacked, inhibited, removed,
-//! chained, checked and reloaded.
+//! Effects: applied, lasting, periodic, stacked, inhibited, removed, chained,
+//! checked and reloaded.
 
 use bevy::prelude::*;
 use bevy_harness::TestApp;

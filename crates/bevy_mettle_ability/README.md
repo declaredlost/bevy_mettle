@@ -27,6 +27,17 @@ fn cast(mut casting: Query<(Entity, &ActiveAbility, &mut ProjectileCast)>, time:
 }
 ```
 
+At the root: [`AbilityPlugin`], [`Ability`], [`AbilityRegistry`],
+[`AbilityCommands`] and [`AbilityWorld`]. The rest is in four modules, and
+[`prelude`] brings in what using abilities takes:
+
+| Module | What's in it |
+|---|---|
+| [`data`] | An ability's parts, and what runs it: `Grant`, `Commit`, `Trigger`, `Behaviour`, `Behaviours` |
+| [`active`] | Granted and active abilities: `Abilities`, `AbilityOf`, `GrantedAbility`, `ActiveAbility` |
+| [`events`] | What's told: `AbilityActivated`, `AbilityEnded`, `AbilityFailed`, `GameplayEvent` |
+| [`net`] | Over a network: `AbilityRequest`, `AbilityReply`, `AbilityReplica` |
+
 ## Definitions
 
 An ability is data, named by an `Id<Ability>`: [`Ability`].
@@ -82,7 +93,7 @@ hand mettle the two lists.
 
 A granted ability is an entity [`AbilityOf`] its actor, which despawns
 with it: granted by `grant_ability`, or by an effect for as long as it
-lasts, through a [`Grant`]: gear's skills. Activating it
+lasts, through a [`Grant`](data::Grant): gear's skills. Activating it
 checks it, in order: granted and not active, not cooling down, affordable,
 not blocked, its requirement holding. Then abilities it cancels are
 cancelled, its tags granted, its behaviour's component put on it with
@@ -114,3 +125,13 @@ With the effect crate's `NetRole` set:
   to the server.
 
 A server's own activations have the top bit set, apart from its clients'.
+
+[`AbilityActivated`]: events::AbilityActivated
+[`AbilityEnded`]: events::AbilityEnded
+[`AbilityFailed`]: events::AbilityFailed
+[`AbilityOf`]: active::AbilityOf
+[`AbilityReplica`]: net::AbilityReplica
+[`AbilityReply`]: net::AbilityReply
+[`AbilityRequest`]: net::AbilityRequest
+[`ActiveAbility`]: active::ActiveAbility
+[`GameplayEvent`]: events::GameplayEvent

@@ -5,11 +5,13 @@ use std::marker::PhantomData;
 
 use bevy::prelude::*;
 
-use crate::{Attribute, AttributeState};
+use crate::Attribute;
+use crate::registry::AttributeState;
 
-/// On an actor: attribute `A`'s base, what the game and effects set
-/// (what's left of life, a level gained), before modifiers. Having it is
-/// having the attribute; it brings [`Current<A>`].
+/// On an actor: attribute `A`'s base, before modifiers: what the game sets.
+///
+/// What the game and effects set (what's left of life, a level gained). Having
+/// it is having the attribute; it brings [`Current<A>`].
 #[derive(Component)]
 #[require(Current<A>, AttributeState)]
 pub struct Base<A: Attribute> {
@@ -51,12 +53,13 @@ impl<A: Attribute> Base<A> {
     }
 }
 
-/// On an actor: attribute `A`'s current value, with every modifier that
-/// counts with nothing in play, kept within its limits (GAS's current
-/// value). Mettle's to write, as [`AttributeSystems`](crate::AttributeSystems)
-/// runs, and only when it changes: `Changed<Current<A>>` is it changing.
-/// For a read in context (a hit's tags), see
-/// [`AttributeReader`](crate::AttributeReader).
+/// On an actor: attribute `A`'s current value, modifiers and limits applied.
+///
+/// Every modifier that counts with nothing in play (GAS's current value).
+/// Mettle's to write, as [`AttributeSystems`](crate::AttributeSystems) runs,
+/// and only when it changes: `Changed<Current<A>>` is it changing. For a read
+/// in context (a hit's tags), see
+/// [`AttributeReader`](crate::read::AttributeReader).
 #[derive(Component)]
 pub struct Current<A: Attribute> {
     /// `None` until it's first worked out.

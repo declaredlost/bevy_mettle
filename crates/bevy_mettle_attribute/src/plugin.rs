@@ -3,9 +3,9 @@ use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
 use bevy_mettle_core::tag::publish_tags;
 
-use crate::{AttributeRegistry, state};
+use crate::registry::{AttributeRegistry, state};
 
-/// Where actors' attributes are kept.
+/// The system set attributes are kept in, `FixedPreUpdate` by default.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AttributeSystems;
 
@@ -26,10 +26,11 @@ pub(crate) enum Phase {
 #[derive(Resource)]
 pub(crate) struct AttributeSchedule(pub(crate) Interned<dyn ScheduleLabel>);
 
-/// Keeps actors' attributes: their bases synced, their modifiers folded as
-/// they change, their values worked out, and what changed told. Added by
-/// [`add_attribute`](crate::AttributeApp::add_attribute) if it isn't
-/// yet; add it first to choose the schedule.
+/// Keeps actors' attributes: bases synced, modifiers folded, values computed.
+///
+/// What changed is told. Added by
+/// [`add_attribute`](crate::AttributeApp::add_attribute) if it isn't yet; add
+/// it first to choose the schedule.
 pub struct AttributePlugin {
     schedule: Interned<dyn ScheduleLabel>,
 }

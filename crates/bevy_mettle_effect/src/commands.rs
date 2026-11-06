@@ -51,8 +51,9 @@ impl EffectCommands for EntityCommands<'_> {
     }
 }
 
-/// Applying and removing effects on the world, at once: in an exclusive
-/// system, or a test.
+/// Applying and removing effects on the world, at once.
+///
+/// In an exclusive system, or a test.
 pub trait EffectWorld {
     /// Applies `spec` to `target`.
     fn apply_effect(&mut self, target: Entity, spec: EffectSpec);
@@ -63,17 +64,21 @@ pub trait EffectWorld {
     /// Takes the active effect `effect` off its actor.
     fn remove_effect(&mut self, effect: Entity);
 
-    /// The server confirmed `activation`: what was predicted under it
-    /// stays, until the server's own effects replace it.
+    /// The server confirmed `activation`: what was predicted under it stays,
+    /// until the server's own effects replace it.
     fn confirm_prediction(&mut self, activation: u64);
 
-    /// The server rejected `activation`: every effect and base change
-    /// predicted under it undone.
+    /// The server rejected `activation`: every effect and base change predicted
+    /// under it undone.
     fn reject_prediction(&mut self, activation: u64);
 
     /// What applying `spec` to `target` as an instant effect would change,
     /// without changing it; `None` if there's no such effect.
-    fn preview_effect(&self, target: Entity, spec: &EffectSpec) -> Option<Vec<crate::BaseChange>>;
+    fn preview_effect(
+        &self,
+        target: Entity,
+        spec: &EffectSpec,
+    ) -> Option<Vec<crate::code::BaseChange>>;
 }
 
 impl EffectWorld for World {
@@ -97,7 +102,11 @@ impl EffectWorld for World {
         crate::net::rollback(self, activation);
     }
 
-    fn preview_effect(&self, target: Entity, spec: &EffectSpec) -> Option<Vec<crate::BaseChange>> {
+    fn preview_effect(
+        &self,
+        target: Entity,
+        spec: &EffectSpec,
+    ) -> Option<Vec<crate::code::BaseChange>> {
         engine::preview(self, target, spec)
     }
 }

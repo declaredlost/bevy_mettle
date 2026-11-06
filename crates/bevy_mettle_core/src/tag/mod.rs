@@ -1,5 +1,6 @@
-//! Gameplay tags: labels in a tree, defined in data. Sets of them, counts
-//! of them, and the tree they're checked against.
+//! Gameplay tags: labels in a tree, sets and counts of them, and owned tags.
+//!
+//! Defined in data, and checked against the tree.
 
 mod counts;
 mod owned;
@@ -16,11 +17,12 @@ pub use self::tree::TagTree;
 use crate::{Id, IdTarget};
 
 /// A gameplay tag: a label in a tree, defined in data, its id its path.
-/// `damage.elemental.fire` is under `damage.elemental`, under `damage`;
-/// what has a tag has every tag above it. What effects, abilities and hits
-/// are labelled with, and what an actor owns while a state holds
-/// (`state.moving`, `immune.stun`). Named by an `Id<Tag>`; defined in data,
-/// so a mod can add its own:
+///
+/// `damage.elemental.fire` is under `damage.elemental`, under `damage`; what
+/// has a tag has every tag above it. What effects, abilities and hits are
+/// labelled with, and what an actor owns while a state holds (`state.moving`,
+/// `immune.stun`). Named by an `Id<Tag>`; defined in data, so a mod can add its
+/// own:
 ///
 /// ```ron
 /// [(id: "damage"), (id: "damage.elemental"), (id: "damage.elemental.fire")]
@@ -34,6 +36,7 @@ pub struct Tag {
 }
 
 /// A set of tags: what an effect, an ability or a hit is labelled with.
+///
 /// Has every tag above the ones it's given too, so asking it for
 /// `effect.affliction` finds `effect.affliction.poison`. Written to data as
 /// what it was given alone.
@@ -58,8 +61,8 @@ impl Tags {
         self.written.insert(tag);
     }
 
-    /// Takes `tag` out, as given, and what's above it unless another tag
-    /// given is under it too.
+    /// Takes `tag` out, as given, and what's above it unless another tag given
+    /// is under it too.
     pub fn remove(&mut self, tag: &Id<Tag>) {
         if self.written.remove(tag) {
             self.all = self.written.iter().flat_map(Id::lineage).collect();

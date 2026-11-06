@@ -1,5 +1,5 @@
-//! When modifiers count: the read's tags, owned tags, the target's, and
-//! facts, weighed.
+//! When modifiers count: the read's tags, owned tags, the target's, and facts,
+//! weighed.
 
 use bevy_mettle::prelude::*;
 

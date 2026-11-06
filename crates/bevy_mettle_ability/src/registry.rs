@@ -6,13 +6,16 @@ use std::sync::Arc;
 use bevy::prelude::*;
 use bevy_mettle_core::tag::TagTree;
 use bevy_mettle_core::{Id, MettleError, MettleErrors};
-use bevy_mettle_effect::{Effect, EffectDuration, EffectRegistry};
+use bevy_mettle_effect::data::EffectDuration;
+use bevy_mettle_effect::{Effect, EffectRegistry};
 
-use crate::{Ability, Behaviour, Behaviours, Grant, Trigger};
+use crate::Ability;
+use crate::data::{Behaviour, Behaviours, Grant, Trigger};
 
-/// The abilities there are, built from their definitions and checked
-/// against the tag tree, the effects and the behaviours there are; and
-/// what the effects grant checked against them. Insert it as a resource.
+/// The abilities there are, checked against the tags, effects and behaviours.
+///
+/// Built from their definitions, and what the effects grant checked against
+/// them. Insert it as a resource.
 #[derive(Resource, Clone, Default)]
 pub struct AbilityRegistry {
     abilities: Arc<HashMap<Id<Ability>, Arc<Ability>>>,
@@ -39,10 +42,10 @@ impl AbilityRegistry {
     ///
     /// # Errors
     ///
-    /// Everything wrong, at once: abilities defined twice; tags, effects
-    /// and behaviours named that aren't; a cost that isn't instant, a
-    /// cooldown that doesn't last or grants nothing; and grants of effects
-    /// that aren't, or don't last, or of abilities that aren't.
+    /// Everything wrong, at once: abilities defined twice; tags, effects and
+    /// behaviours named that aren't; a cost that isn't instant, a cooldown that
+    /// doesn't last or grants nothing; and grants of effects that aren't, or
+    /// don't last, or of abilities that aren't.
     pub fn build<'a, 'g>(
         definitions: impl IntoIterator<Item = &'a Ability>,
         grants: impl IntoIterator<Item = &'g Grant>,
@@ -103,8 +106,8 @@ impl AbilityRegistry {
     }
 }
 
-/// Checks `grant`: its effect is one there is, and lasts; its abilities
-/// are among `abilities`.
+/// Checks `grant`: its effect is one there is, and lasts; its abilities are
+/// among `abilities`.
 fn check_grant(
     grant: &Grant,
     abilities: &HashMap<Id<Ability>, Arc<Ability>>,

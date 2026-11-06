@@ -1,5 +1,5 @@
-//! What's told: `Current` written, `Changed<Current<A>>`, and entity
-//! events for attributes and owned tags.
+//! What's told: `Current` written, `Changed<Current<A>>`, and entity events for
+//! attributes and owned tags.
 
 use bevy::prelude::*;
 use bevy_harness::TestApp;

@@ -10,12 +10,14 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub use self::operation::Operation;
 pub use self::sources::{ModifierOf, ModifierSources, Modifiers};
-use crate::{AnyAttribute, Attribute, AttributeRegistry};
+use crate::Attribute;
+use crate::registry::{AnyAttribute, AttributeRegistry};
 
-/// A modifier: one line on an item, a passive, an effect. Changes an
-/// attribute by an [op](Operation) and a value, while its [`Condition`]
-/// holds and as much as it does, once for each whole so much of another
-/// attribute if it's [`per`](Self::per) one.
+/// A modifier: one line on an item, a passive or an effect.
+///
+/// Changes an attribute by an [op](Operation) and a value, while its
+/// [`Condition`] holds and as much as it does, once for each whole so much of
+/// another attribute if it's [`per`](Self::per) one.
 ///
 /// ```ron
 /// (attribute: "damage", op: Additive, value: 0.2, condition: ReadTagged("damage.elemental.fire"))
@@ -27,22 +29,21 @@ pub struct Modifier {
     pub attribute: Id<AnyAttribute>,
     /// How.
     pub op: Operation,
-    /// By how much: an amount for `Base`, `Flat`, `Unscaled` and
-    /// `Override`, a fraction (`0.2` for +20%) for the rest. Negative for
-    /// less.
+    /// By how much: an amount for `Base`, `Flat`, `Unscaled` and `Override`, a
+    /// fraction (`0.2` for +20%) for the rest. Negative for less.
     pub value: f32,
     /// When it counts, and how much. Always, if `None`.
     pub condition: Option<Condition>,
-    /// That it counts once for each whole `every` of an attribute, read in
-    /// the same context.
+    /// That it counts once for each whole `every` of an attribute, read in the
+    /// same context.
     pub per: Option<Per>,
-    /// That it only counts for reads naming its source: a weapon's own
-    /// damage, not every attack's.
+    /// That it only counts for reads naming its source: a weapon's own damage,
+    /// not every attack's.
     pub local: bool,
 }
 
-/// A modifier as data is written: what isn't there left out, what is
-/// written bare (`condition: ReadTagged("fire")`).
+/// A modifier as data is written: what isn't there left out, what is written
+/// bare (`condition: ReadTagged("fire")`).
 #[derive(Serialize, Deserialize)]
 #[serde(rename = "Modifier", deny_unknown_fields)]
 struct Readable {
@@ -109,8 +110,8 @@ macro_rules! convert {
 
 convert!(Readable, Packed);
 
-/// As data (RON, JSON), leaving out what isn't there; in a binary format
-/// (what networking uses), every field.
+/// As data (RON, JSON), leaving out what isn't there; in a binary format (what
+/// networking uses), every field.
 impl Serialize for Modifier {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         if serializer.is_human_readable() {
@@ -167,8 +168,7 @@ impl Modifier {
         Self::new(A::ID, Operation::Flat, value)
     }
 
-    /// `A` by a fraction (`0.2` for +20%), summed with the other additive
-    /// ones.
+    /// `A` by a fraction (`0.2` for +20%), summed with the other additive ones.
     #[must_use]
     pub fn additive<A: Attribute>(value: f32) -> Self {
         Self::new(A::ID, Operation::Additive, value)
@@ -180,8 +180,8 @@ impl Modifier {
         Self::new(A::ID, Operation::Multiplicative, value)
     }
 
-    /// `A` divided by one more than a fraction, summed with the other
-    /// dividing ones.
+    /// `A` divided by one more than a fraction, summed with the other dividing
+    /// ones.
     #[must_use]
     pub fn divide<A: Attribute>(value: f32) -> Self {
         Self::new(A::ID, Operation::Divide, value)
@@ -239,14 +239,14 @@ impl Modifier {
         self
     }
 
-    /// Whether it always counts: no condition, not local, not per
-    /// anything. What folding sums at once.
+    /// Whether it always counts: no condition, not local, not per anything.
+    /// What folding sums at once.
     pub(crate) fn always(&self) -> bool {
         self.condition.is_none() && self.per.is_none() && !self.local
     }
 
-    /// Checks it: its attributes are in `attributes`, its tags in `tags`,
-    /// its numbers ones that can be.
+    /// Checks it: its attributes are in `attributes`, its tags in `tags`, its
+    /// numbers ones that can be.
     ///
     /// # Errors
     ///
@@ -259,8 +259,8 @@ impl Modifier {
         }
     }
 
-    /// Checks its attributes and numbers, not its tags: what folding
-    /// needs, without the tag tree.
+    /// Checks its attributes and numbers, not its tags: what folding needs,
+    /// without the tag tree.
     pub(crate) fn check_values(&self, attributes: &AttributeRegistry) -> Result<(), MettleError> {
         let invalid = |what: String| MettleError::Invalid { what, within: None };
         attributes.check(&self.attribute, None)?;

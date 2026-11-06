@@ -6,11 +6,12 @@ use bevy_mettle_core::condition::Condition;
 use bevy_mettle_core::tag::TagCounts;
 use serde::{Deserialize, Serialize};
 
-use crate::context::{AttributeContext, Read};
-use crate::{AnyAttribute, Modifier, Operation};
+use crate::modifier::{Modifier, Operation};
+use crate::read::{AttributeContext, Read};
+use crate::registry::AnyAttribute;
 
-/// When a modifier counts, and how much: its expression, and whether it's
-/// local to its source.
+/// When a modifier counts, and how much: its expression, and whether it's local
+/// to its source.
 #[derive(Clone)]
 pub(super) struct Counts {
     pub(super) condition: Option<Condition>,
@@ -27,8 +28,8 @@ impl Counts {
         }
     }
 
-    /// How much it counts for `context`, with the owner owning `owned`: from
-    /// 0 to 1. A local one counts only for reads naming its source.
+    /// How much it counts for `context`, with the owner owning `owned`: from 0
+    /// to 1. A local one counts only for reads naming its source.
     pub(super) fn weight(&self, context: &AttributeContext, owned: &TagCounts) -> f32 {
         if self.local && context.source != Some(self.source) {
             return 0.0;
@@ -47,13 +48,14 @@ pub(super) struct Scoped {
     /// The attribute it's per, and how much of it makes one.
     pub(super) per: Option<(Id<AnyAttribute>, f32)>,
     pub(super) counts: Counts,
-    /// Where it comes, in its actor's modifiers: of `Base`s and
-    /// `Override`s, the last counts.
+    /// Where it comes, in its actor's modifiers: of `Base`s and `Override`s,
+    /// the last counts.
     pub(super) order: u32,
 }
 
-/// An attribute's modifiers, summed: what a read reports apart, for an
-/// attacker's and a target's to be combined, or a tooltip.
+/// An attribute's modifiers, summed but not applied: for tooltips and hits.
+///
+/// For an attacker's and a target's to be combined.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Breakdown {
     /// The base: set, or replaced by a `Base` modifier.
@@ -73,10 +75,10 @@ pub struct Breakdown {
 }
 
 impl Breakdown {
-    /// `((base + Σ flat) × (1 + Σ additive) × Π (1 + multiplicative) /
-    /// (1 + Σ divide)) + Σ unscaled`, or the override. Less than -100%
-    /// additive leaves nothing, not less; -100% divide or less divides by
-    /// next to nothing.
+    /// `((base + Σ flat) × (1 + Σ additive) × Π (1 + multiplicative) / (1 + Σ
+    /// divide)) + Σ unscaled`, or the override. Less than -100% additive
+    /// leaves nothing, not less; -100% divide or less divides by next to
+    /// nothing.
     #[must_use]
     pub fn total(&self) -> f32 {
         if let Some(value) = self.overriding {
@@ -88,9 +90,8 @@ impl Breakdown {
     }
 }
 
-/// An attribute's always-counting modifiers, summed. A `Base` or an
-/// `Override` is kept with where it comes, so the last counts however
-/// they're summed.
+/// An attribute's always-counting modifiers, summed. A `Base` or an `Override`
+/// is kept with where it comes, so the last counts however they're summed.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct Sum {
     base: Option<(u32, f32)>,
@@ -117,8 +118,8 @@ impl Default for Sum {
 }
 
 impl Sum {
-    /// Adds `value` by `op`, counted `weight` of itself: an amount scaled
-    /// by it, a base or an override only in full.
+    /// Adds `value` by `op`, counted `weight` of itself: an amount scaled by
+    /// it, a base or an override only in full.
     pub(super) fn add_weighted(&mut self, op: Operation, value: f32, weight: f32, order: u32) {
         if !op.whole() || weight >= 1.0 {
             self.add(op, value * weight, order);

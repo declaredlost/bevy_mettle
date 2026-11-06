@@ -1,11 +1,12 @@
-//! Keeping actors' attributes: bases synced in, values worked out, and
-//! what changed told.
+//! Keeping actors' attributes: bases synced in, values worked out, and what
+//! changed told.
 
 use bevy::prelude::*;
 use bevy_mettle_core::tag::OwnedTags;
 
 use super::AttributeState;
-use crate::{Attribute, AttributeChanged, AttributeRegistry, Base, Current};
+use crate::registry::{AttributeChanged, AttributeRegistry};
+use crate::{Attribute, Base, Current};
 
 /// Syncs each actor's changed `Base<A>` into its state.
 pub(crate) fn sync_base<A: Attribute>(
@@ -19,8 +20,8 @@ pub(crate) fn sync_base<A: Attribute>(
 /// Actors whose attributes or owned tags changed.
 type Touched = Or<(Changed<AttributeState>, Changed<OwnedTags>)>;
 
-/// Works out the values of every actor whose attributes or owned tags
-/// changed, marking its state changed only where one did.
+/// Works out the values of every actor whose attributes or owned tags changed,
+/// marking its state changed only where one did.
 pub(crate) fn refresh(
     registry: Res<AttributeRegistry>,
     mut actors: Query<(&mut AttributeState, &OwnedTags), Touched>,
@@ -35,8 +36,8 @@ pub(crate) fn refresh(
     }
 }
 
-/// Writes each actor's `Current<A>` where its value changed, and tells
-/// each one that did.
+/// Writes each actor's `Current<A>` where its value changed, and tells each one
+/// that did.
 pub(crate) fn publish<A: Attribute>(
     mut commands: Commands,
     mut actors: Query<(Entity, &AttributeState, &mut Current<A>), Changed<AttributeState>>,

@@ -7,12 +7,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::Effect;
 
-/// An effect about to be applied (Unreal's `GameplayEffectSpec`): which,
-/// at what level, with what the applying code set, from whom. What's
-/// applied, and what's sent to replicate an active effect: its
-/// definition, being data, isn't. Every field is always written, so binary
-/// formats (what networking uses) read it back; data can leave out all but
-/// `effect`.
+/// An effect about to be applied: which, at what level, with what, from whom.
+///
+/// Unreal's `GameplayEffectSpec`: with what the applying code set. What's
+/// applied, and what's sent to replicate an active effect: its definition,
+/// being data, isn't. Every field is always written, so binary formats (what
+/// networking uses) read it back; data can leave out all but `effect`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EffectSpec {
@@ -27,8 +27,8 @@ pub struct EffectSpec {
     /// Who applied it: the caster, the attacker.
     #[serde(default)]
     pub source: Option<Entity>,
-    /// The activation it was applied under, if any: what a rejected
-    /// prediction takes back.
+    /// The activation it was applied under, if any: what a rejected prediction
+    /// takes back.
     #[serde(default)]
     pub activation: Option<u64>,
 }

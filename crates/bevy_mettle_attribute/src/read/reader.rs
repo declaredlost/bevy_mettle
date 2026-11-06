@@ -5,14 +5,15 @@ use bevy::prelude::*;
 use bevy_mettle_core::Id;
 use bevy_mettle_core::tag::OwnedTags;
 
-use crate::{
-    AnyAttribute, Attribute, AttributeContext, AttributeRegistry, AttributeState, Breakdown,
-    Operation,
-};
+use crate::Attribute;
+use crate::modifier::Operation;
+use crate::read::{AttributeContext, Breakdown};
+use crate::registry::{AnyAttribute, AttributeRegistry, AttributeState};
 
-/// Actors' attributes, read in context: a hit's tags, its target's, the
-/// facts it supplies, its source. With nothing in play, read
-/// [`Current`](crate::Current) instead.
+/// A system parameter: actors' attributes, read in a context such as a hit's.
+///
+/// Its tags, its target's, the facts it supplies, its source. With nothing in
+/// play, read [`Current`](crate::Current) instead.
 ///
 /// ```ignore
 /// fn strike(attributes: AttributeReader) {
@@ -49,8 +50,8 @@ impl AttributeReader<'_, '_> {
             .then(|| state.value(&self.registry, owned, attribute, context))
     }
 
-    /// `actor`'s `A`'s modifiers in `context`, summed but not applied: for
-    /// an attacker's and a target's to be combined, or a tooltip.
+    /// `actor`'s `A`'s modifiers in `context`, summed but not applied: for an
+    /// attacker's and a target's to be combined, or a tooltip.
     #[must_use]
     pub fn breakdown<A: Attribute>(
         &self,
@@ -60,8 +61,7 @@ impl AttributeReader<'_, '_> {
         self.breakdown_at(actor, &A::ID, context)
     }
 
-    /// `actor`'s `attribute`'s modifiers in `context`, summed but not
-    /// applied.
+    /// `actor`'s `attribute`'s modifiers in `context`, summed but not applied.
     #[must_use]
     pub fn breakdown_at(
         &self,
@@ -82,8 +82,9 @@ impl AttributeReader<'_, '_> {
     }
 }
 
-/// Reading and changing attributes on the world, without their types: for
-/// exclusive systems, effects and tests.
+/// Reading and changing attributes on the world, without their types.
+///
+/// For exclusive systems, effects and tests.
 pub trait AttributeWorld {
     /// `actor`'s `attribute` in `context`, if it has it.
     fn value_at(
@@ -93,8 +94,7 @@ pub trait AttributeWorld {
         context: &AttributeContext,
     ) -> Option<f32>;
 
-    /// `actor`'s `attribute`'s modifiers in `context`, summed but not
-    /// applied.
+    /// `actor`'s `attribute`'s modifiers in `context`, summed but not applied.
     fn breakdown_at(
         &self,
         actor: Entity,
@@ -102,11 +102,10 @@ pub trait AttributeWorld {
         context: &AttributeContext,
     ) -> Option<Breakdown>;
 
-    /// Changes `actor`'s `attribute`'s base by `op` and `value`, as an
-    /// instant effect does (damage taken off life), rounded and kept
-    /// within its limits: `Flat` and `Unscaled` add, `Additive` and
-    /// `Multiplicative` scale, `Divide` divides, `Base` and `Override` set.
-    /// Whether it has `attribute`.
+    /// Changes `actor`'s `attribute`'s base by `op` and `value`, as an instant
+    /// effect does (damage taken off life), rounded and kept within its limits:
+    /// `Flat` and `Unscaled` add, `Additive` and `Multiplicative` scale,
+    /// `Divide` divides, `Base` and `Override` set. Whether it has `attribute`.
     fn apply_to_base(
         &mut self,
         actor: Entity,

@@ -13,7 +13,6 @@ publish = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
-homepage = { workspace = true }
 
 [dependencies]
 # Tags, curves and the condition language

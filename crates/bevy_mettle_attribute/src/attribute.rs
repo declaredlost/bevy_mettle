@@ -1,10 +1,12 @@
 //! What an attribute is: a marker type, its rules on it.
 
-use bevy_mettle_core::{Id, IdTarget};
-use serde::{Deserialize, Serialize};
+use bevy_mettle_core::Id;
 
-/// An attribute: a number an actor has (life, damage, a resistance), as a
-/// marker type its rules are on. Derive it:
+use crate::registry::{AnyAttribute, Limit, Rounding};
+
+/// An attribute: a number an actor has, as a marker type its rules are on.
+///
+/// Life, damage, a resistance. Derive it:
 ///
 /// ```ignore
 /// #[derive(Attribute)]
@@ -24,11 +26,11 @@ use serde::{Deserialize, Serialize};
 /// attribute, its modifiers counting for reads tagged so:
 /// `Modifier::flat::<Resistance>(0.2).read_tagged("damage.elemental")`.
 ///
-/// Or implement it, for rules the derive can't say: its rules are
-/// constants.
+/// Or implement it, for rules the derive can't say: its rules are constants.
 ///
 /// ```
-/// use bevy_mettle_attribute::{Attribute, Limit};
+/// use bevy_mettle_attribute::Attribute;
+/// use bevy_mettle_attribute::registry::Limit;
 ///
 /// struct MaxLife;
 /// impl Attribute for MaxLife {
@@ -64,62 +66,4 @@ pub trait Attribute: Send + Sync + 'static {
 
     /// How it's rounded, if it's a whole number.
     const ROUNDING: Option<Rounding> = None;
-}
-
-/// Any attribute: what attributes are named by, as an `Id<AnyAttribute>`,
-/// in data and in modifiers. Each attribute is a type of its own; this is
-/// what they share.
-#[derive(IdTarget)]
-#[id_target(name = "attribute")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum AnyAttribute {}
-
-/// What an attribute is kept within.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Limit {
-    /// This value.
-    Value(f32),
-    /// This attribute's current value, as the actor has it, read in the
-    /// same context.
-    Attribute(Id<AnyAttribute>),
-}
-
-impl Limit {
-    /// `A`'s current value.
-    #[must_use]
-    pub const fn attribute<A: Attribute>() -> Self {
-        Self::Attribute(A::ID)
-    }
-}
-
-/// How a whole-number attribute is rounded.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize
-)]
-pub enum Rounding {
-    /// Towards negative infinity: 2.9 is 2.
-    #[default]
-    Down,
-    /// Towards positive infinity: 2.1 is 3.
-    Up,
-    /// To the nearest, halves away from 0: 2.5 is 3.
-    Nearest,
-}
-
-impl Rounding {
-    pub(crate) fn round(self, value: f32) -> f32 {
-        match self {
-            Self::Down => value.floor(),
-            Self::Up => value.ceil(),
-            Self::Nearest => value.round(),
-        }
-    }
 }

@@ -1,5 +1,5 @@
-//! An actor's attributes, without their types: bases as last synced,
-//! modifiers folded, and current values worked out.
+//! An actor's attributes, without their types: bases as last synced, modifiers
+//! folded, and current values worked out.
 
 mod fold;
 mod sum;
@@ -15,18 +15,19 @@ pub(crate) use self::fold::{Dirty, collect, fold};
 pub use self::sum::Breakdown;
 use self::sum::{Counts, Scoped, Sum};
 pub(crate) use self::systems::{publish, refresh, sync_base};
-use crate::context::AttributeContext;
-use crate::{AnyAttribute, AttributeRegistry, Limit, Modifier};
+use crate::modifier::Modifier;
+use crate::read::AttributeContext;
+use crate::registry::{AnyAttribute, AttributeRegistry, Limit};
 
-/// One read's walk through the attributes it reads: those being worked
-/// out, and those worked out already.
+/// One read's walk through the attributes it reads: those being worked out, and
+/// those worked out already.
 #[derive(Default)]
 struct Walk {
-    /// The attributes being worked out: one reading one of these again is
-    /// a cycle, cut there.
+    /// The attributes being worked out: one reading one of these again is a
+    /// cycle, cut there.
     visiting: Vec<Id<AnyAttribute>>,
-    /// Values worked out with no cycle cut beneath them: the same,
-    /// whatever reads them, so worked out once.
+    /// Values worked out with no cycle cut beneath them: the same, whatever
+    /// reads them, so worked out once.
     memo: HashMap<Id<AnyAttribute>, f32>,
     /// Whether a cycle was cut beneath the value being worked out.
     cut: bool,
@@ -58,12 +59,13 @@ struct Folded {
     scoped: Vec<Scoped>,
 }
 
-/// On an actor: its attributes, whatever their types. Each one's base, a
-/// cache of its [`Base`](crate::Base), which stays the truth; every
-/// modifier that counts for it, folded; and each value with nothing in
-/// play, as last worked out. What [`Current`](crate::Current) is written
-/// from, and [`AttributeReader`](crate::AttributeReader) and
-/// [`AttributeWorld`](crate::AttributeWorld) read: mettle's to keep, and
+/// On an actor: its attributes, whatever their types, as mettle keeps them.
+///
+/// Each one's base, a cache of its [`Base`](crate::Base), which stays the
+/// truth; every modifier that counts for it, folded; and each value with
+/// nothing in play, as last worked out. What [`Current`](crate::Current) is
+/// written from, and [`AttributeReader`](crate::read::AttributeReader) and
+/// [`AttributeWorld`](crate::read::AttributeWorld) read: mettle's to keep, and
 /// read only through them.
 #[derive(Component, Default)]
 #[require(OwnedTags)]
@@ -81,16 +83,15 @@ impl AttributeState {
         self.bases.contains_key(attribute)
     }
 
-    /// Sets `attribute`'s base: synced from its `Base`, or as an effect
-    /// changes it.
+    /// Sets `attribute`'s base: synced from its `Base`, or as an effect changes
+    /// it.
     pub(crate) fn set_base(&mut self, attribute: Id<AnyAttribute>, value: f32) {
         self.bases.insert(attribute, value);
         self.stale = true;
     }
 
     /// Folds `modifiers`, each with its source. One naming what `registry`
-    /// doesn't have, or whose numbers can't be, is skipped, with a
-    /// warning.
+    /// doesn't have, or whose numbers can't be, is skipped, with a warning.
     pub(crate) fn fold<'a>(
         &mut self,
         registry: &AttributeRegistry,
@@ -121,9 +122,9 @@ impl AttributeState {
         }
     }
 
-    /// `attribute`'s value in `context`, with the owner owning `owned`;
-    /// with nothing in play and nothing changed since it was last worked
-    /// out, as it was then.
+    /// `attribute`'s value in `context`, with the owner owning `owned`; with
+    /// nothing in play and nothing changed since it was last worked out, as it
+    /// was then.
     #[must_use]
     pub(crate) fn value(
         &self,
@@ -166,8 +167,8 @@ impl AttributeState {
         )
     }
 
-    /// Works out every value the actor has with nothing in play: whether
-    /// any changed.
+    /// Works out every value the actor has with nothing in play: whether any
+    /// changed.
     pub(crate) fn refresh(&mut self, registry: &AttributeRegistry, owned: &TagCounts) -> bool {
         let context = AttributeContext::new();
         let mut walk = Walk::default();
@@ -190,8 +191,8 @@ impl AttributeState {
         self.current.get(attribute).copied()
     }
 
-    /// `value` rounded as `attribute` is, and kept within its limits, read
-    /// with nothing in play.
+    /// `value` rounded as `attribute` is, and kept within its limits, read with
+    /// nothing in play.
     pub(crate) fn within_limits(
         &self,
         registry: &AttributeRegistry,
@@ -244,8 +245,8 @@ impl AttributeState {
             .unwrap_or_else(|| registry.get(attribute).map_or(0.0, |info| info.base))
     }
 
-    /// `attribute`'s modifiers in `context`, summed over its base: a `per`
-    /// one of the attributes being worked out doesn't count.
+    /// `attribute`'s modifiers in `context`, summed over its base: a `per` one
+    /// of the attributes being worked out doesn't count.
     fn sum(
         &self,
         registry: &AttributeRegistry,
