@@ -1,0 +1,46 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "bevy_mettle_core"
+description = "What bevy_mettle's crates share: gameplay tags and the tags an actor owns, curve tables, and the condition language"
+keywords = ["bevy", "gameplay", "tags", "game"]
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+
+[dependencies]
+# The Id derive
+bevy_mettle_macros = { workspace = true, features = [] }
+
+# Owned tags: a component, the events of its changes, and the system
+# telling them
+bevy_ecs = { workspace = true, features = [] }
+
+# Curves: what curve tables sample
+bevy_curve = { workspace = true, features = ["serialize"] }
+
+# (De)serialization
+serde = { workspace = true, features = ["derive"] }
+
+# Derive macros & utilities
+thiserror = { workspace = true, features = [] }
+
+# Hashing
+fnv = { workspace = true, features = [] }
+
+# Primitive datatypes
+smol_str = { workspace = true, features = ["serde"] }
+
+[dev-dependencies]
+# Definitions
+ron = { workspace = true, features = [] }
+
+[lints]
+workspace = true

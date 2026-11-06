@@ -1,0 +1,161 @@
+//! An attribute's modifiers summed, and those kept apart to weigh on reads.
+
+use bevy::prelude::*;
+use bevy_mettle_core::Id;
+use bevy_mettle_core::condition::Condition;
+use bevy_mettle_core::tag::TagCounts;
+use serde::{Deserialize, Serialize};
+
+use crate::context::{AttributeContext, Read};
+use crate::{AnyAttribute, Modifier, Operation};
+
+/// When a modifier counts, and how much: its expression, and whether it's
+/// local to its source.
+#[derive(Clone)]
+pub(super) struct Counts {
+    pub(super) condition: Option<Condition>,
+    pub(super) local: bool,
+    pub(super) source: Entity,
+}
+
+impl Counts {
+    pub(super) fn of(modifier: &Modifier, source: Entity) -> Self {
+        Self {
+            condition: modifier.condition.clone(),
+            local: modifier.local,
+            source,
+        }
+    }
+
+    /// How much it counts for `context`, with the owner owning `owned`: from
+    /// 0 to 1. A local one counts only for reads naming its source.
+    pub(super) fn weight(&self, context: &AttributeContext, owned: &TagCounts) -> f32 {
+        if self.local && context.source != Some(self.source) {
+            return 0.0;
+        }
+        self.condition
+            .as_ref()
+            .map_or(1.0, |condition| condition.weight(&Read { context, owned }))
+    }
+}
+
+/// A modifier that only sometimes counts.
+#[derive(Clone)]
+pub(super) struct Scoped {
+    pub(super) op: Operation,
+    pub(super) value: f32,
+    /// The attribute it's per, and how much of it makes one.
+    pub(super) per: Option<(Id<AnyAttribute>, f32)>,
+    pub(super) counts: Counts,
+    /// Where it comes, in its actor's modifiers: of `Base`s and
+    /// `Override`s, the last counts.
+    pub(super) order: u32,
+}
+
+/// An attribute's modifiers, summed: what a read reports apart, for an
+/// attacker's and a target's to be combined, or a tooltip.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Breakdown {
+    /// The base: set, or replaced by a `Base` modifier.
+    pub base: f32,
+    /// Σ flat.
+    pub flat: f32,
+    /// Σ additive.
+    pub additive: f32,
+    /// Π (1 + multiplicative).
+    pub multiplier: f32,
+    /// Σ divide.
+    pub divide: f32,
+    /// Σ unscaled.
+    pub unscaled: f32,
+    /// The override, if any.
+    pub overriding: Option<f32>,
+}
+
+impl Breakdown {
+    /// `((base + Σ flat) × (1 + Σ additive) × Π (1 + multiplicative) /
+    /// (1 + Σ divide)) + Σ unscaled`, or the override. Less than -100%
+    /// additive leaves nothing, not less; -100% divide or less divides by
+    /// next to nothing.
+    #[must_use]
+    pub fn total(&self) -> f32 {
+        if let Some(value) = self.overriding {
+            return value;
+        }
+        (self.base + self.flat) * (1.0 + self.additive).max(0.0) * self.multiplier
+            / (1.0 + self.divide).max(f32::EPSILON)
+            + self.unscaled
+    }
+}
+
+/// An attribute's always-counting modifiers, summed. A `Base` or an
+/// `Override` is kept with where it comes, so the last counts however
+/// they're summed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Sum {
+    base: Option<(u32, f32)>,
+    flat: f32,
+    additive: f32,
+    multiplier: f32,
+    divide: f32,
+    unscaled: f32,
+    overriding: Option<(u32, f32)>,
+}
+
+impl Default for Sum {
+    fn default() -> Self {
+        Self {
+            base: None,
+            flat: 0.0,
+            additive: 0.0,
+            multiplier: 1.0,
+            divide: 0.0,
+            unscaled: 0.0,
+            overriding: None,
+        }
+    }
+}
+
+impl Sum {
+    /// Adds `value` by `op`, counted `weight` of itself: an amount scaled
+    /// by it, a base or an override only in full.
+    pub(super) fn add_weighted(&mut self, op: Operation, value: f32, weight: f32, order: u32) {
+        if !op.whole() || weight >= 1.0 {
+            self.add(op, value * weight, order);
+        }
+    }
+
+    /// Adds `value` by `op`, the modifier coming `order`th.
+    pub(super) fn add(&mut self, op: Operation, value: f32, order: u32) {
+        match op {
+            Operation::Base => self.base = later(self.base, Some((order, value))),
+            Operation::Flat => self.flat += value,
+            Operation::Additive => self.additive += value,
+            Operation::Multiplicative => self.multiplier *= (1.0 + value).max(0.0),
+            Operation::Divide => self.divide += value,
+            Operation::Unscaled => self.unscaled += value,
+            Operation::Override => self.overriding = later(self.overriding, Some((order, value))),
+        }
+    }
+
+    /// The sum over `base`, unless a `Base` modifier replaces it.
+    pub(super) fn over(&self, base: f32) -> Breakdown {
+        Breakdown {
+            base: self.base.map_or(base, |(_, value)| value),
+            flat: self.flat,
+            additive: self.additive,
+            multiplier: self.multiplier,
+            divide: self.divide,
+            unscaled: self.unscaled,
+            overriding: self.overriding.map(|(_, value)| value),
+        }
+    }
+}
+
+/// Of two values kept with where they come, the later.
+fn later(one: Option<(u32, f32)>, other: Option<(u32, f32)>) -> Option<(u32, f32)> {
+    match (one, other) {
+        (Some(one), Some(other)) => Some(if other.0 >= one.0 { other } else { one }),
+        (one, other) => one.or(other),
+    }
+}

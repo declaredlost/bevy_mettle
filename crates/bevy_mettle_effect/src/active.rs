@@ -1,0 +1,119 @@
+//! Effects on their targets.
+
+use std::sync::Arc;
+
+use bevy::ecs::lifecycle::HookContext;
+use bevy::ecs::world::DeferredWorld;
+use bevy::prelude::*;
+use bevy_mettle_core::Id;
+use bevy_mettle_core::tag::{OwnedTags, TagCounts, Tags};
+
+use crate::{Effect, EffectSpec};
+
+/// An effect on its target (Unreal's active gameplay effect): an entity
+/// of its own, [`EffectOf`] the target. While it counts, it carries its
+/// modifiers as [`Modifiers`](bevy_mettle_attribute::Modifiers)
+/// [`ModifierOf`](bevy_mettle_attribute::ModifierOf) the target, and the
+/// target owns the tags it grants; while it's inhibited, neither, and its
+/// time stands still.
+#[derive(Component, Debug)]
+#[component(on_discard = take_back)]
+pub struct ActiveEffect {
+    pub(crate) spec: EffectSpec,
+    pub(crate) def: Arc<Effect>,
+    pub(crate) stacks: u32,
+    /// How long it lasts in full, if not forever.
+    pub(crate) duration: Option<f32>,
+    pub(crate) remaining: Option<f32>,
+    /// How often it executes, if it does.
+    pub(crate) period: Option<f32>,
+    pub(crate) until_period: f32,
+    pub(crate) inhibited: bool,
+    /// The tags it granted, to take back.
+    pub(crate) granted: Tags,
+    /// What its source owned as it applied.
+    pub(crate) source_tags: TagCounts,
+}
+
+impl ActiveEffect {
+    /// What was applied.
+    #[must_use]
+    pub fn spec(&self) -> &EffectSpec {
+        &self.spec
+    }
+
+    /// Its definition.
+    #[must_use]
+    pub fn def(&self) -> &Effect {
+        &self.def
+    }
+
+    /// Its effect's id.
+    #[must_use]
+    pub fn id(&self) -> &Id<Effect> {
+        &self.def.id
+    }
+
+    /// How many stacks of it there are.
+    #[must_use]
+    pub fn stacks(&self) -> u32 {
+        self.stacks
+    }
+
+    /// The seconds it has left, if it doesn't last forever.
+    #[must_use]
+    pub fn remaining(&self) -> Option<f32> {
+        self.remaining
+    }
+
+    /// Whether it's inhibited: its ongoing requirement doesn't hold.
+    #[must_use]
+    pub fn is_inhibited(&self) -> bool {
+        self.inhibited
+    }
+}
+
+/// Takes back the tags `ActiveEffect` granted, as it's taken off its
+/// entity however: despawned with its target, or replicated away.
+fn take_back(mut world: DeferredWorld, context: HookContext) {
+    let Some(active) = world.get::<ActiveEffect>(context.entity) else {
+        return;
+    };
+    if active.granted.is_empty() {
+        return;
+    }
+    let granted = active.granted.clone();
+    let Some(target) = world.get::<EffectOf>(context.entity).map(|of| of.0) else {
+        return;
+    };
+    if let Some(mut owned) = world.get_mut::<OwnedTags>(target) {
+        owned.remove_all(&granted);
+    }
+}
+
+/// On an active effect: its target.
+#[derive(
+    Component,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize
+)]
+#[relationship(relationship_target = ActiveEffects)]
+pub struct EffectOf(pub Entity);
+
+/// On an actor: the effects on it. Kept by [`EffectOf`]; despawning the
+/// actor despawns them.
+#[derive(Component, Debug, Default)]
+#[relationship_target(relationship = EffectOf, linked_spawn)]
+pub struct ActiveEffects(Vec<Entity>);
+
+impl ActiveEffects {
+    /// The effects, in the order they were applied.
+    pub fn iter(&self) -> impl Iterator<Item = Entity> + '_ {
+        self.0.iter().copied()
+    }
+}

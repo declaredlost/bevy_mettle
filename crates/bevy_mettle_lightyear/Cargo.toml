@@ -1,0 +1,40 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "bevy_mettle_lightyear"
+description = "bevy_mettle over lightyear: its replicas and bases replicated, ability requests and replies sent, and who may ask checked"
+keywords = ["bevy", "lightyear", "multiplayer", "gameplay"]
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+
+[dependencies]
+# What's replicated and sent
+bevy_mettle_attribute = { workspace = true, features = [] }
+bevy_mettle_effect = { workspace = true, features = [] }
+bevy_mettle_ability = { workspace = true, features = [] }
+
+# Game engine
+bevy = { workspace = true, features = [] }
+
+# Networking
+lightyear = { workspace = true, features = ["client", "server", "replication"] }
+
+[dev-dependencies]
+# States, which lightyear's plugins need
+bevy = { workspace = true, features = ["bevy_state"] }
+
+# An in-process client and server for the tests
+lightyear = { workspace = true, features = ["client", "server", "replication", "crossbeam", "netcode"] }
+bevy_mettle_core = { workspace = true, features = [] }
+bevy_replicon = { workspace = true, features = ["client"] }
+
+[lints]
+workspace = true

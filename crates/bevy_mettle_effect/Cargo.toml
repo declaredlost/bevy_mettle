@@ -1,0 +1,32 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "bevy_mettle_effect"
+description = "bevy_mettle's effects, as in Unreal's Gameplay Ability System: instant, timed, infinite and periodic effects, stacking, granted tags, immunity"
+keywords = ["bevy", "effects", "buffs", "gameplay"]
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+
+[dependencies]
+# The schema, tags, curves and the condition language
+bevy_mettle_core = { workspace = true, features = [] }
+
+# Attributes, which effects change
+bevy_mettle_attribute = { workspace = true, features = [] }
+
+# Game engine
+bevy = { workspace = true, features = ["bevy_log", "serialize"] }
+
+# (De)serialization
+serde = { workspace = true, features = ["derive"] }
+
+[lints]
+workspace = true

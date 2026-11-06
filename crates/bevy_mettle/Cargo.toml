@@ -1,0 +1,50 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "bevy_mettle"
+description = "A gameplay framework for Bevy in the spirit of Unreal's Gameplay Ability System: attributes, effects and abilities, its crates behind features"
+keywords = ["bevy", "gameplay", "attributes", "abilities"]
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+
+[features]
+default = ["attribute", "effect", "ability"]
+# Attributes: bases, modifiers, reads
+attribute = ["dep:bevy_mettle_attribute"]
+# Effects: instant, timed, periodic, stacking
+effect = ["attribute", "dep:bevy_mettle_effect"]
+# Abilities: granted, activated, committed, ended
+ability = ["effect", "dep:bevy_mettle_ability"]
+
+[dependencies]
+# The schema, tags and the condition language
+bevy_mettle_core = { workspace = true, features = [] }
+
+# What the features bring
+bevy_mettle_ability = { workspace = true, features = [], optional = true }
+bevy_mettle_attribute = { workspace = true, features = [], optional = true }
+bevy_mettle_effect = { workspace = true, features = [], optional = true }
+
+[dev-dependencies]
+# Game engine
+bevy = { workspace = true, features = [] }
+
+# (De)serialization
+serde = { workspace = true, features = ["derive"] }
+
+# Testing the plugin in a real app
+bevy_harness = { workspace = true, features = [] }
+
+# Definitions as a game would write them
+ron = { workspace = true, features = [] }
+
+[lints]
+workspace = true

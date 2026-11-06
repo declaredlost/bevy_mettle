@@ -1,0 +1,193 @@
+//! Reading attributes in context, in systems and on the world.
+
+use bevy::ecs::system::SystemParam;
+use bevy::prelude::*;
+use bevy_mettle_core::Id;
+use bevy_mettle_core::tag::OwnedTags;
+
+use crate::{
+    AnyAttribute, Attribute, AttributeContext, AttributeRegistry, AttributeState, Breakdown,
+    Operation,
+};
+
+/// Actors' attributes, read in context: a hit's tags, its target's, the
+/// facts it supplies, its source. With nothing in play, read
+/// [`Current`](crate::Current) instead.
+///
+/// ```ignore
+/// fn strike(attributes: AttributeReader) {
+///     let context = AttributeContext::new().tag("delivery.attack").fact("fact.flown", 7.0);
+///     let damage = attributes.value::<Damage>(caster, &context);
+///     let fire = AttributeContext::new().tag("damage.elemental.fire");
+///     let resistance = attributes.value::<Resistance>(target, &fire);
+/// }
+/// ```
+#[derive(SystemParam)]
+pub struct AttributeReader<'w, 's> {
+    registry: Res<'w, AttributeRegistry>,
+    actors: Query<'w, 's, (&'static AttributeState, &'static OwnedTags)>,
+}
+
+impl AttributeReader<'_, '_> {
+    /// `actor`'s `A` in `context`, if it has `A`.
+    #[must_use]
+    pub fn value<A: Attribute>(&self, actor: Entity, context: &AttributeContext) -> Option<f32> {
+        self.value_at(actor, &A::ID, context)
+    }
+
+    /// `actor`'s `attribute` in `context`, if it has it.
+    #[must_use]
+    pub fn value_at(
+        &self,
+        actor: Entity,
+        attribute: &Id<AnyAttribute>,
+        context: &AttributeContext,
+    ) -> Option<f32> {
+        let (state, owned) = self.actors.get(actor).ok()?;
+        state
+            .has(attribute)
+            .then(|| state.value(&self.registry, owned, attribute, context))
+    }
+
+    /// `actor`'s `A`'s modifiers in `context`, summed but not applied: for
+    /// an attacker's and a target's to be combined, or a tooltip.
+    #[must_use]
+    pub fn breakdown<A: Attribute>(
+        &self,
+        actor: Entity,
+        context: &AttributeContext,
+    ) -> Option<Breakdown> {
+        self.breakdown_at(actor, &A::ID, context)
+    }
+
+    /// `actor`'s `attribute`'s modifiers in `context`, summed but not
+    /// applied.
+    #[must_use]
+    pub fn breakdown_at(
+        &self,
+        actor: Entity,
+        attribute: &Id<AnyAttribute>,
+        context: &AttributeContext,
+    ) -> Option<Breakdown> {
+        let (state, owned) = self.actors.get(actor).ok()?;
+        state
+            .has(attribute)
+            .then(|| state.breakdown(&self.registry, owned, attribute, context))
+    }
+
+    /// `actor`'s owned tags, if it has attributes.
+    #[must_use]
+    pub fn owned(&self, actor: Entity) -> Option<&OwnedTags> {
+        self.actors.get(actor).ok().map(|(_, owned)| owned)
+    }
+}
+
+/// Reading and changing attributes on the world, without their types: for
+/// exclusive systems, effects and tests.
+pub trait AttributeWorld {
+    /// `actor`'s `attribute` in `context`, if it has it.
+    fn value_at(
+        &self,
+        actor: Entity,
+        attribute: &Id<AnyAttribute>,
+        context: &AttributeContext,
+    ) -> Option<f32>;
+
+    /// `actor`'s `attribute`'s modifiers in `context`, summed but not
+    /// applied.
+    fn breakdown_at(
+        &self,
+        actor: Entity,
+        attribute: &Id<AnyAttribute>,
+        context: &AttributeContext,
+    ) -> Option<Breakdown>;
+
+    /// Changes `actor`'s `attribute`'s base by `op` and `value`, as an
+    /// instant effect does (damage taken off life), rounded and kept
+    /// within its limits: `Flat` and `Unscaled` add, `Additive` and
+    /// `Multiplicative` scale, `Divide` divides, `Base` and `Override` set.
+    /// Whether it has `attribute`.
+    fn apply_to_base(
+        &mut self,
+        actor: Entity,
+        attribute: &Id<AnyAttribute>,
+        op: Operation,
+        value: f32,
+    ) -> bool;
+
+    /// `actor`'s `attribute`'s base, if it has it.
+    fn base_at(&self, actor: Entity, attribute: &Id<AnyAttribute>) -> Option<f32>;
+}
+
+impl AttributeWorld for World {
+    fn value_at(
+        &self,
+        actor: Entity,
+        attribute: &Id<AnyAttribute>,
+        context: &AttributeContext,
+    ) -> Option<f32> {
+        let registry = self.get_resource::<AttributeRegistry>()?;
+        let state = self.get::<AttributeState>(actor)?;
+        let owned = self.get::<OwnedTags>(actor)?;
+        state
+            .has(attribute)
+            .then(|| state.value(registry, owned, attribute, context))
+    }
+
+    fn breakdown_at(
+        &self,
+        actor: Entity,
+        attribute: &Id<AnyAttribute>,
+        context: &AttributeContext,
+    ) -> Option<Breakdown> {
+        let registry = self.get_resource::<AttributeRegistry>()?;
+        let state = self.get::<AttributeState>(actor)?;
+        let owned = self.get::<OwnedTags>(actor)?;
+        state
+            .has(attribute)
+            .then(|| state.breakdown(registry, owned, attribute, context))
+    }
+
+    fn base_at(&self, actor: Entity, attribute: &Id<AnyAttribute>) -> Option<f32> {
+        let registry = self.get_resource::<AttributeRegistry>()?;
+        (registry.get(attribute)?.get_base)(self, actor)
+    }
+
+    fn apply_to_base(
+        &mut self,
+        actor: Entity,
+        attribute: &Id<AnyAttribute>,
+        op: Operation,
+        value: f32,
+    ) -> bool {
+        let Some(registry) = self.get_resource::<AttributeRegistry>().cloned() else {
+            return false;
+        };
+        let Some(info) = registry.get(attribute) else {
+            return false;
+        };
+        let Some(base) = (info.get_base)(self, actor) else {
+            return false;
+        };
+        let changed = match op {
+            Operation::Base | Operation::Override => value,
+            Operation::Flat | Operation::Unscaled => base + value,
+            Operation::Additive | Operation::Multiplicative => base * (1.0 + value),
+            Operation::Divide => base / (1.0 + value).max(f32::EPSILON),
+        };
+        let kept = match (
+            self.get::<AttributeState>(actor),
+            self.get::<OwnedTags>(actor),
+        ) {
+            (Some(state), Some(owned)) => {
+                state.within_limits(&registry, owned.counts(), attribute, changed)
+            }
+            _ => changed,
+        };
+        (info.set_base)(self, actor, kept);
+        if let Some(mut state) = self.get_mut::<AttributeState>(actor) {
+            state.set_base(attribute.clone(), kept);
+        }
+        true
+    }
+}

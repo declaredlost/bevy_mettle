@@ -1,0 +1,35 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "bevy_mettle_ability"
+description = "bevy_mettle's abilities, as in Unreal's Gameplay Ability System: granted, activated, committed and ended, their behaviours in code"
+keywords = ["bevy", "abilities", "skills", "gameplay"]
+
+version = { workspace = true }
+rust-version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+
+[dependencies]
+# Tags and the condition language
+bevy_mettle_core = { workspace = true, features = [] }
+
+# Attributes, which costs are paid in, and owned tags
+bevy_mettle_attribute = { workspace = true, features = [] }
+
+# Effects, which costs and cooldowns are
+bevy_mettle_effect = { workspace = true, features = [] }
+
+# Game engine
+bevy = { workspace = true, features = ["bevy_log", "serialize"] }
+
+# (De)serialization
+serde = { workspace = true, features = ["derive"] }
+
+[lints]
+workspace = true
