@@ -1078,7 +1078,7 @@ dependencies = [
 [[package]]
 name = "bevy_harness"
 version = "0.1.0"
-source = "git+https://github.com/declaredlost/bevy_harness#67cab0b3dbafe33255d89c235013b823f03c2260"
+source = "git+https://github.com/declaredlost/bevy_harness#1e84a896f0381993bdc1cbac090ecd0fbed383a8"
 dependencies = [
  "bevy",
  "bevy_harness_macros",
@@ -1087,7 +1087,7 @@ dependencies = [
 [[package]]
 name = "bevy_harness_macros"
 version = "0.1.0"
-source = "git+https://github.com/declaredlost/bevy_harness#67cab0b3dbafe33255d89c235013b823f03c2260"
+source = "git+https://github.com/declaredlost/bevy_harness#1e84a896f0381993bdc1cbac090ecd0fbed383a8"
 dependencies = [
  "proc-macro2",
  "quote",
