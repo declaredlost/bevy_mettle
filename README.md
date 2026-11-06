@@ -7,8 +7,6 @@
 [![Build](https://img.shields.io/github/actions/workflow/status/declaredlost/bevy_mettle/build.yml?branch=main&label=build&style=flat-square)](https://github.com/declaredlost/bevy_mettle/actions/workflows/build.yml)
 [![Security](https://img.shields.io/github/actions/workflow/status/declaredlost/bevy_mettle/security.yml?branch=main&label=security&style=flat-square)](https://github.com/declaredlost/bevy_mettle/actions/workflows/security.yml)
 
-[**github.com/declaredlost**](https://github.com/declaredlost)
-
 </div>
 
 Attributes, effects and abilities, data first like GAS: attributes are the
