@@ -34,6 +34,11 @@ allow_attributes = "deny"
 allow_attributes_without_reason = "deny"
 # Bevy systems take `Res`, `Query` and `Commands` by value by design.
 needless_pass_by_value = "allow"
+# Bevy systems naturally have many resource params and complex `Query`
+# types: these lints fire on idiomatic Bevy code, so they're allowed
+# workspace-wide rather than per system.
+too_many_arguments = "allow"
+type_complexity = "allow"
 
 [workspace.dependencies]
 # Default features are disabled for certain dependencies to allow
