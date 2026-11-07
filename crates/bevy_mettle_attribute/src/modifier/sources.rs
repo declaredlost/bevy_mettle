@@ -52,3 +52,11 @@ impl ModifierSources {
         self.0.iter().copied()
     }
 }
+
+/// On a source of modifiers: that they're a prediction, not the authority's.
+///
+/// While one counts for a [`Remote`](crate::authority::Remote) actor, the
+/// actor shows its own values, the prediction, not those served.
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq, Reflect)]
+#[reflect(Component, Clone, Debug, Default, PartialEq)]
+pub struct Provisional;

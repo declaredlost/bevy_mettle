@@ -123,7 +123,10 @@ what it says to.
   effects, and lets the rest give way to the server's state, so it's
   called once that state has arrived; `reject_prediction` undoes all of
   it. Once an activation is answered, nothing more is predicted under it.
-  Abilities do both as the server answers.
+  Abilities do both as the server answers. What's predicted (an effect,
+  an instant change's modifier, a stack on the server's effect) is
+  `Provisional`: while it counts, a `Remote` actor shows its own values,
+  the prediction, rather than those the server serves.
 
 [`EffectApplied`]: events::EffectApplied
 [`EffectBlocked`]: events::EffectBlocked

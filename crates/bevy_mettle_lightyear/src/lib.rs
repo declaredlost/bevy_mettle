@@ -11,7 +11,9 @@ use bevy_mettle_ability::AbilitySystems;
 use bevy_mettle_ability::active::AbilityOf;
 use bevy_mettle_ability::events::Failure;
 use bevy_mettle_ability::net::{AbilityReplica, AbilityReply, AbilityRequest};
-use bevy_mettle_attribute::{Attribute, Base};
+use bevy_mettle_attribute::authority::{self, Served};
+use bevy_mettle_attribute::registry::AttributeState;
+use bevy_mettle_attribute::{Attribute, Base, Current};
 use bevy_mettle_effect::active::EffectOf;
 use bevy_mettle_effect::net::{EffectReplica, NetRole};
 use bevy_replicon::client::ClientSystems;
@@ -86,24 +88,57 @@ impl Plugin for MettleNetPlugin {
             .add_systems(
                 Update,
                 (
-                    ask.run_if(resource_equals(NetRole::Client)),
+                    (ask, remote).run_if(resource_equals(NetRole::Client)),
                     (reply, replicate).run_if(resource_equals(NetRole::Server)),
                 ),
             );
     }
 }
 
-/// Replicating attributes' bases over lightyear: `replicate_attribute::<A>()`.
+/// Replicating attributes over lightyear: `replicate_attribute::<A>()`.
 pub trait MettleNetApp {
-    /// Replicates `A`'s [`Base`] from the server: what clients' values are
-    /// worked out from.
+    /// Replicates `A` from the server: its [`Base`], what predictions are
+    /// worked out on, and its [`Served`] value, what clients show.
+    ///
+    /// On the server, every actor with `Base<A>` serves `A`.
     fn replicate_attribute<A: Attribute>(&mut self) -> &mut Self;
 }
 
 impl MettleNetApp for App {
     fn replicate_attribute<A: Attribute>(&mut self) -> &mut Self {
         self.component::<Base<A>>().replicate();
-        self
+        self.component::<Served<A>>().replicate();
+        self.add_systems(Update, serve::<A>.run_if(resource_equals(NetRole::Server)))
+    }
+}
+
+/// On a server: has each actor with `A` serve it, from its value now.
+fn serve<A: Attribute>(
+    mut commands: Commands,
+    actors: Query<(Entity, &Current<A>), (With<Base<A>>, Without<Served<A>>)>,
+) {
+    for (actor, current) in &actors {
+        commands
+            .entity(actor)
+            .insert(Served::<A>::new(current.get()));
+    }
+}
+
+/// On a client: marks each actor replicated from the server
+/// [`Remote`](authority::Remote), so it shows the values served.
+fn remote(
+    mut commands: Commands,
+    actors: Query<
+        Entity,
+        (
+            With<Replicated>,
+            With<AttributeState>,
+            Without<authority::Remote>,
+        ),
+    >,
+) {
+    for actor in &actors {
+        commands.entity(actor).insert(authority::Remote);
     }
 }
 

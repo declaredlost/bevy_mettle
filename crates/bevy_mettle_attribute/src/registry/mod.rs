@@ -153,6 +153,7 @@ impl AttributeApp for App {
         }
         self.register_type::<crate::Base<A>>()
             .register_type::<crate::Current<A>>()
+            .register_type::<crate::authority::Served<A>>()
             .add_observer(crate::registry::state::remove_base::<A>);
         let schedule = self
             .world()
@@ -161,8 +162,17 @@ impl AttributeApp for App {
         self.add_systems(
             schedule,
             (
-                crate::registry::state::sync_base::<A>.in_set(crate::plugin::Phase::Sync),
-                crate::registry::state::publish::<A>.in_set(crate::plugin::Phase::Publish),
+                (
+                    crate::registry::state::sync_base::<A>,
+                    crate::authority::sync_served::<A>,
+                )
+                    .in_set(crate::plugin::Phase::Sync),
+                (
+                    crate::registry::state::publish::<A>,
+                    crate::authority::serve::<A>,
+                )
+                    .chain()
+                    .in_set(crate::plugin::Phase::Publish),
             ),
         )
     }

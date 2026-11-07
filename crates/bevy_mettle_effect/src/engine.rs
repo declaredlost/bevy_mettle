@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use bevy::prelude::*;
-use bevy_mettle_attribute::modifier::{Modifier, ModifierOf, Modifiers};
+use bevy_mettle_attribute::modifier::{Modifier, ModifierOf, Modifiers, Provisional};
 use bevy_mettle_attribute::read::AttributeContext;
 use bevy_mettle_core::Id;
 use bevy_mettle_core::condition::Context;
@@ -351,7 +351,10 @@ fn stack(
         if world.get::<net::Proxy>(existing).is_some()
             && let Some(mut active) = world.get_mut::<ActiveEffect>(existing)
         {
+            // The server's, with a stack predicted on top: a prediction too,
+            // until that stack settles.
             active.predicted += 1;
+            world.entity_mut(existing).insert(Provisional);
         }
         net::stacked(world, activation, existing);
     }
@@ -887,6 +890,9 @@ pub(crate) fn unstack(world: &mut World, registry: &EffectRegistry, effect: Enti
         if active.predicted > 0 {
             active.predicted -= 1;
             active.stacks = active.stacks.saturating_sub(1).max(1);
+            if active.predicted == 0 {
+                world.entity_mut(effect).remove::<Provisional>();
+            }
             refresh(world, registry, effect);
         }
     } else if active.stacks > 1 {

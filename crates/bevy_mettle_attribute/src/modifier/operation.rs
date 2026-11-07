@@ -10,15 +10,18 @@ use serde::{Deserialize, Serialize};
 /// ```
 ///
 /// unless overridden, then rounded and kept within its limits. Of `Base`s and
-/// `Override`s, the last counts: in the actor's own modifiers, then each
-/// source's, in the order the sources came. That order is this world's: a
-/// client's replicated sources can come in another order than the server's,
-/// so don't have two sources' overrides compete where clients have to agree.
+/// `Override`s, the one applied last counts, as Unreal's does: a source's as
+/// its `ModifierOf` was last set (an effect applied, an item equipped), the
+/// actor's own as its `Modifiers` was added; within one, the later in its
+/// list; sources applied in one tick, by entity. On the server that's exact,
+/// and it decides: a client shows the values the server serves
+/// ([`Served`](crate::authority::Served)), not its own fold, but while it
+/// predicts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[derive(Serialize, Deserialize, Reflect)]
 #[reflect(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub enum Operation {
-    /// Replaces the base: the last one counts.
+    /// Replaces the base: the one applied last counts.
     Base,
     /// Added to the base.
     Flat,
@@ -34,7 +37,7 @@ pub enum Operation {
     Divide,
     /// Added after everything else: "+10 damage, not affected by increases".
     Unscaled,
-    /// The value, whatever else there is: the last one counts.
+    /// The value, whatever else there is: the one applied last counts.
     Override,
 }
 

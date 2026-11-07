@@ -57,11 +57,12 @@ fn health_bars(lives: Query<&Current<Life>, Changed<Current<Life>>>) {
 
 At the root: [`Attribute`] (and its derive), [`AttributePlugin`],
 [`AttributeSystems`], [`AttributeApp`], [`Base`] and [`Current`]. The rest is
-in three modules, and [`prelude`] brings in what using attributes takes:
+in four modules, and [`prelude`] brings in what using attributes takes:
 
 | Module | What's in it |
 |---|---|
-| [`modifier`] | `Modifier`, `Modifiers` and the sources they sit on, `Operation`, `Per` |
+| [`authority`] | Whose values an actor shows: `Served`, `Remote` |
+| [`modifier`] | `Modifier`, `Modifiers` and the sources they sit on, `Operation`, `Per`, `Provisional` |
 | [`read`] | Reads in context: `AttributeContext`, `AttributeReader`, `AttributeWorld`, `Breakdown`, guards |
 | [`registry`] | The untyped layer: `AttributeRegistry`, `AnyAttribute`, `Limit`, `Rounding`, `AttributeState`, `AttributeChanged` |
 
@@ -114,6 +115,19 @@ can name it, and actors with its [`Base`] have its [`Current`] kept.
   worked out isn't a change; what only some reads see (a fire hit's
   resistance) isn't told.
 
+## Served values
+
+Which values an actor shows, from [`authority`]: an actor's own world works
+them out, and keeps [`Served<A>`](authority::Served) as its `Current<A>`
+for a server to replicate. On a client, an actor marked
+[`Remote`](authority::Remote) shows its `Served<A>` as its `Current<A>`
+and its reads with nothing in play, rather than folding the modifiers
+replicated to it; but while a [`Provisional`](modifier::Provisional)
+source, a prediction, counts for it, it shows its own fold. Reads in
+context (a hit's tags) are worked out where they're read: on a client,
+they're advisory, as Unreal's are. `AttributeChanged` is told as the
+value shown changes, whichever it comes from.
+
 Two attribute types can't share a name: adding the second panics. The
 components are reflected and registered, for inspectors and scenes.
 
@@ -126,21 +140,21 @@ An attribute is
 ```
 
 or its override, then rounded and kept within its limits (the limits
-win). Of `Base`s and `Override`s, the last counts: in the actor's own
-modifiers, then each source's, in the order the sources came. That order
-is the world's own: a client can have replicated sources in another
-order than the server, so don't have sources' overrides compete where
-clients have to agree.
+win). Of `Base`s and `Override`s, the one applied last counts, as in
+Unreal: a source's as its `ModifierOf` was last set (an effect applied,
+an item equipped), the actor's own as its `Modifiers` was added; within
+one, the later in its list; sources applied in the same tick, by entity.
+On the server this is exact, and the server decides (below).
 
 | Op | What it does |
 |---|---|
-| `Base` | Replaces the base; the last counts |
+| `Base` | Replaces the base; the one applied last counts |
 | `Flat` | Added to the base |
 | `Additive` | A fraction, summed with the others of its kind: +20% and +30% are +50% ("increased") |
 | `Multiplicative` | A fraction, multiplied in on its own: +20% and +30% are +56% ("more") |
 | `Divide` | A fraction, summed, then divided by: +100% halves it, more never reaches 0 (cooldown recovery); -99% or less divides by 0.01 |
 | `Unscaled` | Added after everything, scaled by nothing |
-| `Override` | The value, whatever else there is; the last counts |
+| `Override` | The value, whatever else there is; the one applied last counts |
 
 `Modifier::flat::<Damage>(5.0)`. A modifier can count while a `Condition`
 holds, and as much as it does (`read_tagged`, `owner_has`);

@@ -141,3 +141,61 @@ fn a_base_or_an_override_per_something_is_skipped() {
     assert!(close(get::<Damage>(&app, npc), 10.0), "not replaced by 0");
     assert!(close(get::<Life>(&app, npc), 50.0));
 }
+
+#[test]
+fn of_overrides_the_one_applied_last_counts_whatever_came_first() {
+    let mut app = app();
+    let npc = actor(&mut app, []);
+    let ring = app.spawn((
+        ModifierOf(npc),
+        Modifiers(vec![Modifier::overriding::<Damage>(2.0)]),
+    ));
+    app.tick();
+    assert!(close(get::<Damage>(&app, npc), 2.0));
+    // Its own, added after the ring was put on.
+    app.entity_mut(npc).remove::<Modifiers>();
+    app.tick();
+    app.entity_mut(npc)
+        .insert(Modifiers(vec![Modifier::overriding::<Damage>(1.0)]));
+    app.tick();
+    assert!(
+        close(get::<Damage>(&app, npc), 1.0),
+        "its own, applied after the ring"
+    );
+    app.entity_mut(ring).insert(ModifierOf(npc));
+    app.tick();
+    assert!(
+        close(get::<Damage>(&app, npc), 2.0),
+        "the ring put on again"
+    );
+}
+
+#[test]
+fn a_remote_actor_shows_what_it_is_served_but_while_it_predicts() {
+    let mut app = app();
+    let npc = actor(&mut app, []);
+    app.entity_mut(npc)
+        .insert((Remote, Served::<Damage>::new(42.0)));
+    app.tick();
+    let current =
+        |app: &bevy_harness::TestApp| app.world().get::<Current<Damage>>(npc).unwrap().get();
+    assert!(close(get::<Damage>(&app, npc), 42.0), "served");
+    assert!(close(current(&app), 42.0));
+    let read = AttributeContext::new().tag("damage");
+    assert!(
+        close(value::<Damage>(&app, npc, &read), 10.0),
+        "a read in context is worked out here"
+    );
+    let guess = app.spawn((
+        ModifierOf(npc),
+        Modifiers(vec![Modifier::flat::<Damage>(5.0)]),
+        Provisional,
+    ));
+    app.tick();
+    assert!(close(get::<Damage>(&app, npc), 15.0), "the prediction");
+    assert!(close(current(&app), 15.0));
+    app.entity_mut(guess).despawn();
+    app.tick();
+    assert!(close(get::<Damage>(&app, npc), 42.0), "served again");
+    assert!(close(current(&app), 42.0));
+}

@@ -75,6 +75,11 @@ struct Folded {
 /// [`AttributeWorld`](crate::read::AttributeWorld) read: mettle's to keep, and
 /// read only through them.
 ///
+/// On a [`Remote`](crate::authority::Remote) actor, each value with nothing
+/// in play is the one served, as [`Served`](crate::authority::Served) says,
+/// unless a [`Provisional`](crate::modifier::Provisional) source counts for
+/// it: then it's its own, the prediction.
+///
 /// Reflected for inspectors: its bases and values, not what's folded.
 #[derive(Component, Default, Reflect)]
 #[reflect(Component, Default)]
@@ -84,6 +89,12 @@ pub struct AttributeState {
     #[reflect(ignore)]
     folded: HashMap<Id<AnyAttribute>, Folded>,
     current: HashMap<Id<AnyAttribute>, f32>,
+    /// The values served by the authority, as synced from `Served`.
+    served: HashMap<Id<AnyAttribute>, f32>,
+    /// Whether the authority is another world: its values are served.
+    remote: bool,
+    /// Whether a prediction counts for it: its values are its own.
+    provisional: bool,
     stale: bool,
 }
 
@@ -92,6 +103,26 @@ impl AttributeState {
     #[must_use]
     pub(crate) fn has(&self, attribute: &Id<AnyAttribute>) -> bool {
         self.bases.contains_key(attribute)
+    }
+
+    /// Sets `attribute`'s value as served: synced from its `Served`.
+    pub(crate) fn set_served(&mut self, attribute: Id<AnyAttribute>, value: f32) {
+        self.served.insert(attribute, value);
+        self.stale = true;
+    }
+
+    /// Sets whether the actor's authority is another world.
+    pub(crate) fn set_remote(&mut self, remote: bool) {
+        self.remote = remote;
+        self.stale = true;
+    }
+
+    /// `attribute`'s value with nothing in play as served, if it's shown so:
+    /// the actor's remote, and no prediction counts for it.
+    fn shown_served(&self, attribute: &Id<AnyAttribute>) -> Option<f32> {
+        (self.remote && !self.provisional)
+            .then(|| self.served.get(attribute).copied())
+            .flatten()
     }
 
     /// `attribute`'s base as cached, if it's there.
@@ -113,14 +144,18 @@ impl AttributeState {
         self.stale = true;
     }
 
-    /// Folds `modifiers`, each with its source. One naming what `registry`
+    /// Folds `modifiers`, each with its source, in the order they were
+    /// applied. One naming what `registry`
     /// doesn't have, or whose numbers can't be, is skipped, with a warning.
+    /// `provisional` if any of them is a prediction.
     pub(crate) fn fold<'a>(
         &mut self,
         registry: &AttributeRegistry,
         modifiers: impl IntoIterator<Item = (Entity, &'a Modifier)>,
+        provisional: bool,
     ) {
         self.folded.clear();
+        self.provisional = provisional;
         self.stale = true;
         for (order, (source, modifier)) in (0u32..).zip(modifiers) {
             if let Err(error) = modifier.check_values(registry) {
@@ -146,8 +181,8 @@ impl AttributeState {
     }
 
     /// `attribute`'s value in `context`, with the owner owning `owned`; with
-    /// nothing in play and nothing changed since it was last worked out, as it
-    /// was then.
+    /// nothing in play, as served if it's shown so, or, with nothing changed
+    /// since it was last worked out, as it was then.
     #[must_use]
     pub(crate) fn value(
         &self,
@@ -156,6 +191,11 @@ impl AttributeState {
         attribute: &Id<AnyAttribute>,
         context: &AttributeContext,
     ) -> f32 {
+        if context.is_empty()
+            && let Some(value) = self.shown_served(attribute)
+        {
+            return value;
+        }
         if context.is_empty()
             && !self.stale
             && !owned.is_pending()
@@ -190,8 +230,8 @@ impl AttributeState {
         )
     }
 
-    /// Works out every value the actor has with nothing in play: whether any
-    /// changed.
+    /// Works out every value the actor has with nothing in play, or takes it
+    /// as served if it's shown so: whether any changed.
     pub(crate) fn refresh(&mut self, registry: &AttributeRegistry, owned: &TagCounts) -> bool {
         let context = AttributeContext::new();
         let mut walk = Walk::default();
@@ -199,7 +239,9 @@ impl AttributeState {
             .bases
             .keys()
             .map(|attribute| {
-                let value = self.eval(registry, owned, attribute, &context, &mut walk);
+                let value = self
+                    .shown_served(attribute)
+                    .unwrap_or_else(|| self.eval(registry, owned, attribute, &context, &mut walk));
                 (attribute.clone(), value)
             })
             .collect();

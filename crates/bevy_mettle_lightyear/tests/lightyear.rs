@@ -484,3 +484,87 @@ fn an_actor_not_replicated_has_its_effects_kept_back_too() {
     assert_eq!(replicas, 0, "nothing of an actor the client doesn't see");
     assert!(net.client.world().get::<Abilities>(here).is_some());
 }
+
+/// `here`'s mana as its `Current` says.
+fn current(app: &App, here: Entity) -> f32 {
+    app.world().get::<Current<Mana>>(here).unwrap().get()
+}
+
+#[test]
+fn a_client_shows_the_servers_override_whatever_order_its_sources_came_in() {
+    let mut net = Net::new();
+    let (there, here) = net.mage(true);
+    let ring = |net: &mut Net, value: f32| {
+        net.server
+            .world_mut()
+            .spawn((
+                ModifierOf(there),
+                Modifiers(vec![Modifier::overriding::<Mana>(value)]),
+                Replicate::to_clients(NetworkTarget::All),
+            ))
+            .id()
+    };
+    let first = ring(&mut net, 5.0);
+    net.step(10);
+    ring(&mut net, 15.0);
+    net.step(10);
+    assert!(
+        (Net::mana(&net.server, there) - 15.0).abs() < 1e-4,
+        "the last applied"
+    );
+    // On the client, the first ring comes (again) after the second.
+    let first = net
+        .client
+        .world()
+        .resource::<ServerEntityMap>()
+        .to_client()
+        .get(&first)
+        .copied()
+        .unwrap();
+    net.client
+        .world_mut()
+        .entity_mut(first)
+        .insert(ModifierOf(here));
+    net.step(2);
+    let read = AttributeContext::new().tag("state");
+    let local = net.client.world().value_at(here, &Mana::ID, &read).unwrap();
+    assert!((local - 5.0).abs() < 1e-4, "its own fold would say {local}");
+    assert!(
+        (Net::mana(&net.client, here) - 15.0).abs() < 1e-4,
+        "but it shows the server's"
+    );
+    assert!((current(&net.client, here) - 15.0).abs() < 1e-4);
+}
+
+#[test]
+fn a_prediction_shows_until_answered_then_the_served_value() {
+    let mut net = Net::new();
+    net.server
+        .insert_resource(ReplicationMetadata::new(Duration::from_millis(50)));
+    let (there, here) = net.mage(true);
+    // A source only the server has: what the client can't work out itself.
+    net.server.world_mut().spawn((
+        ModifierOf(there),
+        Modifiers(vec![Modifier::flat::<Mana>(100.0)]),
+    ));
+    net.step(20);
+    assert!((current(&net.client, here) - 130.0).abs() < 1e-4, "served");
+    net.client
+        .world_mut()
+        .activate_ability(here, "fireball")
+        .unwrap();
+    let mut answered = false;
+    for step in 0..30 {
+        net.step(1);
+        let shown = (Net::mana(&net.client, here), current(&net.client, here));
+        if (shown.0 - 110.0).abs() < 1e-4 && (shown.1 - 110.0).abs() < 1e-4 {
+            answered = true;
+        } else {
+            assert!(
+                !answered && (shown.0 - 10.0).abs() < 1e-4 && (shown.1 - 10.0).abs() < 1e-4,
+                "the prediction, then the served value, nothing between: {shown:?} at {step}"
+            );
+        }
+    }
+    assert!(answered, "served after the answer");
+}

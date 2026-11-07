@@ -8,7 +8,11 @@ pub use bevy_mettle_core::condition::Condition;
 pub use bevy_mettle_core::tag::{OwnedTags, Tag, TagAdded, TagCounts, TagRemoved, TagTree, Tags};
 
 #[doc(hidden)]
-pub use crate::modifier::{Modifier, ModifierOf, ModifierSources, Modifiers, Operation};
+pub use crate::authority::{Remote, Served};
+#[doc(hidden)]
+pub use crate::modifier::{
+    Modifier, ModifierOf, ModifierSources, Modifiers, Operation, Provisional,
+};
 #[doc(hidden)]
 pub use crate::read::{AttributeContext, AttributeReader, AttributeWorld, Breakdown};
 #[doc(hidden)]

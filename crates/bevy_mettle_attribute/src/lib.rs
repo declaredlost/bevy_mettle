@@ -2,6 +2,7 @@
 #![doc = include_str!("../README.md")]
 
 mod attribute;
+pub mod authority;
 pub mod modifier;
 mod plugin;
 pub mod prelude;

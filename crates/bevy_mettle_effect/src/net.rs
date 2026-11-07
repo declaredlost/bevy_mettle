@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::prelude::*;
-use bevy_mettle_attribute::modifier::{Modifier, ModifierOf, Modifiers, Operation};
+use bevy_mettle_attribute::modifier::{Modifier, ModifierOf, Modifiers, Operation, Provisional};
 use bevy_mettle_attribute::read::AttributeWorld;
 use bevy_mettle_core::tag::Tags;
 use serde::{Deserialize, Serialize};
@@ -36,7 +36,9 @@ pub enum NetRole {
 
 /// On a client's active effect: predicted under an activation, until settled.
 ///
-/// Until the server's own arrives or rejects it.
+/// Until the server's own arrives or rejects it. It's
+/// [`Provisional`] too: while it counts, its actor shows its own values, the
+/// prediction, not those the server serves.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PredictedUnder(pub u64);
 
@@ -169,7 +171,9 @@ fn log(world: &mut World, activation: u64, undo: Undo) {
 
 /// Notes `effect` spawned under `activation`, and marks it predicted.
 pub(crate) fn spawned(world: &mut World, activation: u64, effect: Entity) {
-    world.entity_mut(effect).insert(PredictedUnder(activation));
+    world
+        .entity_mut(effect)
+        .insert((PredictedUnder(activation), Provisional));
     log(world, activation, Undo::Effect(effect));
 }
 
@@ -256,6 +260,7 @@ pub(crate) fn change_base(
                 Modifiers(vec![flat(change, difference)]),
                 ModifierOf(actor),
                 PredictedUnder(activation),
+                Provisional,
             ))
             .id();
         log(world, activation, Undo::Overlay { actor, overlay });

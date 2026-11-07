@@ -51,8 +51,8 @@ pub(super) struct Scoped {
     /// The attribute it's per, and how much of it makes one.
     pub(super) per: Option<(Id<AnyAttribute>, f32)>,
     pub(super) counts: Counts,
-    /// Where it comes, in its actor's modifiers: of `Base`s and `Override`s,
-    /// the last counts.
+    /// Where it comes, its actor's modifiers in the order they were applied:
+    /// of `Base`s and `Override`s, the last counts.
     pub(super) order: u32,
 }
 

@@ -3,7 +3,8 @@ use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
 use bevy_mettle_core::tag::{OwnedTags, publish_tags};
 
-use crate::modifier::{ModifierOf, ModifierSources, Modifiers};
+use crate::authority::{self, Remote};
+use crate::modifier::{ModifierOf, ModifierSources, Modifiers, Provisional};
 use crate::registry::{AttributeRegistry, AttributeState, state};
 
 /// The system set attributes are kept in, `FixedPreUpdate` by default.
@@ -60,6 +61,8 @@ impl Plugin for AttributePlugin {
             .register_type::<ModifierSources>()
             .register_type::<OwnedTags>()
             .register_type::<AttributeState>()
+            .register_type::<Provisional>()
+            .register_type::<Remote>()
             .init_resource::<AttributeRegistry>()
             .init_resource::<state::Dirty>()
             .insert_resource(AttributeSchedule(self.schedule))
@@ -72,6 +75,7 @@ impl Plugin for AttributePlugin {
             .add_systems(
                 self.schedule,
                 (
+                    authority::sync_remote.in_set(Phase::Sync),
                     (state::collect, state::fold).chain().in_set(Phase::Fold),
                     (publish_tags, state::refresh)
                         .chain()

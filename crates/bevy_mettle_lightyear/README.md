@@ -22,9 +22,12 @@ commands.spawn((
 - **Replicated, server to clients**: every active effect's
   `EffectReplica` and every granted ability's `AbilityReplica`, with their
   `EffectOf` and `AbilityOf`, as their actor is (`ReplicateLike` it: to
-  whom it's visible, with it); and each actor's `Base<A>` the game asks
-  for. An effect's source is mapped. A client shows them; it never
-  decides them.
+  whom it's visible, with it); and each actor's `Base<A>` and
+  `Served<A>` the game asks for with `replicate_attribute`. On the server
+  every actor with `Base<A>` serves `A`; on the client every actor
+  replicated from the server is `Remote`, so it shows the server's values
+  rather than its own fold, but while it predicts. An effect's source is
+  mapped. A client shows them; it never decides them.
 - **Sent**: a client's `AbilityRequest`s to the server, on
   [`MettleChannel`] (reliable, ordered); the server's `AbilityReply` back
   to the client that asked, with the replication tick its state goes out
@@ -37,5 +40,6 @@ commands.spawn((
   `NotGranted`, so its prediction is undone), with a warning.
 
 The game replicates its actors (and their owned tags it sets, if clients
-read them); mettle's own state on them, folded modifiers and current
-values, is worked out on each side.
+read them); mettle's own state on them, folded modifiers, is worked out
+on each side, and a client's reads in context (a hit's tags) are its own,
+advisory.

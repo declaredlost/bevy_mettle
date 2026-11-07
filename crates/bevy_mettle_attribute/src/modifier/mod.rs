@@ -10,7 +10,7 @@ use bevy_mettle_core::{Id, MettleError};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub use self::operation::Operation;
-pub use self::sources::{ModifierOf, ModifierSources, Modifiers};
+pub use self::sources::{ModifierOf, ModifierSources, Modifiers, Provisional};
 use crate::Attribute;
 use crate::registry::{AnyAttribute, AttributeRegistry};
 
