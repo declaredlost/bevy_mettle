@@ -2,6 +2,8 @@
 
 use std::collections::BTreeMap;
 
+use bevy_reflect::prelude::*;
+
 use super::{Tag, Tags};
 use crate::Id;
 
@@ -10,22 +12,35 @@ use crate::Id;
 /// While its states hold. Each source of a tag (an effect granting it, the game
 /// marking the actor moving) adds one and takes its one away, so two effects
 /// granting `immune.stun` keep it until both are gone.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Reflect)]
+#[reflect(Clone, Debug, Default, PartialEq)]
 pub struct TagCounts {
     /// How many hold each tag, given or above one given.
     counts: BTreeMap<Id<Tag>, u32>,
+    /// How many hold each tag as given: what can be taken away.
+    given: BTreeMap<Id<Tag>, u32>,
 }
 
 impl TagCounts {
     /// One more source of `tag`.
     pub fn add(&mut self, tag: &Id<Tag>) {
+        *self.given.entry(tag.clone()).or_default() += 1;
         for tag in tag.lineage() {
             *self.counts.entry(tag).or_default() += 1;
         }
     }
 
     /// One fewer source of `tag`: gone with its last.
-    pub fn remove(&mut self, tag: &Id<Tag>) {
+    ///
+    /// Nothing for a tag not given, even one held under another: `false` then.
+    pub fn remove(&mut self, tag: &Id<Tag>) -> bool {
+        let Some(given) = self.given.get_mut(tag) else {
+            return false;
+        };
+        *given -= 1;
+        if *given == 0 {
+            self.given.remove(tag);
+        }
         for tag in tag.lineage() {
             if let Some(count) = self.counts.get_mut(&tag) {
                 *count -= 1;
@@ -34,6 +49,7 @@ impl TagCounts {
                 }
             }
         }
+        true
     }
 
     /// One more source of each of `tags`, as given.
@@ -104,5 +120,16 @@ mod tests {
         owned.add(&Id::from_static("immune.stun"));
         owned.add(&Id::from_static("immune.freeze"));
         assert_eq!(owned.count(&Id::from_static("immune")), 2);
+    }
+
+    #[test]
+    fn removing_a_tag_not_given_changes_nothing() {
+        let immune = Id::<Tag>::from_static("immune");
+        let mut owned = TagCounts::default();
+        owned.add(&Id::from_static("immune.stun"));
+        assert!(!owned.remove(&Id::from_static("immune.freeze")));
+        assert!(!owned.remove(&immune));
+        assert!(owned.contains(&Id::from_static("immune.stun")));
+        assert_eq!(owned.count(&immune), 1);
     }
 }

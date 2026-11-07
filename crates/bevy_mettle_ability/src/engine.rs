@@ -1,14 +1,15 @@
 //! Granting, activating, committing and ending abilities, on the world.
 
+use std::collections::HashMap;
+
 use bevy::prelude::*;
-use bevy_mettle_attribute::modifier::Operation;
 use bevy_mettle_attribute::read::{AttributeContext, AttributeWorld};
 use bevy_mettle_core::Id;
 use bevy_mettle_core::condition::Context;
 use bevy_mettle_core::tag::{OwnedTags, Tag, TagCounts, Tags};
 use bevy_mettle_effect::{EffectRegistry, EffectSpec, EffectWorld};
 
-use crate::active::{Abilities, AbilityOf, ActiveAbility, GrantedAbility};
+use crate::active::{Abilities, AbilityOf, ActiveAbility, GrantedAbility, GrantedBy};
 use crate::data::{Behaviours, Commit, Trigger};
 use crate::events::{AbilityActivated, AbilityEnded, AbilityFailed, Failure, GameplayEvent};
 use crate::{Ability, AbilityRegistry};
@@ -70,11 +71,11 @@ pub(crate) fn grant(
         warn!("there's no ability called `{id}`");
         return None;
     };
-    Some(
-        world
-            .spawn((GrantedAbility::new(def, level, source), AbilityOf(actor)))
-            .id(),
-    )
+    let mut granted = world.spawn((GrantedAbility::new(def, level, source), AbilityOf(actor)));
+    if let Some(source) = source {
+        granted.insert(GrantedBy(source));
+    }
+    Some(granted.id())
 }
 
 /// Takes `ability` away from its actor, cancelling it if it's active.
@@ -191,8 +192,8 @@ fn can_activate(world: &World, ability: Entity) -> Result<(), Failure> {
     Ok(())
 }
 
-/// Whether `actor` can pay `granted`'s cost: applying it wouldn't take an
-/// attribute below 0.
+/// Whether `actor` can pay `granted`'s cost: applying it, each change after
+/// the one before, wouldn't leave an attribute below 0.
 fn affords(world: &World, actor: Entity, granted: &GrantedAbility) -> bool {
     let Some(cost) = &granted.def.cost else {
         return true;
@@ -203,18 +204,16 @@ fn affords(world: &World, actor: Entity, granted: &GrantedAbility) -> bool {
     let Some(changes) = world.preview_effect(actor, &spec) else {
         return true;
     };
-    changes.iter().all(|change| {
-        let now = world
-            .value_at(actor, &change.attribute, &AttributeContext::new())
-            .unwrap_or_default();
-        let after = match change.op {
-            Operation::Flat | Operation::Unscaled => now + change.value,
-            Operation::Base | Operation::Override => change.value,
-            Operation::Additive | Operation::Multiplicative => now * (1.0 + change.value),
-            Operation::Divide => now / (1.0 + change.value).max(f32::EPSILON),
-        };
-        after >= 0.0
-    })
+    let mut after = HashMap::new();
+    for change in &changes {
+        let now = after.get(&change.attribute).copied().unwrap_or_else(|| {
+            world
+                .value_at(actor, &change.attribute, &AttributeContext::new())
+                .unwrap_or_default()
+        });
+        after.insert(change.attribute.clone(), change.op.apply(now, change.value));
+    }
+    after.values().all(|value| *value >= 0.0)
 }
 
 /// Activates `ability`, for `event` if one triggered it, under `activation` if
@@ -462,20 +461,30 @@ pub(crate) fn effect_applied(world: &mut World, actor: Entity, effect: Entity) {
     }
 }
 
-/// An effect taken off `actor`: the abilities it granted, taken away.
-pub(crate) fn effect_removed(world: &mut World, actor: Entity, effect: Entity) {
-    if crate::net::defers(world) {
-        return;
-    }
-    let granted: Vec<Entity> = abilities_of(world, actor)
-        .into_iter()
-        .filter(|ability| {
-            world
-                .get::<GrantedAbility>(*ability)
-                .is_some_and(|granted| granted.source == Some(effect))
-        })
-        .collect();
-    for ability in granted {
+/// The effect `ability` was granted by is gone: it's taken away too.
+pub(crate) fn ungranted(world: &mut World, ability: Entity) {
+    if world.get_entity(ability).is_ok() {
         revoke(world, ability);
+    }
+}
+
+/// Gives every granted ability its definition from the registry, as it's
+/// replaced: one whose ability is gone is taken away.
+pub(crate) fn relink(world: &mut World, granted: &mut QueryState<Entity, With<GrantedAbility>>) {
+    let registry = world.resource::<AbilityRegistry>().clone();
+    let all: Vec<Entity> = granted.iter(world).collect();
+    for ability in all {
+        let Some(granted) = world.get::<GrantedAbility>(ability) else {
+            continue;
+        };
+        match registry.get(&granted.def.id).cloned() {
+            None => revoke(world, ability),
+            Some(def) if !std::sync::Arc::ptr_eq(&def, &granted.def) => {
+                if let Some(mut granted) = world.get_mut::<GrantedAbility>(ability) {
+                    granted.def = def;
+                }
+            }
+            Some(_) => {}
+        }
     }
 }

@@ -26,6 +26,12 @@ bevy = { workspace = true, features = [] }
 # Networking
 lightyear = { workspace = true, features = ["client", "server", "replication"] }
 
+# Replication's ticks: what a reply waits for the state of
+bevy_replicon = { workspace = true, features = ["client", "server"] }
+
+# (De)serialization of a reply as it's sent
+serde = { workspace = true, features = ["derive"] }
+
 [dev-dependencies]
 # States, which lightyear's plugins need
 bevy = { workspace = true, features = ["bevy_state"] }
@@ -33,7 +39,6 @@ bevy = { workspace = true, features = ["bevy_state"] }
 # An in-process client and server for the tests
 lightyear = { workspace = true, features = ["client", "server", "replication", "crossbeam", "netcode"] }
 bevy_mettle_core = { workspace = true, features = [] }
-bevy_replicon = { workspace = true, features = ["client"] }
 
 [lints]
 workspace = true

@@ -11,7 +11,8 @@ use crate::modifier::Modifier;
 /// On a source, they count for the actor it's [`ModifierOf`]; on an actor, for
 /// itself.
 #[derive(Component, Debug, Clone, Default, PartialEq)]
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Reflect)]
+#[reflect(Component, Clone, Debug, Default, PartialEq)]
 pub struct Modifiers(pub Vec<Modifier>);
 
 impl FromIterator<Modifier> for Modifiers {
@@ -25,7 +26,8 @@ impl FromIterator<Modifier> for Modifiers {
 /// Equipping an item is adding this; taking it off, or despawning the source,
 /// takes its modifiers away with it.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Reflect)]
+#[reflect(Component, Clone, Debug, PartialEq)]
 #[relationship(relationship_target = ModifierSources)]
 pub struct ModifierOf(pub Entity);
 
@@ -39,7 +41,8 @@ impl MapEntities for ModifierOf {
 /// On an actor: the sources whose modifiers count for it.
 ///
 /// Kept by [`ModifierOf`]; not for setting by hand.
-#[derive(Component, Debug, Default)]
+#[derive(Component, Debug, Default, Reflect)]
+#[reflect(Component, Debug, Default)]
 #[relationship_target(relationship = ModifierOf)]
 pub struct ModifierSources(Vec<Entity>);
 

@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use bevy_harness::TestApp;
 use bevy_mettle::prelude::*;
 
-use crate::common::{AttackSpeed, Damage, FIRE, Resistance, actor, app, own, set_base};
+use crate::common::{AttackSpeed, Damage, FIRE, Life, Resistance, actor, app, own, set_base};
 
 #[derive(Resource, Default)]
 struct Told(Vec<String>);
@@ -50,7 +50,7 @@ fn a_change_is_told_once_with_what_it_was() {
     let mut app = app();
     watch(&mut app);
     let npc = actor(&mut app, [Modifier::flat::<Damage>(5.0)]);
-    assert_eq!(told(&mut app), ["damage 10 -> 15"]);
+    assert!(told(&mut app).is_empty(), "its first value isn't a change");
     app.tick();
     assert!(told(&mut app).is_empty(), "nothing changed");
     set_base::<Damage>(&mut app, npc, 20.0);
@@ -138,4 +138,36 @@ fn current_is_written_only_when_its_value_changes() {
     app.tick();
     assert_ne!(last(&app), folded, "a value changed");
     assert_eq!(app.world().get::<Current<Damage>>(npc).unwrap().get(), 25.0);
+}
+
+#[test]
+fn current_starts_at_the_base_spawned_with() {
+    let mut app = app();
+    watch(&mut app);
+    let npc = app.spawn(Base::<Life>::new(30.0));
+    assert_eq!(
+        app.world().get::<Current<Life>>(npc).unwrap().get(),
+        30.0,
+        "before it's worked out"
+    );
+    app.tick();
+    assert_eq!(app.world().get::<Current<Life>>(npc).unwrap().get(), 30.0);
+    assert!(told(&mut app).is_empty(), "nothing changed");
+}
+
+#[test]
+fn removing_a_tag_not_owned_tells_nothing_and_keeps_the_rest() {
+    let mut app = app();
+    watch(&mut app);
+    let npc = actor(&mut app, []);
+    own(&mut app, npc, "immune.stun", true);
+    app.tick();
+    told(&mut app);
+    own(&mut app, npc, "immune.freeze", false);
+    own(&mut app, npc, "state.moving", false);
+    app.tick();
+    assert!(told(&mut app).is_empty(), "nothing went");
+    let owned = app.world().get::<OwnedTags>(npc).unwrap();
+    assert!(owned.contains(&Id::from_static("immune")));
+    assert!(owned.contains(&Id::from_static("immune.stun")));
 }

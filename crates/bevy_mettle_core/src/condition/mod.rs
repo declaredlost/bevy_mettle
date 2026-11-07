@@ -7,6 +7,7 @@ mod tests;
 
 use std::ops;
 
+use bevy_reflect::prelude::*;
 use serde::{Deserialize, Serialize};
 
 pub use self::context::Context;
@@ -30,8 +31,9 @@ use crate::tag::Tag;
 /// A tag term holds for the tag or any under it. A fact is a number a read
 /// supplies, named by a tag (`fact.flown`); one the read didn't supply isn't
 /// there: [`FactSet`](Self::FactSet) and the comparisons don't hold, so a read
-/// with no hit gets no hit bonuses.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// with no hit gets no hit bonuses. Reflected as a value.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Reflect)]
+#[reflect(opaque, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Condition {
     /// Every one holds: the product of their weights.
     All(Vec<Condition>),

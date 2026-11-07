@@ -13,5 +13,5 @@ mod registry;
 
 pub use self::commands::{AbilityCommands, AbilityWorld};
 pub use self::data::Ability;
-pub use self::plugin::AbilityPlugin;
+pub use self::plugin::{AbilityPlugin, AbilitySystems};
 pub use self::registry::AbilityRegistry;

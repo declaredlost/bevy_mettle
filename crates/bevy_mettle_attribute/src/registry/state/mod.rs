@@ -13,11 +13,18 @@ use bevy_mettle_core::tag::{OwnedTags, TagCounts};
 
 pub(crate) use self::fold::{Dirty, collect, fold};
 pub use self::sum::Breakdown;
+pub(crate) use self::sum::divisor;
 use self::sum::{Counts, Scoped, Sum};
-pub(crate) use self::systems::{publish, refresh, sync_base};
+pub(crate) use self::systems::{publish, refresh, remove_base, sync_base};
 use crate::modifier::Modifier;
 use crate::read::AttributeContext;
 use crate::registry::{AnyAttribute, AttributeRegistry, Limit};
+
+/// How many whole `every` there are in `of`: none for less than one, floored a
+/// little above, against float error.
+pub(crate) fn times_per(of: f32, every: f32) -> f32 {
+    (of / every + 1e-4).floor().max(0.0)
+}
 
 /// One read's walk through the attributes it reads: those being worked out, and
 /// those worked out already.
@@ -67,10 +74,14 @@ struct Folded {
 /// written from, and [`AttributeReader`](crate::read::AttributeReader) and
 /// [`AttributeWorld`](crate::read::AttributeWorld) read: mettle's to keep, and
 /// read only through them.
-#[derive(Component, Default)]
+///
+/// Reflected for inspectors: its bases and values, not what's folded.
+#[derive(Component, Default, Reflect)]
+#[reflect(Component, Default)]
 #[require(OwnedTags)]
 pub struct AttributeState {
     bases: HashMap<Id<AnyAttribute>, f32>,
+    #[reflect(ignore)]
     folded: HashMap<Id<AnyAttribute>, Folded>,
     current: HashMap<Id<AnyAttribute>, f32>,
     stale: bool,
@@ -83,10 +94,22 @@ impl AttributeState {
         self.bases.contains_key(attribute)
     }
 
+    /// `attribute`'s base as cached, if it's there.
+    pub(crate) fn cached_base(&self, attribute: &Id<AnyAttribute>) -> Option<f32> {
+        self.bases.get(attribute).copied()
+    }
+
     /// Sets `attribute`'s base: synced from its `Base`, or as an effect changes
     /// it.
     pub(crate) fn set_base(&mut self, attribute: Id<AnyAttribute>, value: f32) {
         self.bases.insert(attribute, value);
+        self.stale = true;
+    }
+
+    /// Forgets `attribute`: its `Base` was taken off.
+    pub(crate) fn remove(&mut self, attribute: &Id<AnyAttribute>) {
+        self.bases.remove(attribute);
+        self.current.remove(attribute);
         self.stale = true;
     }
 
@@ -272,10 +295,10 @@ impl AttributeState {
                         continue;
                     }
                     let of = self.eval(registry, owned, per, context, walk);
-                    (of / every).floor().max(0.0)
+                    times_per(of, *every)
                 }
             };
-            sum.add_weighted(scoped.op, scoped.value * times, weight, scoped.order);
+            sum.add_weighted(scoped.op, scoped.value, weight, times, scoped.order);
         }
         sum.over(base)
     }

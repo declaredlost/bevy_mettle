@@ -85,7 +85,10 @@ grants; while it's inhibited, neither, and its time stands still.
 and ongoing requirements weighed, periods come round, time run out.
 
 Stacked, an effect's amounts count once per stack; a base or an override
-once.
+once. Applied again at its limit, it still refreshes its time if it says
+to. An `Attribute` magnitude is captured as the effect applies, and kept:
+new stacks and periods use it. A duration that comes to no time, or not
+a number, isn't applied.
 
 ## Told
 
@@ -100,19 +103,27 @@ for cues and abilities to observe.
 what it says to.
 
 - **On a server**, each active effect keeps an [`EffectReplica`] (its
-  spec, stacks, time left, whether it's inhibited) for the game to
-  replicate with its [`EffectOf`]. Its definition is data both sides
-  have, so it's named, not sent.
+  spec, stacks, duration and time left, whether it's inhibited, what its
+  source owned and what it captured) for the game to replicate with its
+  [`EffectOf`], mapping the spec's source. Its definition is data both
+  sides have, so it's named, not sent. It's sent again as it changes, not
+  as its time runs down.
 - **On a client**, an effect whose replica arrives is shown as a
-  [`Proxy`](net::Proxy): counting, granting its tags, but not ticked; the server's
-  replica says how it stands, and its despawn takes it off.
+  [`Proxy`](net::Proxy): counting, granting its tags, its time running
+  down, but not ticked otherwise; the server's replica says how it stands,
+  and its despawn takes it off.
 - **Predicting**: what a client applies under an activation is
-  [`PredictedUnder`]. A lasting effect stays until the server's own replaces
-  it. An instant change is never written to a base (the server owns
-  bases, and replicates them): it's shown as a modifier until the server
-  answers. `confirm_prediction` keeps what was predicted;
-  `reject_prediction` undoes all of it. Abilities do both as the server
-  answers.
+  [`PredictedUnder`]. A lasting effect stays until the server's own (the
+  same effect, from the same source, under the same activation) replaces
+  it; a stack predicted onto the server's effect is kept apart from the
+  server's stacks. An instant change is never written to a base (the
+  server owns bases, and replicates them): it's worked out on the base as
+  shown, kept within its limits, and the difference shown as a modifier
+  until the server answers. `confirm_prediction` keeps the predicted
+  effects, and lets the rest give way to the server's state, so it's
+  called once that state has arrived; `reject_prediction` undoes all of
+  it. Once an activation is answered, nothing more is predicted under it.
+  Abilities do both as the server answers.
 
 [`EffectApplied`]: events::EffectApplied
 [`EffectBlocked`]: events::EffectBlocked

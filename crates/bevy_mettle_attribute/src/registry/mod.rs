@@ -6,6 +6,7 @@ mod events;
 mod rules;
 pub(crate) mod state;
 
+use std::any::TypeId;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -32,6 +33,10 @@ pub struct AttributeInfo {
     pub max: Option<Limit>,
     /// How it's rounded, if it's a whole number.
     pub rounding: Option<Rounding>,
+    /// The type it is: two types can't share a name.
+    pub(crate) type_id: TypeId,
+    /// The type's name, for when two would share one.
+    pub(crate) type_name: &'static str,
     pub(crate) get_base: fn(&World, Entity) -> Option<f32>,
     pub(crate) set_base: fn(&mut World, Entity, f32) -> bool,
 }
@@ -44,6 +49,8 @@ impl AttributeInfo {
             min: A::MIN,
             max: A::MAX,
             rounding: A::ROUNDING,
+            type_id: TypeId::of::<A>(),
+            type_name: std::any::type_name::<A>(),
             get_base: |world, actor| Some(world.get::<Base<A>>(actor)?.get()),
             set_base: |world, actor, value| {
                 let Some(mut base) = world.get_mut::<Base<A>>(actor) else {
@@ -97,9 +104,21 @@ impl AttributeRegistry {
         }
     }
 
-    fn add<A: Attribute>(&mut self) -> bool {
+    /// Adds `A`: whether it's new.
+    ///
+    /// # Panics
+    ///
+    /// If another type has its name: data couldn't tell them apart.
+    pub(crate) fn add<A: Attribute>(&mut self) -> bool {
         let attributes = Arc::make_mut(&mut self.attributes);
-        if attributes.contains_key(&A::ID) {
+        if let Some(known) = attributes.get(&A::ID) {
+            assert!(
+                known.type_id == TypeId::of::<A>(),
+                "attributes `{}` and `{}` are both named `{}`",
+                known.type_name,
+                std::any::type_name::<A>(),
+                A::NAME,
+            );
             return false;
         }
         attributes.insert(A::ID, AttributeInfo::of::<A>());
@@ -110,8 +129,13 @@ impl AttributeRegistry {
 /// Adding attributes to an app: `app.add_attribute::<Life>()`.
 pub trait AttributeApp {
     /// Adds attribute `A`: data can name it, and actors with its [`Base`] have
-    /// its [`Current`](crate::Current) kept and its changes told. Adds
+    /// its [`Current`](crate::Current) kept and its changes told; both are
+    /// registered for reflection. Adds
     /// [`AttributePlugin`](crate::AttributePlugin) if it isn't yet.
+    ///
+    /// # Panics
+    ///
+    /// If another attribute type has the same name.
     fn add_attribute<A: Attribute>(&mut self) -> &mut Self;
 }
 
@@ -125,9 +149,11 @@ impl AttributeApp for App {
             .resource_mut::<AttributeRegistry>()
             .add::<A>();
         if !added {
-            warn!("attribute `{}` is added twice", A::NAME);
             return self;
         }
+        self.register_type::<crate::Base<A>>()
+            .register_type::<crate::Current<A>>()
+            .add_observer(crate::registry::state::remove_base::<A>);
         let schedule = self
             .world()
             .resource::<crate::plugin::AttributeSchedule>()

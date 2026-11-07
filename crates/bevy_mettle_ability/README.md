@@ -93,9 +93,13 @@ hand mettle the two lists.
 
 A granted ability is an entity [`AbilityOf`] its actor, which despawns
 with it: granted by `grant_ability`, or by an effect for as long as it
-lasts, through a [`Grant`](data::Grant): gear's skills. Activating it
-checks it, in order: granted and not active, not cooling down, affordable,
-not blocked, its requirement holding. Then abilities it cancels are
+lasts, through a [`Grant`](data::Grant): gear's skills. One an effect
+grants is [`GrantedBy`](active::GrantedBy) it, and goes however the effect
+goes; one despawned while active takes back the tags it granted. A new
+[`AbilityRegistry`] gives granted abilities their new definitions.
+Activating it checks it, in order: granted and not active, not cooling
+down, affordable (its cost's changes worked out one after another), not
+blocked, its requirement holding. Then abilities it cancels are
 cancelled, its tags granted, its behaviour's component put on it with
 [`ActiveAbility`] (its actor, activation, level, and the event that
 triggered it), and, unless it commits by hand, its cost and cooldown
@@ -116,15 +120,20 @@ With the effect crate's `NetRole` set:
   send to the server.
 - **The server decides**: it activates what [`AbilityRequest`]s ask for,
   under the client's activation, and answers each with an
-  [`AbilityReply`].
+  [`AbilityReply`]. One under an activation with the top bit set, the
+  server's own, is rejected.
 - **The client resolves**: a confirmed activation's predictions stay
   until the server's own replace them; a rejected one is ended and all of
   it undone, and [`AbilityFailed`] says why.
 - **Granted abilities replicate** as [`AbilityReplica`]s with their
-  [`AbilityOf`]. A client leaves triggers, and abilities effects grant,
-  to the server.
+  [`AbilityOf`], kept as their replicas change (a level gained). A client
+  leaves triggers, and abilities effects grant, to the server.
 
 A server's own activations have the top bit set, apart from its clients'.
+Two clients' activations are told apart by the actor they're for, the
+source of what they apply. The network systems run in
+[`AbilitySystems`](AbilitySystems), in `PreUpdate`: a transport hands its
+messages over before it.
 
 [`AbilityActivated`]: events::AbilityActivated
 [`AbilityEnded`]: events::AbilityEnded

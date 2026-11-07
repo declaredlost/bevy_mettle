@@ -4,6 +4,8 @@
 use std::ops::Deref;
 
 use bevy_ecs::prelude::*;
+use bevy_ecs::reflect::ReflectComponent;
+use bevy_reflect::prelude::*;
 
 use super::{Tag, TagCounts, Tags};
 use crate::Id;
@@ -17,10 +19,12 @@ use crate::Id;
 /// A tag coming to be owned, or ceasing to be (it, or one above it), is told as
 /// [`TagAdded`] or [`TagRemoved`] as [`publish_tags`] runs: as
 /// `bevy_mettle_attribute` schedules it.
-#[derive(Component, Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Component, Debug, Clone, Default, PartialEq, Eq, Reflect)]
+#[reflect(Component, Clone, Debug, Default, PartialEq)]
 pub struct OwnedTags {
     counts: TagCounts,
     /// Tags that came to be owned (`true`) or ceased to be, not yet told.
+    #[reflect(ignore)]
     changes: Vec<(Id<Tag>, bool)>,
 }
 
@@ -36,8 +40,12 @@ impl OwnedTags {
     }
 
     /// One fewer source of `tag`: gone with its last.
+    ///
+    /// Nothing for a tag not given, even one owned under another.
     pub fn remove(&mut self, tag: &Id<Tag>) {
-        self.counts.remove(tag);
+        if !self.counts.remove(tag) {
+            return;
+        }
         for tag in tag.lineage() {
             if !self.counts.contains(&tag) {
                 self.changes.push((tag, false));
@@ -149,4 +157,21 @@ pub fn publish_tags(
 #[must_use]
 pub fn owns(In((agent, tag)): In<(Entity, Id<Tag>)>, owned: Query<&OwnedTags>) -> bool {
     owned.get(agent).is_ok_and(|owned| owned.contains(&tag))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn removing_a_tag_not_owned_tells_nothing() {
+        let mut owned = OwnedTags::default();
+        owned.remove(&Id::from_static("state.moving"));
+        assert!(!owned.is_pending());
+        owned.add(&Id::from_static("immune.stun"));
+        owned.take_changes();
+        owned.remove(&Id::from_static("immune.freeze"));
+        assert!(!owned.is_pending());
+        assert!(owned.contains(&Id::from_static("immune")));
+    }
 }

@@ -83,6 +83,9 @@ fn apply_at(world: &mut World, target: Entity, spec: EffectSpec, depth: u32) {
         warn!("there's no effect called `{}`", spec.effect);
         return;
     };
+    if net::answered(world, &spec) {
+        return;
+    }
     let source_tags = source_tags(world, spec.source);
     if world.get::<OwnedTags>(target).is_none() {
         warn!(
@@ -103,7 +106,7 @@ fn apply_at(world: &mut World, target: Entity, spec: EffectSpec, depth: u32) {
         remove_tagged(world, target, &def.removes, depth);
     }
     if !def.lasts() {
-        execute(world, &registry, target, &spec, &def, 1, &source_tags);
+        execute(world, &registry, target, &spec, &def, 1, &source_tags, &[]);
         chain(world, target, &spec, &def.on_apply, depth);
         return;
     }
@@ -113,7 +116,9 @@ fn apply_at(world: &mut World, target: Entity, spec: EffectSpec, depth: u32) {
         stack(world, &registry, existing, stacking, &spec, depth);
         return;
     }
-    let effect = spawn(world, &registry, target, &spec, &def, source_tags);
+    let Some(effect) = spawn(world, &registry, target, &spec, &def, source_tags) else {
+        return;
+    };
     if let Some(activation) = net::predicting(world, &spec) {
         net::spawned(world, activation, effect);
     }
@@ -152,7 +157,8 @@ fn blocked(
 }
 
 /// Spawns `def`, applied as `spec`, on `target`: counting at once if its
-/// ongoing requirement holds, and executing at once if it says so.
+/// ongoing requirement holds, and executing at once if it says so. Nothing, if
+/// the duration it comes to can't be: not a number, or none at all.
 fn spawn(
     world: &mut World,
     registry: &EffectRegistry,
@@ -160,8 +166,8 @@ fn spawn(
     spec: &EffectSpec,
     def: &Arc<Effect>,
     source_tags: TagCounts,
-) -> Entity {
-    let (duration, period) = {
+) -> Option<Entity> {
+    let (duration, period, captured) = {
         let context = EffectContext {
             world: &*world,
             target,
@@ -172,6 +178,15 @@ fn spawn(
             EffectDuration::For(seconds) => Some(resolve(&context, registry, seconds)),
             EffectDuration::Instant | EffectDuration::Infinite => None,
         };
+        if let Some(seconds) = duration
+            && !(seconds.is_finite() && seconds > 0.0)
+        {
+            warn!(
+                "effect `{}` would last {seconds} seconds: it isn't applied",
+                def.id
+            );
+            return None;
+        }
         let period = def
             .period
             .as_ref()
@@ -186,7 +201,7 @@ fn spawn(
                 }
                 fine
             });
-        (duration, period)
+        (duration, period, capture(&context, registry, def))
     };
     let effect = world
         .spawn((
@@ -201,6 +216,8 @@ fn spawn(
                 inhibited: true,
                 granted: Tags::new(),
                 source_tags: source_tags.clone(),
+                predicted: 0,
+                captured: captured.clone(),
             },
             EffectOf(target),
         ))
@@ -208,10 +225,42 @@ fn spawn(
     if holds_ongoing(world, effect) {
         activate(world, registry, effect);
         if def.period.as_ref().is_some_and(|period| period.on_apply) {
-            execute(world, registry, target, spec, def, 1, &source_tags);
+            execute(
+                world,
+                registry,
+                target,
+                spec,
+                def,
+                1,
+                &source_tags,
+                &captured,
+            );
         }
     }
-    effect
+    Some(effect)
+}
+
+/// `def`'s modifiers' attribute magnitudes, as they are now: what it keeps.
+fn capture(context: &EffectContext, registry: &EffectRegistry, def: &Effect) -> Vec<Option<f32>> {
+    def.modifiers
+        .iter()
+        .map(|modifier| {
+            modifier
+                .value
+                .attribute()
+                .map(|_| resolve(context, registry, &modifier.value))
+        })
+        .collect()
+}
+
+/// How much `magnitude` is: as `captured`, if it was.
+fn magnitude(
+    context: &EffectContext,
+    registry: &EffectRegistry,
+    magnitude: &Magnitude,
+    captured: Option<f32>,
+) -> f32 {
+    captured.unwrap_or_else(|| resolve(context, registry, magnitude))
 }
 
 /// What `source` owns, if it's there.
@@ -273,6 +322,13 @@ fn stack(
     };
     let id = active.def.id.clone();
     if active.stacks >= stacking.limit {
+        // At the limit, applying again still refreshes the time, as it says.
+        if stacking.reapply == Reapply::Refresh {
+            active.remaining = active.duration;
+        }
+        if stacking.reset_period {
+            active.until_period = active.period.unwrap_or_default();
+        }
         for overflow in &stacking.overflow {
             apply_at(world, target, spec.for_effect(overflow.clone()), depth + 1);
         }
@@ -290,11 +346,18 @@ fn stack(
     if stacking.reset_period {
         active.until_period = active.period.unwrap_or_default();
     }
-    let stacks = active.stacks;
     let on_apply = active.def.on_apply.clone();
     if let Some(activation) = net::predicting(world, spec) {
+        if world.get::<net::Proxy>(existing).is_some()
+            && let Some(mut active) = world.get_mut::<ActiveEffect>(existing)
+        {
+            active.predicted += 1;
+        }
         net::stacked(world, activation, existing);
     }
+    let stacks = world
+        .get::<ActiveEffect>(existing)
+        .map_or(0, |active| active.stacks);
     refresh(world, registry, existing);
     world.trigger(EffectStacked {
         entity: target,
@@ -350,7 +413,8 @@ fn resolve(context: &EffectContext, registry: &EffectRegistry, magnitude: &Magni
 }
 
 /// What executing `def` on `target` would change, without changing it: its
-/// modifiers and executions, worked out.
+/// modifiers and executions, worked out, its attribute magnitudes as
+/// `captured` if they were.
 fn changes(
     world: &World,
     registry: &EffectRegistry,
@@ -359,6 +423,7 @@ fn changes(
     def: &Effect,
     stacks: u32,
     source_tags: &TagCounts,
+    captured: &[Option<f32>],
 ) -> Vec<BaseChange> {
     let Some(owner) = world.get::<OwnedTags>(target) else {
         return Vec::new();
@@ -375,7 +440,7 @@ fn changes(
         stacks,
     };
     let mut changes = Vec::new();
-    for modifier in &def.modifiers {
+    for (index, modifier) in def.modifiers.iter().enumerate() {
         let weight = modifier
             .condition
             .as_ref()
@@ -383,7 +448,8 @@ fn changes(
         if weight <= 0.0 || (modifier.op.whole() && weight < 1.0) {
             continue;
         }
-        let mut value = resolve(&context, registry, &modifier.value);
+        let captured = captured.get(index).copied().flatten();
+        let mut value = magnitude(&context, registry, &modifier.value, captured);
         if !modifier.op.whole() {
             value *= count(stacks) * weight;
         }
@@ -391,7 +457,7 @@ fn changes(
             let of = context
                 .value_at(target, &per.attribute, &AttributeContext::new())
                 .unwrap_or_default();
-            value *= (of / per.every).floor().max(0.0);
+            value *= per.times(of);
         }
         changes.push(BaseChange {
             attribute: modifier.attribute.clone(),
@@ -413,10 +479,21 @@ pub(crate) fn preview(world: &World, target: Entity, spec: &EffectSpec) -> Optio
     let registry = world.get_resource::<EffectRegistry>()?;
     let def = registry.get(&spec.effect)?;
     let source_tags = source_tags(world, spec.source);
-    Some(changes(world, registry, target, spec, def, 1, &source_tags))
+    Some(changes(
+        world,
+        registry,
+        target,
+        spec,
+        def,
+        1,
+        &source_tags,
+        &[],
+    ))
 }
 
 /// Executes `def` on `target`: its modifiers and executions, changing bases.
+/// Nothing, on a client, under an activation the server answered: its own
+/// changes arrive.
 fn execute(
     world: &mut World,
     registry: &EffectRegistry,
@@ -425,8 +502,21 @@ fn execute(
     def: &Effect,
     stacks: u32,
     source_tags: &TagCounts,
+    captured: &[Option<f32>],
 ) {
-    let changes = changes(world, registry, target, spec, def, stacks, source_tags);
+    if net::answered(world, spec) {
+        return;
+    }
+    let changes = changes(
+        world,
+        registry,
+        target,
+        spec,
+        def,
+        stacks,
+        source_tags,
+        captured,
+    );
     let predicted = net::predicting(world, spec);
     for change in &changes {
         net::change_base(world, predicted, target, change);
@@ -456,8 +546,10 @@ fn modifiers(world: &World, registry: &EffectRegistry, effect: Entity) -> Vec<Mo
         .def
         .modifiers
         .iter()
-        .map(|modifier| {
-            let value = resolve(&context, registry, &modifier.value);
+        .enumerate()
+        .map(|(index, modifier)| {
+            let captured = active.captured.get(index).copied().flatten();
+            let value = magnitude(&context, registry, &modifier.value, captured);
             Modifier {
                 attribute: modifier.attribute.clone(),
                 op: modifier.op,
@@ -620,6 +712,13 @@ pub(crate) fn step(world: &mut World, registry: &EffectRegistry, effect: Entity,
     let target = of.0;
     let inhibited = active.inhibited;
     if net::role(world) == net::NetRole::Client && world.get::<net::Proxy>(effect).is_some() {
+        // The server's: its time runs down here, but it's taken off there.
+        if !inhibited
+            && let Some(mut active) = world.get_mut::<ActiveEffect>(effect)
+            && let Some(remaining) = active.remaining
+        {
+            active.remaining = Some((remaining - seconds).max(0.0));
+        }
         return;
     }
     let (remove_now, ongoing) = {
@@ -675,14 +774,24 @@ pub(crate) fn step(world: &mut World, registry: &EffectRegistry, effect: Entity,
         }
         None => false,
     };
-    let (spec, def, stacks, source_tags) = (
+    let (spec, def, stacks, source_tags, captured) = (
         active.spec.clone(),
         active.def.clone(),
         active.stacks,
         active.source_tags.clone(),
+        active.captured.clone(),
     );
     for _ in 0..executions {
-        execute(world, registry, target, &spec, &def, stacks, &source_tags);
+        execute(
+            world,
+            registry,
+            target,
+            &spec,
+            &def,
+            stacks,
+            &source_tags,
+            &captured,
+        );
     }
     if expired {
         expire(world, registry, effect, &def);
@@ -733,8 +842,22 @@ pub(crate) fn relink(world: &mut World, registry: &EffectRegistry, effect: Entit
     if counted {
         deactivate(world, effect);
     }
+    let captured = world
+        .get::<ActiveEffect>(effect)
+        .zip(world.get::<EffectOf>(effect))
+        .map(|(active, of)| {
+            let context = EffectContext {
+                world,
+                target: of.0,
+                spec: &active.spec,
+                stacks: 1,
+            };
+            capture(&context, registry, &def)
+        })
+        .unwrap_or_default();
     if let Some(mut active) = world.get_mut::<ActiveEffect>(effect) {
         active.def = def;
+        active.captured = captured;
     }
     if counted {
         activate(world, registry, effect);
@@ -753,12 +876,20 @@ pub(crate) fn remove_quietly(world: &mut World, effect: Entity) {
     world.despawn(effect);
 }
 
-/// Takes the stack a prediction added off `effect`.
+/// Takes the stack a prediction added off `effect`. The server's effect, shown
+/// here, keeps the stacks the server says it has.
 pub(crate) fn unstack(world: &mut World, registry: &EffectRegistry, effect: Entity) {
+    let proxy = world.get::<net::Proxy>(effect).is_some();
     let Some(mut active) = world.get_mut::<ActiveEffect>(effect) else {
         return;
     };
-    if active.stacks > 1 {
+    if proxy {
+        if active.predicted > 0 {
+            active.predicted -= 1;
+            active.stacks = active.stacks.saturating_sub(1).max(1);
+            refresh(world, registry, effect);
+        }
+    } else if active.stacks > 1 {
         active.stacks -= 1;
         refresh(world, registry, effect);
     } else {
@@ -768,7 +899,8 @@ pub(crate) fn unstack(world: &mut World, registry: &EffectRegistry, effect: Enti
 
 /// Shows, on a client, the server's effect `entity` on `target` from its
 /// replica: counting as it does there, but not ticked here. A predicted effect
-/// it stands for is taken off.
+/// it stands for (the same effect, from the same source, under the same
+/// activation) is taken off.
 pub(crate) fn show(
     world: &mut World,
     registry: &EffectRegistry,
@@ -787,9 +919,9 @@ pub(crate) fn show(
                 *other != entity
                     && world.get::<net::PredictedUnder>(*other)
                         == Some(&net::PredictedUnder(activation))
-                    && world
-                        .get::<ActiveEffect>(*other)
-                        .is_some_and(|active| active.def.id == def.id)
+                    && world.get::<ActiveEffect>(*other).is_some_and(|active| {
+                        active.def.id == def.id && active.spec.source == replica.spec.source
+                    })
             })
             .collect();
         for other in predicted {
@@ -801,13 +933,15 @@ pub(crate) fn show(
             spec: replica.spec.clone(),
             def,
             stacks: replica.stacks,
-            duration: replica.remaining,
+            duration: replica.duration,
             remaining: replica.remaining,
             period: None,
             until_period: 0.0,
             inhibited: true,
             granted: Tags::new(),
-            source_tags: TagCounts::default(),
+            source_tags: counts(&replica.source_tags),
+            predicted: 0,
+            captured: replica.captured.clone(),
         },
         net::Proxy,
     ));
@@ -816,7 +950,8 @@ pub(crate) fn show(
     }
 }
 
-/// Keeps the shown effect `entity` as its replica now says.
+/// Keeps the shown effect `entity` as its replica now says, with the stacks
+/// predicted onto it on top.
 pub(crate) fn update_shown(
     world: &mut World,
     registry: &EffectRegistry,
@@ -826,9 +961,11 @@ pub(crate) fn update_shown(
     let Some(mut active) = world.get_mut::<ActiveEffect>(entity) else {
         return;
     };
-    let restack = active.stacks != replica.stacks;
+    let stacks = replica.stacks + active.predicted;
+    let restack = active.stacks != stacks;
     let was_inhibited = active.inhibited;
-    active.stacks = replica.stacks;
+    active.stacks = stacks;
+    active.duration = replica.duration;
     active.remaining = replica.remaining;
     match (was_inhibited, replica.inhibited) {
         (true, false) => activate(world, registry, entity),
@@ -836,4 +973,11 @@ pub(crate) fn update_shown(
         _ if restack => refresh(world, registry, entity),
         _ => {}
     }
+}
+
+/// `tags` held once each.
+fn counts(tags: &Tags) -> TagCounts {
+    let mut counts = TagCounts::default();
+    counts.add_all(tags);
+    counts
 }

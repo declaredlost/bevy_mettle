@@ -1,9 +1,10 @@
 use bevy::ecs::intern::Interned;
 use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
-use bevy_mettle_core::tag::publish_tags;
+use bevy_mettle_core::tag::{OwnedTags, publish_tags};
 
-use crate::registry::{AttributeRegistry, state};
+use crate::modifier::{ModifierOf, ModifierSources, Modifiers};
+use crate::registry::{AttributeRegistry, AttributeState, state};
 
 /// The system set attributes are kept in, `FixedPreUpdate` by default.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -28,7 +29,7 @@ pub(crate) struct AttributeSchedule(pub(crate) Interned<dyn ScheduleLabel>);
 
 /// Keeps actors' attributes: bases synced, modifiers folded, values computed.
 ///
-/// What changed is told. Added by
+/// What changed is told, and its components registered for reflection. Added by
 /// [`add_attribute`](crate::AttributeApp::add_attribute) if it isn't yet; add
 /// it first to choose the schedule.
 pub struct AttributePlugin {
@@ -54,7 +55,12 @@ impl Default for AttributePlugin {
 
 impl Plugin for AttributePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<AttributeRegistry>()
+        app.register_type::<Modifiers>()
+            .register_type::<ModifierOf>()
+            .register_type::<ModifierSources>()
+            .register_type::<OwnedTags>()
+            .register_type::<AttributeState>()
+            .init_resource::<AttributeRegistry>()
             .init_resource::<state::Dirty>()
             .insert_resource(AttributeSchedule(self.schedule))
             .configure_sets(

@@ -21,10 +21,12 @@ pub struct Stacking {
     pub by: StackBy,
     /// The most stacks: more than 0.
     pub limit: u32,
-    /// What a new stack does to the time left: refreshes it, unless it says.
+    /// What applying again does to the time left, a new stack or at the
+    /// limit: refreshes it, unless it says.
     #[serde(default)]
     pub reapply: Reapply,
-    /// Whether a new stack starts the period over.
+    /// Whether applying again, a new stack or at the limit, starts the period
+    /// over.
     #[serde(default)]
     pub reset_period: bool,
     /// What running out of time does: takes every stack off, unless it says.

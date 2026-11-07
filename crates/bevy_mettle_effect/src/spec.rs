@@ -1,5 +1,6 @@
 //! What's applied: an effect, at a level, with what code set.
 
+use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::prelude::*;
 use bevy_mettle_core::Id;
 use bevy_mettle_core::tag::Tag;
@@ -28,9 +29,19 @@ pub struct EffectSpec {
     #[serde(default)]
     pub source: Option<Entity>,
     /// The activation it was applied under, if any: what a rejected prediction
-    /// takes back.
+    /// takes back. One the server's own has its top bit set; a client's is
+    /// its own, told apart from another client's by the source.
     #[serde(default)]
     pub activation: Option<u64>,
+}
+
+impl MapEntities for EffectSpec {
+    /// Maps its source, as it arrives from another world.
+    fn map_entities<M: EntityMapper>(&mut self, mapper: &mut M) {
+        if let Some(source) = &mut self.source {
+            *source = mapper.get_mapped(*source);
+        }
+    }
 }
 
 fn one() -> f32 {

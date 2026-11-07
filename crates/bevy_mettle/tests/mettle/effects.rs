@@ -477,3 +477,72 @@ fn a_registry_reports_everything_wrong_at_once() {
         assert!(errors.contains(expected), "{expected} not in: {errors}");
     }
 }
+
+#[test]
+fn an_effect_whose_duration_cant_be_isnt_applied() {
+    let numb =
+        Effect::lasting("numb", Magnitude::Custom(Id::from_static("nan")))
+            .modifier(flat::<Damage>(5.0));
+    let code = EffectCode::new().calculation("nan", |_: &EffectContext| f32::NAN);
+    let mut app = app_with(&[numb], &code);
+    watch(&mut app);
+    let npc = actor(&mut app, []);
+    apply(&mut app, npc, EffectSpec::new("numb"));
+    assert_eq!(effects_on(&app, npc), [], "it'd never run out");
+    assert!(close(get::<Damage>(&app, npc), 10.0));
+    assert!(told(&mut app).is_empty(), "nothing told");
+}
+
+#[test]
+fn applying_again_at_the_limit_refreshes_the_time() {
+    let rage = Effect::lasting("rage", 1.0)
+        .modifier(flat::<Damage>(2.0))
+        .stacking(Stacking {
+            by: StackBy::Target,
+            limit: 1,
+            reapply: Reapply::Refresh,
+            reset_period: false,
+            expire: Expire::ClearAll,
+            overflow: Vec::new(),
+        });
+    let mut app = app(&[rage]);
+    let npc = actor(&mut app, []);
+    apply(&mut app, npc, EffectSpec::new("rage"));
+    app.secs(0.6);
+    apply(&mut app, npc, EffectSpec::new("rage"));
+    app.secs(0.6);
+    assert_eq!(effects_on(&app, npc).len(), 1, "refreshed at the limit");
+    assert!(close(get::<Damage>(&app, npc), 12.0));
+}
+
+#[test]
+fn an_attribute_magnitude_is_captured_as_the_effect_applies() {
+    let might = Effect::infinite("might")
+        .modifier(EffectModifier::new::<Damage>(
+            Operation::Flat,
+            Magnitude::source::<Strength>(1.0),
+        ))
+        .stacking(Stacking {
+            by: StackBy::Target,
+            limit: 3,
+            reapply: Reapply::Refresh,
+            reset_period: false,
+            expire: Expire::ClearAll,
+            overflow: Vec::new(),
+        });
+    let mut app = app(&[might]);
+    let caster = actor(&mut app, []);
+    let npc = actor(&mut app, []);
+    apply(&mut app, npc, EffectSpec::new("might").source(caster));
+    assert!(close(get::<Damage>(&app, npc), 20.0));
+    app.world_mut()
+        .get_mut::<Base<Strength>>(caster)
+        .unwrap()
+        .set(20.0);
+    app.tick();
+    apply(&mut app, npc, EffectSpec::new("might").source(caster));
+    assert!(
+        close(get::<Damage>(&app, npc), 30.0),
+        "two stacks of the 10 captured"
+    );
+}

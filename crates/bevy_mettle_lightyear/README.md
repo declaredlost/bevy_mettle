@@ -21,11 +21,17 @@ commands.spawn((
 
 - **Replicated, server to clients**: every active effect's
   `EffectReplica` and every granted ability's `AbilityReplica`, with their
-  `EffectOf` and `AbilityOf`; and each actor's `Base<A>` the game asks
-  for. A client shows them; it never decides them.
+  `EffectOf` and `AbilityOf`, as their actor is (`ReplicateLike` it: to
+  whom it's visible, with it); and each actor's `Base<A>` the game asks
+  for. An effect's source is mapped. A client shows them; it never
+  decides them.
 - **Sent**: a client's `AbilityRequest`s to the server, on
   [`MettleChannel`] (reliable, ordered); the server's `AbilityReply` back
-  to the client that asked.
+  to the client that asked, with the replication tick its state goes out
+  at. A reply isn't ordered with replication, so a client holds one
+  confirming its prediction until its actor's state as of it has arrived
+  (or 30 frames, for one that changed nothing): what it predicted gives
+  way to the server's in the same frame, never paid twice or not at all.
 - **Checked**: the server takes a request only for an actor
   `ControlledBy` the client asking. Any other is rejected back to it (as
   `NotGranted`, so its prediction is undone), with a warning.

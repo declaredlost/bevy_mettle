@@ -27,7 +27,8 @@ pub struct AbilityRequest {
     pub actor: Entity,
     /// The ability.
     pub ability: Id<Ability>,
-    /// The activation the client predicted it under.
+    /// The activation the client predicted it under: its own, the top bit
+    /// clear (the server's own have it set).
     pub activation: u64,
 }
 
@@ -104,18 +105,30 @@ pub(crate) fn predict(
     Ok(ability)
 }
 
+/// The bit a server's own activations have set, and a client's can't.
+pub(crate) const SERVERS: u64 = 1 << 63;
+
 /// On a server: activates what clients ask for, under their activations, and
-/// answers.
+/// answers. One under an activation with the server's bit set is rejected: a
+/// client's can't look like the server's own.
 pub(crate) fn serve(mut requests: MessageReader<AbilityRequest>, mut commands: Commands) {
     for request in requests.read().cloned() {
         commands.queue(move |world: &mut World| {
-            let rejected = engine::activate_id(
-                world,
-                request.actor,
-                &request.ability,
-                Some(request.activation),
-            )
-            .err();
+            let rejected = if request.activation & SERVERS == 0 {
+                engine::activate_id(
+                    world,
+                    request.actor,
+                    &request.ability,
+                    Some(request.activation),
+                )
+                .err()
+            } else {
+                warn!(
+                    "a client asked to activate `{}` under the server's activation {}: rejected",
+                    request.ability, request.activation
+                );
+                Some(Failure::NotGranted)
+            };
             world.write_message(AbilityReply {
                 actor: request.actor,
                 ability: request.ability,
@@ -170,11 +183,13 @@ pub(crate) fn sync_replicas(
     }
 }
 
-/// On a client: has each ability the server's replica arrived for.
+/// On a client: has each ability the server's replica arrived for, and keeps
+/// it as its replica says.
 pub(crate) fn show_replicas(
     mut commands: Commands,
     registry: Res<AbilityRegistry>,
     arrived: Query<(Entity, &AbilityReplica), Without<GrantedAbility>>,
+    mut changed: Query<(&AbilityReplica, &mut GrantedAbility), Changed<AbilityReplica>>,
 ) {
     for (entity, replica) in &arrived {
         let Some(def) = registry.get(&replica.id).cloned() else {
@@ -184,5 +199,17 @@ pub(crate) fn show_replicas(
         commands
             .entity(entity)
             .insert(GrantedAbility::new(def, replica.level, None));
+    }
+    for (replica, mut granted) in &mut changed {
+        if granted.def.id != replica.id {
+            let Some(def) = registry.get(&replica.id).cloned() else {
+                warn!("there's no ability called `{}` to have", replica.id);
+                continue;
+            };
+            granted.def = def;
+        }
+        if granted.level.to_bits() != replica.level.to_bits() {
+            granted.level = replica.level;
+        }
     }
 }

@@ -20,7 +20,10 @@ bevy_mettle_macros = { workspace = true, features = [] }
 
 # Owned tags: a component, the events of its changes, and the system
 # telling them
-bevy_ecs = { workspace = true, features = [] }
+bevy_ecs = { workspace = true, features = ["bevy_reflect"] }
+
+# Reflection: for inspectors, scenes and remote access
+bevy_reflect = { workspace = true, features = [] }
 
 # Curves: what curve tables sample
 bevy_curve = { workspace = true, features = ["serialize"] }

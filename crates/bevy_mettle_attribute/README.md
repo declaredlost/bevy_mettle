@@ -104,13 +104,18 @@ can name it, and actors with its [`Base`] have its [`Current`] kept.
 
 - [`Base<A>`]: the base, the game's and effects' to set (what's left of
   life, a level gained). Having it is having the attribute; it brings
-  `Current<A>`.
+  `Current<A>`. Taking it off takes the attribute away, `Current<A>` too.
 - [`Current<A>`]: the value with every modifier that counts with nothing
-  in play, kept within its limits. Written only when it changes, so
-  `Changed<Current<Life>>` is life changing.
+  in play, kept within its limits; the base until it's first worked out.
+  Written only when it changes, so `Changed<Current<Life>>` is life
+  changing.
 - [`AttributeChanged<A>`](registry::AttributeChanged): an entity event as its current value changes
-  (what it was, what it is): `On<AttributeChanged<Life>>`. What only
-  some reads see (a fire hit's resistance) isn't told.
+  (what it was, what it is): `On<AttributeChanged<Life>>`. Its first value
+  worked out isn't a change; what only some reads see (a fire hit's
+  resistance) isn't told.
+
+Two attribute types can't share a name: adding the second panics. The
+components are reflected and registered, for inspectors and scenes.
 
 ## Modifiers
 
@@ -122,7 +127,10 @@ An attribute is
 
 or its override, then rounded and kept within its limits (the limits
 win). Of `Base`s and `Override`s, the last counts: in the actor's own
-modifiers, then each source's, in the order the sources came.
+modifiers, then each source's, in the order the sources came. That order
+is the world's own: a client can have replicated sources in another
+order than the server, so don't have sources' overrides compete where
+clients have to agree.
 
 | Op | What it does |
 |---|---|
@@ -130,13 +138,16 @@ modifiers, then each source's, in the order the sources came.
 | `Flat` | Added to the base |
 | `Additive` | A fraction, summed with the others of its kind: +20% and +30% are +50% ("increased") |
 | `Multiplicative` | A fraction, multiplied in on its own: +20% and +30% are +56% ("more") |
-| `Divide` | A fraction, summed, then divided by: +100% halves it, more never reaches 0 (cooldown recovery) |
+| `Divide` | A fraction, summed, then divided by: +100% halves it, more never reaches 0 (cooldown recovery); -99% or less divides by 0.01 |
 | `Unscaled` | Added after everything, scaled by nothing |
 | `Override` | The value, whatever else there is; the last counts |
 
 `Modifier::flat::<Damage>(5.0)`. A modifier can count while a `Condition`
 holds, and as much as it does (`read_tagged`, `owner_has`);
-`per::<Strength>(10.0)`; or `local()`, only for reads naming its source.
+`per::<Strength>(10.0)`, once for each whole 10 (a multiplicative one
+multiplied in each time; a `Base` or `Override` can't be per anything);
+or `local()`, only for reads naming its source. One whose numbers can't
+be, its condition's too, is skipped with a warning.
 In data, by name:
 
 ```ron

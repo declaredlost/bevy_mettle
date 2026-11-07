@@ -2,7 +2,7 @@
 
 use bevy_mettle::prelude::*;
 
-use crate::common::{Damage, MaxResistance, actor, app, close, get};
+use crate::common::{Damage, FLOWN, Life, MaxResistance, Strength, actor, app, close, get, value};
 
 fn flat(value: f32) -> Modifiers {
     Modifiers(vec![Modifier::flat::<Damage>(value)])
@@ -97,4 +97,47 @@ fn a_modifier_of_an_attribute_not_added_is_skipped() {
         [Modifier::flat::<Focus>(5.0), Modifier::flat::<Damage>(1.0)],
     );
     assert!(close(get::<Damage>(&app, npc), 11.0));
+}
+
+#[test]
+fn a_source_that_is_an_actor_too_refolds_itself_as_its_modifiers_go() {
+    let mut app = app();
+    let owner = actor(&mut app, []);
+    let pet = actor(&mut app, [Modifier::flat::<Damage>(5.0)]);
+    app.entity_mut(pet).insert(ModifierOf(owner));
+    app.tick();
+    assert!(close(get::<Damage>(&app, pet), 15.0));
+    assert!(
+        close(get::<Damage>(&app, owner), 15.0),
+        "the pet buffs its owner"
+    );
+    app.entity_mut(pet).remove::<Modifiers>();
+    app.tick();
+    assert!(close(get::<Damage>(&app, owner), 10.0));
+    assert!(close(get::<Damage>(&app, pet), 10.0), "and itself no more");
+}
+
+#[test]
+fn a_modifier_whose_condition_cant_be_is_skipped() {
+    let mut app = app();
+    let npc = actor(
+        &mut app,
+        [Modifier::flat::<Damage>(5.0).condition(Condition::fact_ramp(FLOWN, 5.0, 5.0))],
+    );
+    let read = AttributeContext::new().fact(FLOWN, 5.0);
+    assert!(close(value::<Damage>(&app, npc, &read), 10.0), "not NaN");
+}
+
+#[test]
+fn a_base_or_an_override_per_something_is_skipped() {
+    let mut app = app();
+    let npc = actor(
+        &mut app,
+        [
+            Modifier::base::<Damage>(10.0).per::<Strength>(100.0),
+            Modifier::overriding::<Life>(1.0).per::<Strength>(100.0),
+        ],
+    );
+    assert!(close(get::<Damage>(&app, npc), 10.0), "not replaced by 0");
+    assert!(close(get::<Life>(&app, npc), 50.0));
 }

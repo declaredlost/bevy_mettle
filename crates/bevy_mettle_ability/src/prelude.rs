@@ -1,7 +1,9 @@
 //! What using abilities takes: `use bevy_mettle_ability::prelude::*`.
 
 #[doc(hidden)]
-pub use crate::active::{Abilities, AbilityOf, ActiveAbility, GrantedAbility};
+pub use crate::active::{
+    Abilities, AbilityOf, ActiveAbility, GrantedAbilities, GrantedAbility, GrantedBy,
+};
 #[doc(hidden)]
 pub use crate::data::{Behaviour, BehaviourApp, Behaviours, Commit, Grant, Trigger};
 #[doc(hidden)]
@@ -9,4 +11,6 @@ pub use crate::events::{AbilityActivated, AbilityEnded, AbilityFailed, Failure, 
 #[doc(hidden)]
 pub use crate::net::{AbilityReplica, AbilityReply, AbilityRequest};
 #[doc(hidden)]
-pub use crate::{Ability, AbilityCommands, AbilityPlugin, AbilityRegistry, AbilityWorld};
+pub use crate::{
+    Ability, AbilityCommands, AbilityPlugin, AbilityRegistry, AbilitySystems, AbilityWorld,
+};

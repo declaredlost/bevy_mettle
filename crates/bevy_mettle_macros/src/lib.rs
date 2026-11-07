@@ -5,7 +5,7 @@
 use proc_macro::TokenStream;
 use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::{Literal, Span};
-use quote::{format_ident, quote};
+use quote::{format_ident, quote, quote_spanned};
 use syn::spanned::Spanned;
 use syn::{
     DeriveInput, Error, Expr, ExprLit, ExprUnary, Ident, Lit, LitStr, Path, UnOp, parse_macro_input,
@@ -113,7 +113,10 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             let limit = match limit {
                 Limit::Value(value) => quote!(#krate::registry::Limit::Value(#value)),
                 Limit::Attribute(other) => {
-                    quote!(#krate::registry::Limit::Attribute(<#other as #krate::Attribute>::ID))
+                    // Spanned at the path, so a type that isn't an attribute
+                    // is pointed out where it's written.
+                    let id = quote_spanned!(other.span()=> <#other as #krate::Attribute>::ID);
+                    quote!(#krate::registry::Limit::Attribute(#id))
                 }
             };
             quote! {
@@ -156,6 +159,17 @@ fn settings(input: &DeriveInput) -> syn::Result<Settings> {
                 .map(ToString::to_string)
                 .unwrap_or_default();
             let value = meta.value()?;
+            let given = match key.as_str() {
+                "name" => settings.name.is_some(),
+                "base" => settings.base.is_some(),
+                "min" => settings.min.is_some(),
+                "max" => settings.max.is_some(),
+                "rounding" => settings.rounding.is_some(),
+                _ => false,
+            };
+            if given {
+                return Err(meta.error(format!("`{key}` is given twice")));
+            }
             match key.as_str() {
                 "name" => settings.name = Some(value.parse()?),
                 "base" => settings.base = Some(number(&value.parse()?)?),
@@ -184,7 +198,24 @@ fn settings(input: &DeriveInput) -> syn::Result<Settings> {
 /// A limit: a number, or the path of another attribute.
 fn limit(expr: &Expr) -> syn::Result<Limit> {
     match expr {
-        Expr::Path(path) => Ok(Limit::Attribute(path.path.clone())),
+        Expr::Path(path) => {
+            let path = &path.path;
+            let primitive = path.segments.len() > 1
+                && path.segments.first().is_some_and(|first| {
+                    [
+                        "f32", "f64", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64",
+                    ]
+                    .iter()
+                    .any(|primitive| first.ident == primitive)
+                });
+            if primitive {
+                return Err(Error::new_spanned(
+                    path,
+                    "a limit is a number written out, or an attribute's type",
+                ));
+            }
+            Ok(Limit::Attribute(path.clone()))
+        }
         _ => number(expr).map(Limit::Value),
     }
 }
@@ -256,7 +287,32 @@ fn snake(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::snake;
+    use syn::parse_quote;
+
+    use super::{settings, snake};
+
+    #[test]
+    fn a_setting_given_twice_is_an_error() {
+        let input = parse_quote! {
+            #[attribute(base = 1.0, base = 2.0)]
+            struct Life;
+        };
+        let error = settings(&input).err().expect("an error");
+        assert!(error.to_string().contains("given twice"), "{error}");
+    }
+
+    #[test]
+    fn a_limit_that_names_a_constant_is_an_error() {
+        let input = parse_quote! {
+            #[attribute(min = f32::MIN)]
+            struct Life;
+        };
+        let error = settings(&input).err().expect("an error");
+        assert!(
+            error.to_string().contains("a number written out"),
+            "{error}"
+        );
+    }
 
     #[test]
     fn names_go_snake_case() {

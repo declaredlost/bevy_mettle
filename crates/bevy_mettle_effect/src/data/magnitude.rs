@@ -35,6 +35,10 @@ pub enum Magnitude {
     Param(Id<Tag>),
     /// An attribute of the source's or the target's, as it is when the effect's
     /// applied, times `coefficient`.
+    ///
+    /// Captured then, and kept as it lasts: new stacks and periods use the
+    /// value captured, and a client shows the server's. A new definition
+    /// captures it again.
     Attribute {
         /// The attribute.
         attribute: Id<AnyAttribute>,

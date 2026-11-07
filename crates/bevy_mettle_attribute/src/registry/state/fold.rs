@@ -36,11 +36,13 @@ pub(crate) fn collect(
 ) {
     dirty.0.extend(characters.iter());
     dirty.0.extend(sources.iter().map(|source| source.0));
-    // A source's modifiers taken off: what it's a modifier of. An actor's
-    // own, or its last source gone: the actor.
+    // Modifiers taken off: the entity, whose own they were, and what it's a
+    // modifier of, if it's a source too. Its last source gone: the actor.
     for entity in lost_modifiers.read().chain(lost_sources.read()) {
-        let character = of.get(entity).map_or(entity, |source| source.0);
-        dirty.0.insert(character);
+        dirty.0.insert(entity);
+        if let Ok(source) = of.get(entity) {
+            dirty.0.insert(source.0);
+        }
     }
 }
 

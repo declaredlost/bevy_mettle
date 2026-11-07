@@ -3,23 +3,35 @@
 
 use std::collections::HashMap;
 
+use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use bevy::reflect::TypePath;
+use bevy_mettle_ability::AbilitySystems;
 use bevy_mettle_ability::active::AbilityOf;
 use bevy_mettle_ability::events::Failure;
 use bevy_mettle_ability::net::{AbilityReplica, AbilityReply, AbilityRequest};
 use bevy_mettle_attribute::{Attribute, Base};
 use bevy_mettle_effect::active::EffectOf;
 use bevy_mettle_effect::net::{EffectReplica, NetRole};
+use bevy_replicon::client::ClientSystems;
+use bevy_replicon::prelude::RepliconTick;
+use bevy_replicon::server::server_tick::ServerTick;
 use lightyear::prelude::server::ClientOf;
 use lightyear::prelude::*;
+use serde::{Deserialize, Serialize};
 
 /// The channel mettle's messages go on: reliable and ordered.
 ///
-/// So a reply never overtakes its request's effects.
+/// Requests and replies keep their order. A reply isn't ordered with the
+/// replication of what it did, which goes another way: a client holds each
+/// reply until the server's state as of it has arrived.
 #[derive(TypePath)]
 pub struct MettleChannel;
+
+/// How many frames a client holds a confirming reply at most, waiting for the
+/// state as of it: one whose actor didn't change has nothing to wait for.
+const HOLD: u32 = 30;
 
 /// Mettle over lightyear, on the server and its clients alike.
 ///
@@ -28,13 +40,16 @@ pub struct MettleChannel;
 /// what that role needs.
 ///
 /// - The server replicates every active effect's replica and every granted
-///   ability's to every client, with what they're of; the game replicates its
-///   actors, and their bases with
+///   ability's as their actor is replicated ([`ReplicateLike`] it), with what
+///   they're of; the game replicates its actors, and their bases with
 ///   [`replicate_attribute`](MettleNetApp::replicate_attribute).
 /// - A client's [`AbilityRequest`]s are sent to the server, which takes one
 ///   only for an actor [`ControlledBy`] the client asking (rejecting any other
 ///   back to it, as `NotGranted`), and sends its [`AbilityReply`] back to that
 ///   client.
+/// - A client holds a reply confirming its prediction until the server's
+///   replicated state of the actor as of the reply has arrived, so what it
+///   predicted gives way to the server's in the same frame.
 #[derive(Default)]
 pub struct MettleNetPlugin;
 
@@ -48,20 +63,33 @@ impl Plugin for MettleNetPlugin {
         app.register_message::<AbilityRequest>()
             .add_map_entities()
             .add_direction(NetworkDirection::ClientToServer);
-        app.register_message::<AbilityReply>()
+        app.register_message::<Answer>()
             .add_map_entities()
             .add_direction(NetworkDirection::ServerToClient);
         app.component::<EffectReplica>().replicate();
         app.component::<EffectOf>().replicate();
         app.component::<AbilityReplica>().replicate();
         app.component::<AbilityOf>().replicate();
-        app.init_resource::<Asked>().add_systems(
-            Update,
-            (
-                (ask, hear_replies).run_if(resource_equals(NetRole::Client)),
-                (hear_requests, reply, replicate).run_if(resource_equals(NetRole::Server)),
-            ),
-        );
+        app.init_resource::<Asked>()
+            .init_resource::<Held>()
+            .add_systems(
+                PreUpdate,
+                (
+                    hear_replies.run_if(resource_equals(NetRole::Client)),
+                    hear_requests.run_if(resource_equals(NetRole::Server)),
+                )
+                    .after(MessageSystems::Receive)
+                    .after(ReplicationSystems::Receive)
+                    .after(ClientSystems::Receive)
+                    .before(AbilitySystems),
+            )
+            .add_systems(
+                Update,
+                (
+                    ask.run_if(resource_equals(NetRole::Client)),
+                    (reply, replicate).run_if(resource_equals(NetRole::Server)),
+                ),
+            );
     }
 }
 
@@ -79,9 +107,28 @@ impl MettleNetApp for App {
     }
 }
 
+/// A reply as it's sent: with the replication tick the server's state as of
+/// it goes out at.
+#[derive(Message, Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct Answer {
+    reply: AbilityReply,
+    tick: RepliconTick,
+}
+
+impl MapEntities for Answer {
+    fn map_entities<M: EntityMapper>(&mut self, mapper: &mut M) {
+        self.reply.map_entities(mapper);
+    }
+}
+
 /// On a server: which client asked for each activation, to answer.
 #[derive(Resource, Default)]
 struct Asked(HashMap<(Entity, u64), Entity>);
+
+/// On a client: replies heard, held until the state as of them arrives, and
+/// how many frames each has been.
+#[derive(Resource, Default)]
+struct Held(Vec<(Answer, u32)>);
 
 /// On a client: sends the requests mettle wrote to the server.
 fn ask(
@@ -99,7 +146,7 @@ fn ask(
 type Asking = (
     Entity,
     &'static mut MessageReceiver<AbilityRequest>,
-    &'static mut MessageSender<AbilityReply>,
+    &'static mut MessageSender<Answer>,
 );
 
 /// On a server: takes each client's requests for actors it controls, and
@@ -107,6 +154,7 @@ type Asking = (
 fn hear_requests(
     mut links: Query<Asking, With<ClientOf>>,
     controlled: Query<&ControlledBy>,
+    tick: Res<ServerTick>,
     mut asked: ResMut<Asked>,
     mut requests: MessageWriter<AbilityRequest>,
 ) {
@@ -123,54 +171,89 @@ fn hear_requests(
                     "a client asked to activate `{}` for {}, which it doesn't control: rejected",
                     request.ability, request.actor
                 );
-                sender.send::<MettleChannel>(AbilityReply {
-                    actor: request.actor,
-                    ability: request.ability,
-                    activation: request.activation,
-                    rejected: Some(Failure::NotGranted),
+                sender.send::<MettleChannel>(Answer {
+                    reply: AbilityReply {
+                        actor: request.actor,
+                        ability: request.ability,
+                        activation: request.activation,
+                        rejected: Some(Failure::NotGranted),
+                    },
+                    tick: **tick,
                 });
             }
         }
     }
 }
 
-/// On a server: sends each reply mettle wrote to the client that asked.
+/// On a server: sends each reply mettle wrote to the client that asked, with
+/// the tick this frame's state goes out at: this one's, if replication's tick
+/// came round this frame, else the next.
 fn reply(
     mut replies: ResMut<Messages<AbilityReply>>,
     mut asked: ResMut<Asked>,
-    mut senders: Query<&mut MessageSender<AbilityReply>>,
+    mut senders: Query<&mut MessageSender<Answer>>,
+    tick: Res<ServerTick>,
 ) {
+    let at = if tick.is_changed() {
+        **tick
+    } else {
+        **tick + 1
+    };
     for reply in replies.drain() {
         let Some(link) = asked.0.remove(&(reply.actor, reply.activation)) else {
             continue;
         };
         if let Ok(mut sender) = senders.get_mut(link) {
-            sender.send::<MettleChannel>(reply);
+            sender.send::<MettleChannel>(Answer { reply, tick: at });
         }
     }
 }
 
-/// On a client: hands the server's replies to mettle.
+/// On a client: hands the server's replies to mettle, a confirming one once
+/// its actor's state as of it has arrived (or it's waited long enough); a
+/// rejecting one at once, nothing having changed there.
 fn hear_replies(
-    mut receivers: Query<&mut MessageReceiver<AbilityReply>, With<Client>>,
+    mut receivers: Query<&mut MessageReceiver<Answer>, With<Client>>,
+    histories: Query<&ConfirmHistory>,
+    mut held: ResMut<Held>,
     mut replies: MessageWriter<AbilityReply>,
 ) {
     for mut receiver in &mut receivers {
-        replies.write_batch(receiver.receive());
+        held.0.extend(receiver.receive().map(|answer| (answer, 0)));
     }
+    held.0.retain_mut(|(answer, waited)| {
+        let arrived = answer.reply.rejected.is_some()
+            || *waited >= HOLD
+            || histories
+                .get(answer.reply.actor)
+                .is_ok_and(|history| history.last_tick().is_newer_or_eq(answer.tick));
+        if arrived {
+            replies.write(answer.reply.clone());
+        } else {
+            *waited += 1;
+        }
+        !arrived
+    });
 }
 
 /// Effects and abilities that aren't replicated yet.
 type Unreplicated = (
     Without<Replicate>,
+    Without<ReplicateLike>,
     Or<(With<EffectReplica>, With<AbilityReplica>)>,
 );
 
-/// On a server: replicates each new effect and granted ability to every client.
-fn replicate(mut commands: Commands, new: Query<Entity, Unreplicated>) {
-    for entity in &new {
+/// On a server: replicates each new effect and granted ability as its actor is.
+fn replicate(
+    mut commands: Commands,
+    new: Query<(Entity, Option<&EffectOf>, Option<&AbilityOf>), Unreplicated>,
+) {
+    for (entity, effect, ability) in &new {
+        let Some(actor) = effect.map(|of| of.0).or(ability.map(|of| of.0)) else {
+            continue;
+        };
         commands
             .entity(entity)
-            .insert(Replicate::to_clients(NetworkTarget::All));
+            .insert(ReplicateLike { root: actor });
     }
 }

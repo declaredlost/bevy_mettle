@@ -12,22 +12,38 @@ impl Condition {
     ///
     /// The first tag that isn't defined, or number that can't be.
     pub fn check(&self, tags: &TagTree, within: Option<&str>) -> Result<(), MettleError> {
+        self.walk(Some(tags), within)
+    }
+
+    /// Checks its numbers can be, not its tags: what can be checked without
+    /// the tag tree.
+    ///
+    /// # Errors
+    ///
+    /// The first number that can't be.
+    pub fn check_values(&self, within: Option<&str>) -> Result<(), MettleError> {
+        self.walk(None, within)
+    }
+
+    /// Checks its numbers, and its tags against `tags` if they're given.
+    fn walk(&self, tags: Option<&TagTree>, within: Option<&str>) -> Result<(), MettleError> {
         let invalid = |what: String| MettleError::Invalid {
             what,
             within: within.map(ToOwned::to_owned),
         };
+        let known = |tag| tags.map_or(Ok(()), |tags| tags.known(tag, within));
         match self {
             Self::All(terms) | Self::Any(terms) => {
-                terms.iter().try_for_each(|term| term.check(tags, within))
+                terms.iter().try_for_each(|term| term.walk(tags, within))
             }
-            Self::Not(term) => term.check(tags, within),
+            Self::Not(term) => term.walk(tags, within),
             Self::ReadTagged(tag)
             | Self::OwnerHas(tag)
             | Self::TargetHas(tag)
-            | Self::SourceHas(tag) => tags.known(tag, within),
-            Self::FactSet(fact) => tags.known(fact, within),
+            | Self::SourceHas(tag)
+            | Self::FactSet(tag) => known(tag),
             Self::FactAbove { fact, value } | Self::FactBelow { fact, value } => {
-                tags.known(fact, within)?;
+                known(fact)?;
                 if value.is_finite() {
                     Ok(())
                 } else {
@@ -35,7 +51,7 @@ impl Condition {
                 }
             }
             Self::FactRamp { fact, full, none } => {
-                tags.known(fact, within)?;
+                known(fact)?;
                 if full.is_finite() && none.is_finite() && (none - full).abs() > 0.0 {
                     Ok(())
                 } else {
@@ -45,7 +61,7 @@ impl Condition {
                 }
             }
             Self::FactEvery { fact, n } => {
-                tags.known(fact, within)?;
+                known(fact)?;
                 if *n > 0 {
                     Ok(())
                 } else {

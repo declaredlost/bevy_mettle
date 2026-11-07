@@ -7,6 +7,8 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 
+use bevy_reflect::prelude::*;
+use bevy_reflect::utility::GenericTypePathCell;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use smol_str::SmolStr;
 
@@ -20,7 +22,10 @@ mod target;
 /// for an item's.
 ///
 /// Cheap to clone: a name up to 23 bytes is held inline, a longer one shared.
-/// Written in data as its name (`"fire_resistance"`).
+/// Written in data as its name (`"fire_resistance"`), and reflected as a value.
+#[derive(Reflect)]
+#[reflect(opaque, type_path = false)]
+#[reflect(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Id<T: IdTarget> {
     name: SmolStr,
     kind: PhantomData<fn() -> T>,
@@ -48,6 +53,31 @@ impl<T: IdTarget> Id<T> {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.name
+    }
+}
+
+/// Named by what it names: `bevy_mettle_core::Id<tag>`.
+impl<T: IdTarget> TypePath for Id<T> {
+    fn type_path() -> &'static str {
+        static CELL: GenericTypePathCell = GenericTypePathCell::new();
+        CELL.get_or_insert::<Self, _>(|| format!("bevy_mettle_core::Id<{}>", T::NAME))
+    }
+
+    fn short_type_path() -> &'static str {
+        static CELL: GenericTypePathCell = GenericTypePathCell::new();
+        CELL.get_or_insert::<Self, _>(|| format!("Id<{}>", T::NAME))
+    }
+
+    fn type_ident() -> Option<&'static str> {
+        Some("Id")
+    }
+
+    fn crate_name() -> Option<&'static str> {
+        Some("bevy_mettle_core")
+    }
+
+    fn module_path() -> Option<&'static str> {
+        Some("bevy_mettle_core")
     }
 }
 

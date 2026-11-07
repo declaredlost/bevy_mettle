@@ -65,11 +65,16 @@ pub trait EffectWorld {
     fn remove_effect(&mut self, effect: Entity);
 
     /// The server confirmed `activation`: what was predicted under it stays,
-    /// until the server's own effects replace it.
+    /// until the server's own effects replace it; its base changes, and the
+    /// stacks it added to the server's effects, give way to the server's.
+    ///
+    /// So confirm it no earlier than the server's state as of its answer has
+    /// arrived, or what it paid shows unpaid until it does. Nothing more is
+    /// predicted under it.
     fn confirm_prediction(&mut self, activation: u64);
 
-    /// The server rejected `activation`: every effect and base change predicted
-    /// under it undone.
+    /// The server rejected `activation`: every effect, stack and base change
+    /// predicted under it undone. Nothing more is predicted under it.
     fn reject_prediction(&mut self, activation: u64);
 
     /// What applying `spec` to `target` as an instant effect would change,

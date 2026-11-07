@@ -3,6 +3,7 @@
 mod operation;
 mod sources;
 
+use bevy::prelude::*;
 use bevy_mettle_core::condition::Condition;
 use bevy_mettle_core::tag::{Tag, TagTree};
 use bevy_mettle_core::{Id, MettleError};
@@ -23,7 +24,10 @@ use crate::registry::{AnyAttribute, AttributeRegistry};
 /// (attribute: "damage", op: Additive, value: 0.2, condition: ReadTagged("damage.elemental.fire"))
 /// (attribute: "resistance", op: Flat, value: 0.1, condition: ReadTagged("damage.elemental"))
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+///
+/// Reflected as a value, as data writes it.
+#[derive(Debug, Clone, PartialEq, Reflect)]
+#[reflect(opaque, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Modifier {
     /// The attribute it changes.
     pub attribute: Id<AnyAttribute>,
@@ -35,7 +39,7 @@ pub struct Modifier {
     /// When it counts, and how much. Always, if `None`.
     pub condition: Option<Condition>,
     /// That it counts once for each whole `every` of an attribute, read in the
-    /// same context.
+    /// same context. Only an amount can: not a `Base` or an `Override`.
     pub per: Option<Per>,
     /// That it only counts for reads naming its source: a weapon's own damage,
     /// not every attack's.
@@ -133,13 +137,25 @@ impl<'de> Deserialize<'de> for Modifier {
 }
 
 /// That a modifier counts once for each whole `every` of `attribute`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Reflect)]
+#[reflect(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Per {
     /// The attribute it scales with.
     pub attribute: Id<AnyAttribute>,
     /// How much of it makes one: more than 0.
     pub every: f32,
+}
+
+impl Per {
+    /// How many whole `every` there are in `of`: none for less than one.
+    ///
+    /// Floored a little above, so `0.3` of `0.1` is 3 though the floats say
+    /// 2.9999998.
+    #[must_use]
+    pub fn times(&self, of: f32) -> f32 {
+        crate::registry::state::times_per(of, self.every)
+    }
 }
 
 impl Modifier {
@@ -223,6 +239,9 @@ impl Modifier {
     }
 
     /// Counting once for each whole `every` of `A` (more than 0).
+    ///
+    /// Not for a `Base` or an `Override`, which count only in full: such a
+    /// modifier is skipped.
     #[must_use]
     pub fn per<A: Attribute>(mut self, every: f32) -> Self {
         self.per = Some(Per {
@@ -259,8 +278,8 @@ impl Modifier {
         }
     }
 
-    /// Checks its attributes and numbers, not its tags: what folding needs,
-    /// without the tag tree.
+    /// Checks its attributes and numbers, its condition's too, not its tags:
+    /// what folding needs, without the tag tree.
     pub(crate) fn check_values(&self, attributes: &AttributeRegistry) -> Result<(), MettleError> {
         let invalid = |what: String| MettleError::Invalid { what, within: None };
         attributes.check(&self.attribute, None)?;
@@ -270,8 +289,17 @@ impl Modifier {
                 self.attribute, self.value
             )));
         }
+        if let Some(condition) = &self.condition {
+            condition.check_values(None)?;
+        }
         if let Some(per) = &self.per {
             attributes.check(&per.attribute, None)?;
+            if self.op.whole() {
+                return Err(invalid(format!(
+                    "a {:?} of `{}` per {}: only an amount can count per something",
+                    self.op, self.attribute, per.attribute
+                )));
+            }
             if !(per.every.is_finite() && per.every > 0.0) {
                 return Err(invalid(format!(
                     "a modifier of `{}` per {} {}",
@@ -280,5 +308,30 @@ impl Modifier {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn per_counts_whole_steps_despite_float_error() {
+        let per = Per {
+            attribute: Id::from_static("resistance"),
+            every: 0.1,
+        };
+        assert_eq!(per.times(0.3), 3.0);
+        assert_eq!(per.times(0.29), 2.0);
+        assert_eq!(per.times(-1.0), 0.0);
+    }
+
+    #[test]
+    fn an_operation_changes_a_base_as_an_instant_effect_does() {
+        assert_eq!(Operation::Flat.apply(10.0, 5.0), 15.0);
+        assert_eq!(Operation::Additive.apply(10.0, 0.5), 15.0);
+        assert_eq!(Operation::Override.apply(10.0, 3.0), 3.0);
+        assert_eq!(Operation::Divide.apply(10.0, 1.0), 5.0);
+        assert!((Operation::Divide.apply(1.0, -2.0) - 100.0).abs() < 1e-3);
     }
 }

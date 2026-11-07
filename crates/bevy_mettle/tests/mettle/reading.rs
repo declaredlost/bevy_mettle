@@ -280,3 +280,135 @@ fn an_actor_without_an_attribute_has_no_value_of_it() {
     });
     assert_eq!(reads, (Some(10.0), None));
 }
+
+#[test]
+fn a_per_modifier_counts_a_fractional_every_whole() {
+    let mut app = app();
+    let npc = actor(
+        &mut app,
+        [Modifier::flat::<Damage>(1.0).per::<Resistance>(0.1)],
+    );
+    set_base::<Resistance>(&mut app, npc, 0.3);
+    app.tick();
+    assert!(
+        close(get::<Damage>(&app, npc), 13.0),
+        "three times, not two"
+    );
+}
+
+#[test]
+fn a_multiplicative_per_modifier_multiplies_once_each_time() {
+    let mut app = app();
+    let npc = actor(
+        &mut app,
+        [Modifier::multiplicative::<Damage>(0.1).per::<Strength>(5.0)],
+    );
+    // 10 × 1.1 × 1.1
+    assert!(close(get::<Damage>(&app, npc), 12.1));
+}
+
+#[test]
+fn a_divide_of_minus_all_or_less_divides_by_a_hundredth() {
+    let mut app = app();
+    let npc = actor(&mut app, [Modifier::divide::<Cooldown>(-1.5)]);
+    assert!(close(get::<Cooldown>(&app, npc), 400.0));
+}
+
+#[test]
+fn a_change_to_a_base_is_kept_within_a_limit_changed_since_kept() {
+    let mut app = app();
+    let npc = actor(&mut app, []);
+    set_base::<MaxLife>(&mut app, npc, 200.0);
+    app.world_mut()
+        .apply_to_base(npc, &Life::ID, Operation::Flat, 100.0);
+    assert!(close(
+        app.world().get::<Base<Life>>(npc).unwrap().get(),
+        150.0
+    ));
+}
+
+#[test]
+fn a_per_loop_reads_the_same_whichever_end_is_read_first() {
+    let mut app = app();
+    let npc = actor(
+        &mut app,
+        [
+            Modifier::flat::<Strength>(1.0).per::<Damage>(5.0),
+            Modifier::flat::<Damage>(1.0).per::<Strength>(5.0),
+        ],
+    );
+    // Read afresh, each from its own end, against what refreshing all found.
+    let fresh = AttributeContext::new().tag("damage");
+    for read in [
+        value::<Strength>(&app, npc, &fresh),
+        value::<Damage>(&app, npc, &fresh),
+        get::<Strength>(&app, npc),
+        get::<Damage>(&app, npc),
+    ] {
+        assert!(close(read, 12.0), "{read}");
+    }
+}
+
+#[test]
+fn taking_a_base_off_takes_the_attribute_away() {
+    let mut app = app();
+    let npc = actor(&mut app, []);
+    app.entity_mut(npc).remove::<Base<Damage>>();
+    app.tick();
+    assert_eq!(
+        app.world()
+            .value_at(npc, &Damage::ID, &AttributeContext::new()),
+        None
+    );
+    assert!(app.world().get::<Current<Damage>>(npc).is_none());
+    app.entity_mut(npc).insert(Base::<Damage>::new(4.0));
+    app.tick();
+    assert!(close(get::<Damage>(&app, npc), 4.0), "and back");
+}
+
+#[test]
+#[should_panic(expected = "are both named `damage`")]
+fn two_attributes_cant_share_a_name() {
+    #[derive(Attribute)]
+    #[attribute(name = "damage")]
+    struct OtherDamage;
+    let mut app = app();
+    app.app_mut().add_attribute::<OtherDamage>();
+}
+
+#[test]
+fn an_actors_attributes_reflect() {
+    use bevy::ecs::reflect::ReflectComponent;
+    use bevy::reflect::TypePath;
+
+    let mut app = app();
+    let npc = actor(&mut app, [Modifier::flat::<Damage>(5.0)]);
+    let registry = app.world().resource::<AppTypeRegistry>().clone();
+    let registry = registry.read();
+    let base = registry
+        .get_with_type_path(Base::<Damage>::type_path())
+        .expect("registered");
+    assert_eq!(
+        Base::<Damage>::type_path(),
+        "bevy_mettle_attribute::Base<damage>"
+    );
+    let reflected = base
+        .data::<ReflectComponent>()
+        .unwrap()
+        .reflect(app.world().entity(npc))
+        .unwrap();
+    assert!(
+        reflected
+            .reflect_partial_eq(&Base::<Damage>::new(10.0))
+            .unwrap()
+    );
+    for path in [
+        Current::<Damage>::type_path(),
+        Modifiers::type_path(),
+        ModifierOf::type_path(),
+        OwnedTags::type_path(),
+        bevy_mettle::attribute::registry::AttributeState::type_path(),
+    ] {
+        assert!(registry.get_with_type_path(path).is_some(), "{path}");
+    }
+}

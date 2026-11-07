@@ -187,3 +187,16 @@ fn source_terms_settle_as_the_source_was() {
         .add(&Id::from_static("state.enraged.berserk"));
     assert!(Condition::source_has("state.enraged").holds(&sourced));
 }
+
+#[test]
+fn numbers_are_checked_without_the_tag_tree() {
+    let flat = Condition::all([Condition::fact_ramp(FLOWN, 5.0, 5.0)]);
+    assert!(flat.check_values(None).is_err(), "a ramp that doesn't ramp");
+    assert!(
+        Condition::fact_ramp(FLOWN, 2.0, 8.0)
+            .and(Condition::owner_has("not.in.any.tree"))
+            .check_values(None)
+            .is_ok(),
+        "tags aren't checked"
+    );
+}

@@ -3,11 +3,13 @@
 //! Transport-agnostic: the game (or an adapter) ships [`EffectReplica`]s from
 //! the server to its clients.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 
+use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::prelude::*;
 use bevy_mettle_attribute::modifier::{Modifier, ModifierOf, Modifiers, Operation};
 use bevy_mettle_attribute::read::AttributeWorld;
+use bevy_mettle_core::tag::Tags;
 use serde::{Deserialize, Serialize};
 
 use crate::active::{ActiveEffect, EffectOf};
@@ -26,7 +28,9 @@ pub enum NetRole {
     /// ticked; what's applied under an activation is predicted, kept until the
     /// server confirms it or undone when it rejects it. A predicted instant
     /// change is shown as a modifier, never written to a base: the server owns
-    /// bases, and its own replace it either way.
+    /// bases, and its own replace it either way. Once the server has answered
+    /// an activation, nothing more is predicted under it: what it does from
+    /// then on arrives from the server.
     Client,
 }
 
@@ -38,24 +42,56 @@ pub struct PredictedUnder(pub u64);
 
 /// On a client's active effect: the server's, shown from its replica.
 ///
-/// Not ticked here: the server's replica says how it stands.
+/// Not ticked here but for its time: the server's replica says how it stands.
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Proxy;
 
 /// On a server's active effect: what a client needs to show it.
 ///
-/// For the game to replicate with its [`EffectOf`]. Its definition is data both
-/// sides have, so it's named, not sent.
+/// For the game to replicate with its [`EffectOf`], mapping its entities. Its
+/// definition is data both sides have, so it's named, not sent. Sent again as
+/// it changes, but not as its time runs down: a client runs that down itself.
 #[derive(Component, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EffectReplica {
-    /// What was applied.
+    /// What was applied: its source mapped as it arrives.
+    #[entities]
     pub spec: EffectSpec,
     /// How many stacks it has.
     pub stacks: u32,
-    /// The seconds it has left, if it doesn't last forever.
+    /// How long it lasts in full, if not forever.
+    pub duration: Option<f32>,
+    /// The seconds it had left as it was sent, if it doesn't last forever.
     pub remaining: Option<f32>,
     /// Whether it's inhibited.
     pub inhibited: bool,
+    /// What its source owned as it applied: what source terms are settled by.
+    pub source_tags: Tags,
+    /// Its modifiers' attribute magnitudes, as captured as it applied.
+    pub captured: Vec<Option<f32>>,
+}
+
+impl EffectReplica {
+    /// Whether `self`, sent before, says all `now` says but for time run down.
+    fn stands_as(&self, now: &Self) -> bool {
+        let ran_down = match (self.remaining, now.remaining) {
+            (Some(sent), Some(left)) => left <= sent,
+            (sent, left) => sent == left,
+        };
+        ran_down
+            && self.spec == now.spec
+            && self.stacks == now.stacks
+            && self.duration == now.duration
+            && self.inhibited == now.inhibited
+            && self.source_tags == now.source_tags
+            && self.captured == now.captured
+    }
+}
+
+impl MapEntities for EffectReplica {
+    /// Maps its spec's source, as it arrives from another world.
+    fn map_entities<M: EntityMapper>(&mut self, mapper: &mut M) {
+        self.spec.map_entities(mapper);
+    }
 }
 
 /// What was done under a predicted activation, to undo.
@@ -70,26 +106,62 @@ enum Undo {
     Overlay { actor: Entity, overlay: Entity },
 }
 
-/// What's been done under each predicted activation, not yet confirmed.
+/// How many answered activations are remembered, to predict nothing more
+/// under them.
+const ANSWERED: usize = 1024;
+
+/// What's been done under each predicted activation, not yet answered, and the
+/// activations answered.
 #[derive(Resource, Debug, Default)]
-pub(crate) struct Predictions(HashMap<u64, Vec<Undo>>);
+pub(crate) struct Predictions {
+    pending: HashMap<u64, Vec<Undo>>,
+    answered: HashSet<u64>,
+    /// The answered activations, oldest first, to forget the oldest.
+    order: VecDeque<u64>,
+}
+
+impl Predictions {
+    /// Takes what was done under `activation`, and notes it answered.
+    fn answer(&mut self, activation: u64) -> Vec<Undo> {
+        if self.answered.insert(activation) {
+            self.order.push_back(activation);
+            if self.order.len() > ANSWERED
+                && let Some(oldest) = self.order.pop_front()
+            {
+                self.answered.remove(&oldest);
+            }
+        }
+        self.pending.remove(&activation).unwrap_or_default()
+    }
+}
 
 /// This world's role.
 pub(crate) fn role(world: &World) -> NetRole {
     world.get_resource::<NetRole>().copied().unwrap_or_default()
 }
 
-/// The activation `spec` is predicted under, if this world predicts.
+/// The activation `spec` is predicted under, if this world predicts it.
 pub(crate) fn predicting(world: &World, spec: &EffectSpec) -> Option<u64> {
-    (role(world) == NetRole::Client)
+    (role(world) == NetRole::Client && !answered(world, spec))
         .then_some(spec.activation)
         .flatten()
+}
+
+/// Whether `spec` is under an activation the server answered already, on a
+/// client: what it does arrives from the server, so nothing's done here.
+pub(crate) fn answered(world: &World, spec: &EffectSpec) -> bool {
+    role(world) == NetRole::Client
+        && spec.activation.is_some_and(|activation| {
+            world
+                .get_resource::<Predictions>()
+                .is_some_and(|predictions| predictions.answered.contains(&activation))
+        })
 }
 
 fn log(world: &mut World, activation: u64, undo: Undo) {
     world
         .get_resource_or_init::<Predictions>()
-        .0
+        .pending
         .entry(activation)
         .or_default()
         .push(undo);
@@ -106,9 +178,45 @@ pub(crate) fn stacked(world: &mut World, activation: u64, effect: Entity) {
     log(world, activation, Undo::Stack(effect));
 }
 
+/// The overlays predicted for `actor`, under any activation not yet answered.
+fn overlays(world: &World, actor: Entity) -> Vec<(u64, Entity)> {
+    world
+        .get_resource::<Predictions>()
+        .map(|predictions| {
+            predictions
+                .pending
+                .iter()
+                .flat_map(|(activation, undo)| {
+                    undo.iter().filter_map(move |undo| match undo {
+                        Undo::Overlay { actor: of, overlay } if *of == actor => {
+                            Some((*activation, *overlay))
+                        }
+                        _ => None,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// How much `overlays` add to `attribute`'s base.
+fn overlaid(world: &World, overlays: &[(u64, Entity)], change: &crate::code::BaseChange) -> f32 {
+    overlays
+        .iter()
+        .filter_map(|(_, overlay)| world.get::<Modifiers>(*overlay))
+        .flat_map(|modifiers| &modifiers.0)
+        .filter(|modifier| modifier.attribute == change.attribute)
+        .map(|modifier| modifier.value)
+        .sum()
+}
+
 /// Changes `actor`'s base as an instant effect does; predicted under
 /// `activation`, shown as a modifier instead: the server owns bases, and sends
 /// its own.
+///
+/// A predicted change is worked out on the base as it's shown, every change
+/// predicted before it made, and kept within its limits as the server keeps
+/// it; what it comes to is shown as a flat modifier, the difference.
 pub(crate) fn change_base(
     world: &mut World,
     activation: Option<u64>,
@@ -119,32 +227,33 @@ pub(crate) fn change_base(
         world.apply_to_base(actor, &change.attribute, change.op, change.value);
         return;
     };
-    let modifier = Modifier {
-        attribute: change.attribute.clone(),
-        op: match change.op {
-            Operation::Override => Operation::Base,
-            op => op,
-        },
-        value: change.value,
-        condition: None,
-        per: None,
-        local: false,
+    let Some(base) = world.base_at(actor, &change.attribute) else {
+        return;
     };
-    let existing = world
-        .get_resource::<Predictions>()
-        .and_then(|predictions| predictions.0.get(&activation))
-        .and_then(|undo| {
-            undo.iter().find_map(|undo| match undo {
-                Undo::Overlay { actor: of, overlay } if *of == actor => Some(*overlay),
-                _ => None,
-            })
-        });
-    if let Some(mut modifiers) = existing.and_then(|overlay| world.get_mut::<Modifiers>(overlay)) {
-        modifiers.0.push(modifier);
+    let overlays = overlays(world, actor);
+    let shown = base + overlaid(world, &overlays, change);
+    let Some(after) = world.base_after(actor, &change.attribute, shown, change.op, change.value)
+    else {
+        return;
+    };
+    let difference = after - shown;
+    let mine = overlays
+        .iter()
+        .find(|(under, _)| *under == activation)
+        .map(|(_, overlay)| *overlay);
+    if let Some(mut modifiers) = mine.and_then(|overlay| world.get_mut::<Modifiers>(overlay)) {
+        match modifiers
+            .0
+            .iter_mut()
+            .find(|modifier| modifier.attribute == change.attribute)
+        {
+            Some(modifier) => modifier.value += difference,
+            None => modifiers.0.push(flat(change, difference)),
+        }
     } else {
         let overlay = world
             .spawn((
-                Modifiers(vec![modifier]),
+                Modifiers(vec![flat(change, difference)]),
                 ModifierOf(actor),
                 PredictedUnder(activation),
             ))
@@ -153,17 +262,29 @@ pub(crate) fn change_base(
     }
 }
 
+/// A flat modifier of `change`'s attribute by `value`.
+fn flat(change: &crate::code::BaseChange, value: f32) -> Modifier {
+    Modifier::new(change.attribute.clone(), Operation::Flat, value)
+}
+
 /// The server confirmed `activation`: the effects predicted under it stay,
-/// until the server's own replace them; its instant changes, shown until now,
-/// give way to the server's bases.
+/// until the server's own replace them; its instant changes and the stacks it
+/// added to the server's effects, shown until now, give way to the server's.
 pub(crate) fn confirm(world: &mut World, activation: u64) {
     let undo = world
-        .get_resource_mut::<Predictions>()
-        .and_then(|mut predictions| predictions.0.remove(&activation))
+        .get_resource_or_init::<Predictions>()
+        .answer(activation);
+    let registry = world
+        .get_resource::<EffectRegistry>()
+        .cloned()
         .unwrap_or_default();
     for undo in undo {
-        if let Undo::Overlay { overlay, .. } = undo {
-            despawn(world, overlay);
+        match undo {
+            Undo::Overlay { overlay, .. } => despawn(world, overlay),
+            Undo::Stack(effect) if world.get::<Proxy>(effect).is_some() => {
+                engine::unstack(world, &registry, effect);
+            }
+            Undo::Stack(_) | Undo::Effect(_) => {}
         }
     }
 }
@@ -178,9 +299,8 @@ fn despawn(world: &mut World, entity: Entity) {
 /// first.
 pub(crate) fn rollback(world: &mut World, activation: u64) {
     let undo = world
-        .get_resource_mut::<Predictions>()
-        .and_then(|mut predictions| predictions.0.remove(&activation))
-        .unwrap_or_default();
+        .get_resource_or_init::<Predictions>()
+        .answer(activation);
     let registry = world
         .get_resource::<EffectRegistry>()
         .cloned()
@@ -194,19 +314,32 @@ pub(crate) fn rollback(world: &mut World, activation: u64) {
     }
 }
 
-/// On a server: keeps each active effect's replica as it stands.
+/// What a client needs to show `active`.
+fn replica(active: &ActiveEffect) -> EffectReplica {
+    EffectReplica {
+        spec: active.spec.clone(),
+        stacks: active.stacks,
+        duration: active.duration,
+        remaining: active.remaining,
+        inhibited: active.inhibited,
+        source_tags: active
+            .source_tags
+            .iter()
+            .map(|(tag, _)| tag.clone())
+            .collect(),
+        captured: active.captured.clone(),
+    }
+}
+
+/// On a server: keeps each active effect's replica as it stands, but for its
+/// time running down.
 pub(crate) fn sync_replicas(
     mut commands: Commands,
     effects: Query<(Entity, &ActiveEffect, Option<&EffectReplica>), Changed<ActiveEffect>>,
 ) {
-    for (entity, active, replica) in &effects {
-        let now = EffectReplica {
-            spec: active.spec.clone(),
-            stacks: active.stacks,
-            remaining: active.remaining,
-            inhibited: active.inhibited,
-        };
-        if replica != Some(&now) {
+    for (entity, active, sent) in &effects {
+        let now = replica(active);
+        if !sent.is_some_and(|sent| sent.stands_as(&now)) {
             commands.entity(entity).insert(now);
         }
     }

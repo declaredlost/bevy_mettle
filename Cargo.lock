@@ -1385,6 +1385,7 @@ dependencies = [
  "bevy_curve",
  "bevy_ecs",
  "bevy_mettle_macros",
+ "bevy_reflect",
  "fnv",
  "ron",
  "serde",
@@ -1413,6 +1414,7 @@ dependencies = [
  "bevy_mettle_effect",
  "bevy_replicon",
  "lightyear",
+ "serde",
 ]
 
 [[package]]

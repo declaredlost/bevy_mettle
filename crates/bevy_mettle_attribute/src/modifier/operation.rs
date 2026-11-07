@@ -1,5 +1,6 @@
 //! How a modifier changes its attribute.
 
+use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 /// How a modifier changes its attribute. An attribute is
@@ -10,9 +11,12 @@ use serde::{Deserialize, Serialize};
 ///
 /// unless overridden, then rounded and kept within its limits. Of `Base`s and
 /// `Override`s, the last counts: in the actor's own modifiers, then each
-/// source's, in the order the sources came.
+/// source's, in the order the sources came. That order is this world's: a
+/// client's replicated sources can come in another order than the server's,
+/// so don't have two sources' overrides compete where clients have to agree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Reflect)]
+#[reflect(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub enum Operation {
     /// Replaces the base: the last one counts.
     Base,
@@ -25,7 +29,8 @@ pub enum Operation {
     /// +56%. "More".
     Multiplicative,
     /// A fraction, summed with the others of its kind, then divided by: +100%
-    /// halves it, and more never reaches 0. Cooldown recovery.
+    /// halves it, and more never reaches 0. Cooldown recovery. Less than
+    /// -99% divides by 0.01, a hundred times at most.
     Divide,
     /// Added after everything else: "+10 damage, not affected by increases".
     Unscaled,
@@ -39,5 +44,18 @@ impl Operation {
     #[must_use]
     pub fn whole(self) -> bool {
         matches!(self, Self::Base | Self::Override)
+    }
+
+    /// `base` changed by `value` as an instant effect changes it: `Flat` and
+    /// `Unscaled` add, `Additive` and `Multiplicative` scale, `Divide`
+    /// divides, `Base` and `Override` set.
+    #[must_use]
+    pub fn apply(self, base: f32, value: f32) -> f32 {
+        match self {
+            Self::Base | Self::Override => value,
+            Self::Flat | Self::Unscaled => base + value,
+            Self::Additive | Self::Multiplicative => base * (1.0 + value),
+            Self::Divide => base / crate::registry::state::divisor(value),
+        }
     }
 }

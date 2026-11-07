@@ -413,3 +413,74 @@ fn an_items_modifiers_replicate_and_count_on_the_client() {
         "and counting"
     );
 }
+
+#[test]
+fn a_confirm_waits_for_the_servers_state_as_of_it() {
+    let mut net = Net::new();
+    // Replication lags the reply: the server's state goes out every 50ms.
+    net.server
+        .insert_resource(ReplicationMetadata::new(Duration::from_millis(50)));
+    let (there, here) = net.mage(true);
+    net.client
+        .world_mut()
+        .activate_ability(here, "fireball")
+        .unwrap();
+    for step in 0..30 {
+        net.step(1);
+        let mana = Net::mana(&net.client, here);
+        assert!(
+            (mana - 10.0).abs() < 1e-4,
+            "paid once, and only once, all along: {mana} at step {step}"
+        );
+    }
+    assert!((Net::mana(&net.server, there) - 10.0).abs() < 1e-4);
+}
+
+#[test]
+fn a_shown_effects_source_is_the_clients_own() {
+    let mut net = Net::new();
+    let (_, here) = net.mage(true);
+    net.client
+        .world_mut()
+        .activate_ability(here, "fireball")
+        .unwrap();
+    net.step(20);
+    let shown = net
+        .client
+        .world()
+        .get::<ActiveEffects>(here)
+        .unwrap()
+        .iter()
+        .next()
+        .unwrap();
+    assert_eq!(
+        net.client
+            .world()
+            .get::<ActiveEffect>(shown)
+            .unwrap()
+            .spec()
+            .source,
+        Some(here),
+        "mapped from the server's"
+    );
+}
+
+#[test]
+fn an_actor_not_replicated_has_its_effects_kept_back_too() {
+    let mut net = Net::new();
+    let (_, here) = net.mage(true);
+    let hidden = net.server.world_mut().spawn(Base::<Mana>::default()).id();
+    net.server.update();
+    net.server
+        .world_mut()
+        .apply_effect(hidden, EffectSpec::new("fireball.cooldown"));
+    net.step(20);
+    let replicas = net
+        .client
+        .world_mut()
+        .query::<&EffectReplica>()
+        .iter(net.client.world())
+        .count();
+    assert_eq!(replicas, 0, "nothing of an actor the client doesn't see");
+    assert!(net.client.world().get::<Abilities>(here).is_some());
+}

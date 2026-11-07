@@ -44,6 +44,9 @@ fn effects() -> Vec<Effect> {
             .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
         Effect::lasting("fireball.cooldown", 1.0).grant("cooldown.fireball"),
         Effect::infinite("staff"),
+        Effect::instant("surge.cost")
+            .modifier(EffectModifier::new::<Mana>(Operation::Flat, -30.0))
+            .modifier(EffectModifier::new::<Mana>(Operation::Flat, -30.0)),
     ]
 }
 
@@ -394,4 +397,90 @@ fn a_registry_reports_everything_wrong_at_once() {
     ] {
         assert!(errors.contains(expected), "{expected} not in: {errors}");
     }
+}
+
+#[test]
+fn a_cost_is_checked_change_after_change() {
+    let surge = Ability::new("surge", "cast").cost("surge.cost");
+    let mut app = app(&[surge]);
+    let mage = caster(&mut app, &["surge"]);
+    app.world_mut()
+        .get_mut::<Base<Mana>>(mage)
+        .unwrap()
+        .set(50.0);
+    app.tick();
+    assert_eq!(
+        activate(&mut app, mage, "surge"),
+        Err(Failure::Cost),
+        "50 can't pay 30 twice"
+    );
+    assert!(close(get::<Mana>(&app, mage), 50.0));
+}
+
+#[test]
+fn an_effects_abilities_go_with_it_however_it_goes() {
+    let mut app = app(&[channel()]);
+    let mage = actor(&mut app, []);
+    app.world_mut().apply_effect(mage, EffectSpec::new("staff"));
+    app.tick();
+    let staff = app
+        .world()
+        .get::<ActiveEffects>(mage)
+        .unwrap()
+        .iter()
+        .next()
+        .unwrap();
+    let ability = activate(&mut app, mage, "channel").unwrap();
+    assert_eq!(
+        app.world().get::<GrantedBy>(ability),
+        Some(&GrantedBy(staff))
+    );
+    app.world_mut().despawn(staff);
+    app.tick();
+    assert!(app.world().get_entity(ability).is_err(), "taken away");
+}
+
+#[test]
+fn an_active_ability_despawned_takes_back_its_tags() {
+    let mut app = app(&[fireball()]);
+    let mage = caster(&mut app, &["fireball"]);
+    let ability = activate(&mut app, mage, "fireball").unwrap();
+    assert!(owns(&app, mage, "state.casting"));
+    app.world_mut().despawn(ability);
+    app.tick();
+    assert!(!owns(&app, mage, "state.casting"));
+}
+
+#[test]
+fn a_new_registry_gives_granted_abilities_their_new_definitions() {
+    let mut app = app(&[fireball()]);
+    let mage = caster(&mut app, &["fireball"]);
+    let ability = app
+        .world()
+        .get::<Abilities>(mage)
+        .unwrap()
+        .iter()
+        .next()
+        .unwrap();
+    let world = app.world_mut();
+    let effects = world.resource::<EffectRegistry>().clone();
+    let free = fireball().commit(Commit::Manual);
+    let registry = AbilityRegistry::build(
+        &[free, channel()],
+        &[],
+        &tags(),
+        &effects,
+        world.resource::<Behaviours>(),
+    )
+    .unwrap();
+    world.insert_resource(registry);
+    app.tick();
+    assert_eq!(
+        app.world()
+            .get::<GrantedAbility>(ability)
+            .unwrap()
+            .def()
+            .commit,
+        Commit::Manual
+    );
 }

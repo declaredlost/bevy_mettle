@@ -48,6 +48,11 @@ use crate::registry::{AnyAttribute, Limit, Rounding};
 ///
 /// assert_eq!(Life::ID.as_str(), "life");
 /// ```
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` isn't an attribute",
+    label = "not an attribute",
+    note = "a limit is a number written out, or a type with `#[derive(Attribute)]`"
+)]
 pub trait Attribute: Send + Sync + 'static {
     /// The name data names it by: `"life"`.
     const NAME: &'static str;

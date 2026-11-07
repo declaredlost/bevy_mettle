@@ -34,6 +34,10 @@ pub struct ActiveEffect {
     pub(crate) granted: Tags,
     /// What its source owned as it applied.
     pub(crate) source_tags: TagCounts,
+    /// Of its stacks, those a client predicted onto the server's effect.
+    pub(crate) predicted: u32,
+    /// Its modifiers' attribute magnitudes, as captured as it applied.
+    pub(crate) captured: Vec<Option<f32>>,
 }
 
 impl ActiveEffect {

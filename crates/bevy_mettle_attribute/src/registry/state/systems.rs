@@ -17,6 +17,19 @@ pub(crate) fn sync_base<A: Attribute>(
     }
 }
 
+/// Takes `A` off an actor as its `Base<A>` is taken off: its value forgotten,
+/// and its `Current<A>` taken off too.
+pub(crate) fn remove_base<A: Attribute>(
+    event: On<Remove<Base<A>>>,
+    mut actors: Query<&mut AttributeState>,
+    mut commands: Commands,
+) {
+    if let Ok(mut state) = actors.get_mut(event.entity) {
+        state.remove(&A::ID);
+    }
+    commands.entity(event.entity).try_remove::<Current<A>>();
+}
+
 /// Actors whose attributes or owned tags changed.
 type Touched = Or<(Changed<AttributeState>, Changed<OwnedTags>)>;
 
@@ -37,7 +50,7 @@ pub(crate) fn refresh(
 }
 
 /// Writes each actor's `Current<A>` where its value changed, and tells each one
-/// that did.
+/// that did: not its first, which it had none before.
 pub(crate) fn publish<A: Attribute>(
     mut commands: Commands,
     mut actors: Query<(Entity, &AttributeState, &mut Current<A>), Changed<AttributeState>>,
@@ -47,12 +60,16 @@ pub(crate) fn publish<A: Attribute>(
         let Some(new) = state.current(&id) else {
             continue;
         };
-        let was = current.worked_out();
-        if was.is_some_and(|was| was.to_bits() == new.to_bits()) {
+        if current
+            .worked_out()
+            .is_some_and(|was| was.to_bits() == new.to_bits())
+        {
             continue;
         }
-        let old = was.unwrap_or(A::BASE);
-        current.replace(new);
+        // Its first value worked out isn't a change: it had none before.
+        let Some(old) = current.replace(new) else {
+            continue;
+        };
         if (old - new).abs() > 0.0 || old.is_nan() != new.is_nan() {
             commands.trigger(AttributeChanged::<A>::new(entity, old, new));
         }

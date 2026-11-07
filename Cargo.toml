@@ -57,6 +57,7 @@ bevy_mettle_macros = { path = "./crates/bevy_mettle_macros", version = "0.1.0" }
 bevy = { version = "0.20", default-features = false, features = ["std"] }
 bevy_ecs = { version = "0.20", default-features = false, features = ["std"] }
 bevy_curve = { version = "0.20", default-features = false, features = ["std"] }
+bevy_reflect = { version = "0.20", default-features = false, features = ["std"] }
 
 # Networking
 lightyear = { version = "0.31", default-features = false, features = ["std"] }

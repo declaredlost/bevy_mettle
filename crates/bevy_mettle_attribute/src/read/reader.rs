@@ -104,8 +104,10 @@ pub trait AttributeWorld {
 
     /// Changes `actor`'s `attribute`'s base by `op` and `value`, as an instant
     /// effect does (damage taken off life), rounded and kept within its limits:
-    /// `Flat` and `Unscaled` add, `Additive` and `Multiplicative` scale,
-    /// `Divide` divides, `Base` and `Override` set. Whether it has `attribute`.
+    /// as [`Operation::apply`] says. Whether it has `attribute`.
+    ///
+    /// The limits are read as the bases are now, though they changed since
+    /// attributes were last kept.
     fn apply_to_base(
         &mut self,
         actor: Entity,
@@ -113,6 +115,19 @@ pub trait AttributeWorld {
         op: Operation,
         value: f32,
     ) -> bool;
+
+    /// What `actor`'s `attribute`'s base would be were `base` changed by `op`
+    /// and `value`, as [`apply_to_base`](Self::apply_to_base) changes it:
+    /// rounded and kept within its limits, read as the bases are now. `None`
+    /// if there's no such attribute.
+    fn base_after(
+        &mut self,
+        actor: Entity,
+        attribute: &Id<AnyAttribute>,
+        base: f32,
+        op: Operation,
+        value: f32,
+    ) -> Option<f32>;
 
     /// `actor`'s `attribute`'s base, if it has it.
     fn base_at(&self, actor: Entity, attribute: &Id<AnyAttribute>) -> Option<f32>;
@@ -168,25 +183,61 @@ impl AttributeWorld for World {
         let Some(base) = (info.get_base)(self, actor) else {
             return false;
         };
-        let changed = match op {
-            Operation::Base | Operation::Override => value,
-            Operation::Flat | Operation::Unscaled => base + value,
-            Operation::Additive | Operation::Multiplicative => base * (1.0 + value),
-            Operation::Divide => base / (1.0 + value).max(f32::EPSILON),
-        };
-        let kept = match (
-            self.get::<AttributeState>(actor),
-            self.get::<OwnedTags>(actor),
-        ) {
-            (Some(state), Some(owned)) => {
-                state.within_limits(&registry, owned.counts(), attribute, changed)
-            }
-            _ => changed,
+        let Some(kept) = self.base_after(actor, attribute, base, op, value) else {
+            return false;
         };
         (info.set_base)(self, actor, kept);
         if let Some(mut state) = self.get_mut::<AttributeState>(actor) {
             state.set_base(attribute.clone(), kept);
         }
         true
+    }
+
+    fn base_after(
+        &mut self,
+        actor: Entity,
+        attribute: &Id<AnyAttribute>,
+        base: f32,
+        op: Operation,
+        value: f32,
+    ) -> Option<f32> {
+        let registry = self.get_resource::<AttributeRegistry>()?.clone();
+        registry.get(attribute)?;
+        sync_bases(self, &registry, actor);
+        let changed = op.apply(base, value);
+        Some(
+            match (
+                self.get::<AttributeState>(actor),
+                self.get::<OwnedTags>(actor),
+            ) {
+                (Some(state), Some(owned)) => {
+                    state.within_limits(&registry, owned.counts(), attribute, changed)
+                }
+                _ => changed,
+            },
+        )
+    }
+}
+
+/// Syncs `actor`'s cached bases from its `Base`s as they are now, so limits
+/// read them though they changed since attributes were last kept.
+fn sync_bases(world: &mut World, registry: &AttributeRegistry, actor: Entity) {
+    let Some(state) = world.get::<AttributeState>(actor) else {
+        return;
+    };
+    let changed: Vec<(Id<AnyAttribute>, f32)> = registry
+        .iter()
+        .filter_map(|info| {
+            let base = (info.get_base)(world, actor)?;
+            (state.cached_base(&info.id) != Some(base)).then(|| (info.id.clone(), base))
+        })
+        .collect();
+    if changed.is_empty() {
+        return;
+    }
+    if let Some(mut state) = world.get_mut::<AttributeState>(actor) {
+        for (attribute, base) in changed {
+            state.set_base(attribute, base);
+        }
     }
 }

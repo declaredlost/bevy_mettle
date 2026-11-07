@@ -34,9 +34,12 @@ impl Counts {
         if self.local && context.source != Some(self.source) {
             return 0.0;
         }
-        self.condition
+        let weight = self
+            .condition
             .as_ref()
-            .map_or(1.0, |condition| condition.weight(&Read { context, owned }))
+            .map_or(1.0, |condition| condition.weight(&Read { context, owned }));
+        // A weight that isn't a number counts for nothing.
+        if weight.is_nan() { 0.0 } else { weight }
     }
 }
 
@@ -76,18 +79,27 @@ pub struct Breakdown {
 
 impl Breakdown {
     /// `((base + Σ flat) × (1 + Σ additive) × Π (1 + multiplicative) / (1 + Σ
-    /// divide)) + Σ unscaled`, or the override. Less than -100% additive
-    /// leaves nothing, not less; -100% divide or less divides by next to
-    /// nothing.
+    /// divide)) + Σ unscaled`, or the override.
+    ///
+    /// Less than -100% additive leaves nothing, not less; a divide of -99% or
+    /// less divides by 0.01, a hundred times at most.
     #[must_use]
     pub fn total(&self) -> f32 {
         if let Some(value) = self.overriding {
             return value;
         }
         (self.base + self.flat) * (1.0 + self.additive).max(0.0) * self.multiplier
-            / (1.0 + self.divide).max(f32::EPSILON)
+            / divisor(self.divide)
             + self.unscaled
     }
+}
+
+/// The least a divide divides by: -99% or less, a hundred times at most.
+pub(crate) const LEAST_DIVISOR: f32 = 0.01;
+
+/// What a divide of `divide` (`1.0` for +100%) divides by.
+pub(crate) fn divisor(divide: f32) -> f32 {
+    (1.0 + divide).max(LEAST_DIVISOR)
 }
 
 /// An attribute's always-counting modifiers, summed. A `Base` or an `Override`
@@ -118,11 +130,32 @@ impl Default for Sum {
 }
 
 impl Sum {
-    /// Adds `value` by `op`, counted `weight` of itself: an amount scaled by
-    /// it, a base or an override only in full.
-    pub(super) fn add_weighted(&mut self, op: Operation, value: f32, weight: f32, order: u32) {
-        if !op.whole() || weight >= 1.0 {
-            self.add(op, value * weight, order);
+    /// Adds `value` by `op`, counted `weight` of itself, `times` times: an
+    /// amount scaled by both, a base or an override only in full and once.
+    ///
+    /// A multiplicative one is multiplied in once each time, as its own:
+    /// +10% twice is +21%.
+    pub(super) fn add_weighted(
+        &mut self,
+        op: Operation,
+        value: f32,
+        weight: f32,
+        times: f32,
+        order: u32,
+    ) {
+        if times <= 0.0 {
+            return;
+        }
+        match op {
+            Operation::Base | Operation::Override => {
+                if weight >= 1.0 {
+                    self.add(op, value, order);
+                }
+            }
+            Operation::Multiplicative => {
+                self.multiplier *= (1.0 + value * weight).max(0.0).powf(times);
+            }
+            _ => self.add(op, value * weight * times, order),
         }
     }
 
@@ -158,5 +191,31 @@ fn later(one: Option<(u32, f32)>, other: Option<(u32, f32)>) -> Option<(u32, f32
     match (one, other) {
         (Some(one), Some(other)) => Some(if other.0 >= one.0 { other } else { one }),
         (one, other) => one.or(other),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_multiplicative_counted_twice_multiplies_twice() {
+        let mut sum = Sum::default();
+        sum.add_weighted(Operation::Multiplicative, 0.1, 1.0, 2.0, 0);
+        assert!((sum.over(10.0).total() - 12.1).abs() < 1e-4);
+    }
+
+    #[test]
+    fn a_whole_op_counted_no_times_counts_not_at_all() {
+        let mut sum = Sum::default();
+        sum.add_weighted(Operation::Base, 5.0, 1.0, 0.0, 0);
+        assert_eq!(sum.over(10.0).total(), 10.0);
+    }
+
+    #[test]
+    fn a_divide_of_minus_all_divides_by_a_hundredth() {
+        let mut sum = Sum::default();
+        sum.add(Operation::Divide, -3.0, 0);
+        assert!((sum.over(1.0).total() - 100.0).abs() < 1e-3);
     }
 }
