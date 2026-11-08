@@ -6,7 +6,7 @@ use bevy_mettle_core::tag::Tags;
 
 use crate::behaviour::Behaviour;
 use crate::data::Ability;
-use crate::engine;
+use crate::engine::{self, Commitment};
 use crate::events::{Failure, GameplayEvent};
 
 /// Granting, activating, committing and ending abilities, as commands.
@@ -35,6 +35,12 @@ pub trait AbilityCommands {
     /// Activates every ability of this actor's tagged any of `tags`.
     fn activate_tagged(&mut self, tags: Tags) -> &mut Self;
 
+    /// Cancels this actor's active abilities tagged any of `tags`.
+    fn cancel_abilities(&mut self, tags: Tags) -> &mut Self;
+
+    /// Cancels every one of this actor's active abilities: as it dies.
+    fn cancel_all_abilities(&mut self) -> &mut Self;
+
     /// Sends this actor `event`'s tag and payload, as a gameplay event.
     fn send_event(&mut self, event: GameplayEvent) -> &mut Self;
 
@@ -42,13 +48,21 @@ pub trait AbilityCommands {
     fn activate(&mut self) -> &mut Self;
 
     /// Applies this active ability's cost and cooldown, cancelling it if it
-    /// can't pay: for one that commits by hand.
+    /// can't pay: for one that commits by hand. Each once an activation.
     fn commit_ability(&mut self) -> &mut Self;
 
-    /// Ends this active ability.
+    /// Pays this active ability's cost alone, cancelling it if it can't.
+    fn commit_cost(&mut self) -> &mut Self;
+
+    /// Starts this active ability's cooldown alone.
+    fn commit_cooldown(&mut self) -> &mut Self;
+
+    /// Ends this active ability. On a client, its own prediction alone: the
+    /// server's copy runs its course.
     fn end_ability(&mut self) -> &mut Self;
 
-    /// Cancels this active ability.
+    /// Cancels this active ability: on a client, its own prediction, and the
+    /// server's copy too.
     fn cancel_ability(&mut self) -> &mut Self;
 
     /// Takes this granted ability away from its actor.
@@ -98,6 +112,20 @@ impl AbilityCommands for EntityCommands<'_> {
         })
     }
 
+    fn cancel_abilities(&mut self, tags: Tags) -> &mut Self {
+        self.queue(move |entity: EntityWorldMut| {
+            let actor = entity.id();
+            engine::cancel_tagged(entity.into_world_mut(), actor, Some(&tags));
+        })
+    }
+
+    fn cancel_all_abilities(&mut self) -> &mut Self {
+        self.queue(|entity: EntityWorldMut| {
+            let actor = entity.id();
+            engine::cancel_tagged(entity.into_world_mut(), actor, None);
+        })
+    }
+
     fn send_event(&mut self, event: GameplayEvent) -> &mut Self {
         self.queue(move |entity: EntityWorldMut| {
             let actor = entity.id();
@@ -121,7 +149,21 @@ impl AbilityCommands for EntityCommands<'_> {
     fn commit_ability(&mut self) -> &mut Self {
         self.queue(|entity: EntityWorldMut| {
             let ability = entity.id();
-            engine::commit(entity.into_world_mut(), ability);
+            engine::commit(entity.into_world_mut(), ability, Commitment::Both);
+        })
+    }
+
+    fn commit_cost(&mut self) -> &mut Self {
+        self.queue(|entity: EntityWorldMut| {
+            let ability = entity.id();
+            engine::commit(entity.into_world_mut(), ability, Commitment::Cost);
+        })
+    }
+
+    fn commit_cooldown(&mut self) -> &mut Self {
+        self.queue(|entity: EntityWorldMut| {
+            let ability = entity.id();
+            engine::commit(entity.into_world_mut(), ability, Commitment::Cooldown);
         })
     }
 
@@ -135,7 +177,7 @@ impl AbilityCommands for EntityCommands<'_> {
     fn cancel_ability(&mut self) -> &mut Self {
         self.queue(|entity: EntityWorldMut| {
             let ability = entity.id();
-            engine::end(entity.into_world_mut(), ability, true);
+            engine::cancel(entity.into_world_mut(), ability);
         })
     }
 
@@ -196,6 +238,13 @@ pub trait AbilityWorld {
     /// it's decided) `input` doesn't pass its check, which cancels it.
     fn set_input<B: Behaviour>(&mut self, ability: Entity, input: B::Input) -> Result<(), Failure>;
 
+    /// Cancels `actor`'s active abilities tagged any of `tags`: those it
+    /// cancelled.
+    fn cancel_abilities(&mut self, actor: Entity, tags: &Tags) -> Vec<Entity>;
+
+    /// Cancels every one of `actor`'s active abilities: those it cancelled.
+    fn cancel_all_abilities(&mut self, actor: Entity) -> Vec<Entity>;
+
     /// Activates the granted ability `ability`.
     ///
     /// # Errors
@@ -203,12 +252,39 @@ pub trait AbilityWorld {
     /// Why it didn't activate.
     fn activate(&mut self, ability: Entity) -> Result<(), Failure>;
 
-    /// Applies the active `ability`'s cost and cooldown: whether it could pay.
-    /// One that can't is cancelled.
+    /// Applies the active `ability`'s cost and cooldown, each once an
+    /// activation: whether it could pay. One that can't is cancelled.
     fn commit_ability(&mut self, ability: Entity) -> bool;
 
-    /// Ends the active `ability`; cancelled if `cancelled`.
-    fn end_ability(&mut self, ability: Entity, cancelled: bool);
+    /// Pays the active `ability`'s cost alone: whether it could. One that
+    /// can't is cancelled.
+    fn commit_cost(&mut self, ability: Entity) -> bool;
+
+    /// Starts the active `ability`'s cooldown alone: whether it's active.
+    fn commit_cooldown(&mut self, ability: Entity) -> bool;
+
+    /// Whether the granted `ability` could activate now, and if not, why:
+    /// every check activating it makes, with nothing done.
+    ///
+    /// # Errors
+    ///
+    /// Why it couldn't activate.
+    fn can_activate(&self, ability: Entity) -> Result<(), Failure>;
+
+    /// Whether the granted `ability`'s owner could pay its cost now.
+    fn can_afford(&self, ability: Entity) -> bool;
+
+    /// The seconds left on the granted `ability`'s cooldown, if it's cooling
+    /// down: the longest of the effects granting what its cooldown grants;
+    /// forever if none of them runs out.
+    fn cooldown_remaining(&self, ability: Entity) -> Option<f32>;
+
+    /// Ends the active `ability`. On a client, its own prediction alone.
+    fn end_ability(&mut self, ability: Entity);
+
+    /// Cancels the active `ability`: on a client, its own prediction, and the
+    /// server's copy too.
+    fn cancel_ability(&mut self, ability: Entity);
 
     /// Sends `event` to its actor.
     fn send_event(&mut self, event: GameplayEvent);
@@ -245,16 +321,48 @@ impl AbilityWorld for World {
         engine::set_input(self, ability, Some(&B::ID), input)
     }
 
+    fn cancel_abilities(&mut self, actor: Entity, tags: &Tags) -> Vec<Entity> {
+        engine::cancel_tagged(self, actor, Some(tags))
+    }
+
+    fn cancel_all_abilities(&mut self, actor: Entity) -> Vec<Entity> {
+        engine::cancel_tagged(self, actor, None)
+    }
+
     fn activate(&mut self, ability: Entity) -> Result<(), Failure> {
         engine::activate(self, ability, None, None)
     }
 
     fn commit_ability(&mut self, ability: Entity) -> bool {
-        engine::commit(self, ability)
+        engine::commit(self, ability, Commitment::Both)
     }
 
-    fn end_ability(&mut self, ability: Entity, cancelled: bool) {
-        engine::end(self, ability, cancelled);
+    fn commit_cost(&mut self, ability: Entity) -> bool {
+        engine::commit(self, ability, Commitment::Cost)
+    }
+
+    fn commit_cooldown(&mut self, ability: Entity) -> bool {
+        engine::commit(self, ability, Commitment::Cooldown)
+    }
+
+    fn can_activate(&self, ability: Entity) -> Result<(), Failure> {
+        engine::can_activate(self, ability)
+    }
+
+    fn can_afford(&self, ability: Entity) -> bool {
+        engine::can_afford(self, ability)
+    }
+
+    fn cooldown_remaining(&self, ability: Entity) -> Option<f32> {
+        engine::cooldown_remaining(self, ability)
+    }
+
+    fn end_ability(&mut self, ability: Entity) {
+        engine::end(self, ability, false);
+    }
+
+    fn cancel_ability(&mut self, ability: Entity) {
+        engine::cancel(self, ability);
     }
 
     fn send_event(&mut self, event: GameplayEvent) {

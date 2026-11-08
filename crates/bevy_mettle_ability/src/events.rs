@@ -87,6 +87,8 @@ pub enum Failure {
     Blocked,
     /// Its requirement doesn't hold.
     Requirement,
+    /// What interrupts it holds: its `cancel_if`.
+    Interrupted,
     /// Its input wasn't given, or isn't what its behaviour takes, or doesn't
     /// pass its check: at activation, or given while it was active.
     Input,

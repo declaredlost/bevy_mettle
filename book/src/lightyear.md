@@ -183,6 +183,10 @@ what it has. They're advisory.
   controlling the actor, the only one it takes requests from, with the
   replication tick its state goes out at. Later replies, rejecting a running
   activation's input, go the same way.
+- **Ending.** A client's cancels of its own activations go to the server
+  after the requests they cancel, taken only for actors it controls; the
+  server's ends of a client's activations go to the client controlling the
+  actor. Both on [`MettleChannel`].
 
 A reply isn't ordered with replication: they travel different ways. So a
 client holds a reply that confirms its prediction until the actor's state as
@@ -207,9 +211,9 @@ messages and replication, and before [`AbilitySystems`].
   cast for: every request is rejected.
 
 [`AbilityOf`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.AbilityOf.html
-[`AbilityReplica`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityReplica.html
-[`AbilityReply`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityReply.html
-[`AbilityRequest`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityRequest.html
+[`AbilityReplica`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/replica/struct.AbilityReplica.html
+[`AbilityReply`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/request/struct.AbilityReply.html
+[`AbilityRequest`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/request/struct.AbilityRequest.html
 [`AbilitySystems`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilitySystems.html
 [`ControlledBy`]: https://docs.rs/lightyear_replication/latest/lightyear_replication/control/struct.ControlledBy.html
 [`EffectOf`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/active/struct.EffectOf.html

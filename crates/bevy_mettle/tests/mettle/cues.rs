@@ -154,7 +154,7 @@ fn an_abilitys_cue_is_held_while_its_active() {
     let fireball = app.world_mut().activate_ability(mage, "fireball").unwrap();
     app.tick();
     assert_eq!(shown(&app, mage), ["cue.casting"]);
-    app.world_mut().end_ability(fireball, false);
+    app.world_mut().end_ability(fireball);
     app.tick();
     assert_eq!(shown(&app, mage), Vec::<String>::new());
 }
@@ -383,7 +383,7 @@ fn an_ability_reloaded_mid_cast_ends_what_it_started_with() {
     app.resource_mut::<MettleContent>().abilities =
         vec![Ability::new("fireball", "channel").cue("cue.burning")];
     app.tick();
-    app.world_mut().end_ability(fireball, false);
+    app.world_mut().end_ability(fireball);
     app.tick();
     assert_eq!(
         shown(&app, mage),

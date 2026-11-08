@@ -14,10 +14,15 @@ pub use crate::data::{Ability, Commit, Grant, Trigger};
 #[doc(no_inline)]
 pub use crate::events::{AbilityActivated, AbilityEnded, AbilityFailed, Failure, GameplayEvent};
 #[doc(no_inline)]
-pub use crate::net::{
-    AbilityInput, AbilityReplica, AbilityReply, AbilityRequest, AbilityRequestWith,
-};
+pub use crate::net::end::{AbilityCancelRequest, AbilityEnd};
+#[doc(no_inline)]
+pub use crate::net::input::AbilityInput;
+#[doc(no_inline)]
+pub use crate::net::replica::AbilityReplica;
+#[doc(no_inline)]
+pub use crate::net::request::{AbilityReply, AbilityRequest, AbilityRequestWith};
 #[doc(no_inline)]
 pub use crate::{
-    AbilityChecks, AbilityCommands, AbilityPlugin, AbilityRegistry, AbilitySystems, AbilityWorld,
+    AbilityChecks, AbilityCommands, AbilityPlugin, AbilityReader, AbilityRegistry, AbilitySystems,
+    AbilityWorld,
 };

@@ -196,5 +196,5 @@ it applies.
 [`InputCheck`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/behaviour/struct.InputCheck.html
 [`Failure::Input`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/enum.Failure.html#variant.Input
 [`AbilityFailed`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityFailed.html
-[`AbilityRequestWith`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityRequestWith.html
-[`AbilityInput`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityInput.html
+[`AbilityRequestWith`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/request/struct.AbilityRequestWith.html
+[`AbilityInput`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/input/struct.AbilityInput.html
