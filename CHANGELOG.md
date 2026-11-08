@@ -15,3 +15,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `bevy_mettle_macros`' derives), `bevy_mettle_effect` (effects) and
   `bevy_mettle_ability` (abilities).
 - `bevy_mettle_lightyear`: `bevy_mettle`'s prediction over lightyear.
+- `AttributeChanged` is `Clone`, `Copy` and `PartialEq`, as the other
+  events are, whatever its attribute.

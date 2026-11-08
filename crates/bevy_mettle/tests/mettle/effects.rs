@@ -83,45 +83,51 @@ fn flat<A: Attribute>(value: f32) -> EffectModifier {
 }
 
 fn effects_on(app: &TestApp, target: Entity) -> Vec<Entity> {
-    app.world()
-        .get::<ActiveEffects>(target)
+    app.entity(target)
+        .try_get::<ActiveEffects>()
         .map(|effects| effects.iter().collect())
         .unwrap_or_default()
 }
 
 fn owns(app: &TestApp, target: Entity, tag: &'static str) -> bool {
-    app.world()
-        .get::<OwnedTags>(target)
-        .unwrap()
+    app.entity(target)
+        .get::<OwnedTags>()
         .contains(&Id::from_static(tag))
 }
 
-/// What was told, in order.
-#[derive(Resource, Default)]
-struct Told(Vec<String>);
-
+/// Records what an effect tells as it comes, stacks, is blocked or goes.
 fn watch(app: &mut TestApp) {
-    let world = app.world_mut();
-    world.init_resource::<Told>();
-    world.add_observer(|event: On<EffectApplied>, mut told: ResMut<Told>| {
-        told.0.push(format!("applied {}", event.id));
-    });
-    world.add_observer(|event: On<EffectBlocked>, mut told: ResMut<Told>| {
-        told.0
-            .push(format!("blocked {} {:?}", event.id, event.reason));
-    });
-    world.add_observer(|event: On<EffectStacked>, mut told: ResMut<Told>| {
-        told.0
-            .push(format!("stacked {} {}", event.id, event.stacks));
-    });
-    world.add_observer(|event: On<EffectRemoved>, mut told: ResMut<Told>| {
-        told.0
-            .push(format!("removed {} {}", event.id, event.expired));
-    });
+    app.watch_triggered::<EffectApplied>();
+    app.watch_triggered::<EffectBlocked>();
+    app.watch_triggered::<EffectStacked>();
+    app.watch_triggered::<EffectRemoved>();
 }
 
+/// What was told since last asked, each as it reads: `"applied warded"`.
+///
+/// By kind, so a test asks after each step to know which came first.
 fn told(app: &mut TestApp) -> Vec<String> {
-    std::mem::take(&mut app.world_mut().resource_mut::<Told>().0)
+    let applied = app
+        .read_triggered::<EffectApplied>()
+        .into_iter()
+        .map(|event| format!("applied {}", event.id));
+    let blocked = app
+        .read_triggered::<EffectBlocked>()
+        .into_iter()
+        .map(|event| format!("blocked {} {:?}", event.id, event.reason));
+    let stacked = app
+        .read_triggered::<EffectStacked>()
+        .into_iter()
+        .map(|event| format!("stacked {} {}", event.id, event.stacks));
+    let removed = app
+        .read_triggered::<EffectRemoved>()
+        .into_iter()
+        .map(|event| format!("removed {} {}", event.id, event.expired));
+    applied
+        .chain(blocked)
+        .chain(stacked)
+        .chain(removed)
+        .collect()
 }
 
 #[test]
@@ -133,7 +139,7 @@ fn an_instant_effect_changes_the_base_within_its_limits() {
     apply(&mut app, npc, EffectSpec::new("hit"));
     assert!(close(get::<Life>(&app, npc), 30.0));
     apply(&mut app, npc, EffectSpec::new("crush"));
-    let base = app.world().get::<Base<Life>>(npc).unwrap().get();
+    let base = app.entity(npc).get::<Base<Life>>().get();
     assert!(
         close(base, 0.0),
         "the base itself kept at least none: {base}"
@@ -190,17 +196,12 @@ fn a_requirement_or_an_immunity_blocks_an_effect() {
     let npc = actor(&mut app, []);
     own(&mut app, npc, "state.wet", true);
     apply(&mut app, npc, EffectSpec::new("burning"));
+    assert_eq!(told(&mut app), ["blocked burning Requirement"]);
     own(&mut app, npc, "state.wet", false);
     apply(&mut app, npc, EffectSpec::new("warded"));
+    assert_eq!(told(&mut app), ["applied warded"]);
     apply(&mut app, npc, EffectSpec::new("burning"));
-    assert_eq!(
-        told(&mut app),
-        [
-            "blocked burning Requirement",
-            "applied warded",
-            "blocked burning Immunity"
-        ]
-    );
+    assert_eq!(told(&mut app), ["blocked burning Immunity"]);
 }
 
 #[test]
@@ -231,19 +232,22 @@ fn stacks_count_their_modifiers_up_to_a_limit_then_overflow() {
     let mut app = app(&[rage, frenzy]);
     watch(&mut app);
     let npc = actor(&mut app, []);
-    for _ in 0..4 {
-        apply(&mut app, npc, EffectSpec::new("rage"));
-    }
+    let told: Vec<Vec<String>> = (0..4)
+        .map(|_| {
+            apply(&mut app, npc, EffectSpec::new("rage"));
+            told(&mut app)
+        })
+        .collect();
     assert!(close(get::<Damage>(&app, npc), 16.0), "three stacks");
     assert!(close(get::<Strength>(&app, npc), 11.0), "overflowed once");
     assert_eq!(effects_on(&app, npc).len(), 1);
     assert_eq!(
-        told(&mut app),
+        told,
         [
-            "applied rage",
-            "stacked rage 2",
-            "stacked rage 3",
-            "blocked rage StackLimit"
+            ["applied rage"],
+            ["stacked rage 2"],
+            ["stacked rage 3"],
+            ["blocked rage StackLimit"]
         ]
     );
     app.secs(1.0);
@@ -398,8 +402,8 @@ fn effects_come_off_by_activation_tag_or_with_their_actor() {
         "the predicted one taken back"
     );
     let last = effects_on(&app, npc)[0];
-    app.world_mut().despawn(npc);
-    assert!(app.world().get_entity(last).is_err(), "gone with its actor");
+    app.entity_mut(npc).despawn();
+    assert!(!app.entity(last).is_spawned(), "gone with its actor");
 }
 
 #[test]
@@ -410,12 +414,10 @@ fn a_new_registry_gives_active_effects_their_new_definitions() {
     apply(&mut app, npc, EffectSpec::new("haste"));
     assert!(close(get::<AttackSpeed>(&app, npc), 2.0));
     let faster = Effect::infinite("haste").modifier(flat::<AttackSpeed>(3.0));
-    app.world_mut()
-        .insert_resource(registry(&[faster], &EffectCode::new()));
+    app.insert_resource(registry(&[faster], &EffectCode::new()));
     app.ticks(2);
     assert!(close(get::<AttackSpeed>(&app, npc), 4.0));
-    app.world_mut()
-        .insert_resource(registry(&[], &EffectCode::new()));
+    app.insert_resource(registry(&[], &EffectCode::new()));
     app.ticks(2);
     assert!(effects_on(&app, npc).is_empty(), "its effect is gone");
 }

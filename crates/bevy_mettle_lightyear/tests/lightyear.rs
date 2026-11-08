@@ -5,10 +5,10 @@
 use core::net::{Ipv4Addr, SocketAddr};
 use core::time::Duration;
 
-use bevy::platform::time::Instant;
+use bevy::app::Plugins;
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
-use bevy::time::TimeUpdateStrategy;
+use bevy_harness::{TestApp, TestWorld};
 use bevy_mettle_ability::prelude::*;
 use bevy_mettle_attribute::prelude::*;
 use bevy_mettle_core::curve::CurveTable;
@@ -82,246 +82,184 @@ fn protocol(app: &mut App, role: NetRole) {
     world.insert_resource(abilities);
 }
 
-/// A server and a client, connected.
-struct Net {
-    server: App,
-    client: App,
-    /// The client's link, on the server.
-    link: Entity,
-    now: Instant,
+/// The app of one side, `role`, on `plugins`: lightyear's, with mettle.
+fn side<M>(role: NetRole, plugins: impl Plugins<M>) -> TestApp {
+    TestApp::builder()
+        .plugins((StatesPlugin, plugins))
+        .with(|app| protocol(app, role))
+        .fixed_hz(1.0 / TICK.as_secs_f64())
+        .build()
 }
 
-impl Net {
-    fn new() -> Self {
-        let mut server = App::new();
-        server.add_plugins((
-            MinimalPlugins,
-            StatesPlugin,
+/// A server, as `"server"`, and a client, as `"client"`, connected over
+/// crossbeam: the server ticked first, then the client.
+fn net() -> TestWorld {
+    let mut server = side(
+        NetRole::Server,
+        (
             ServerPlugins {
                 tick_duration: TICK,
             },
             RoomPlugin,
-        ));
-        protocol(&mut server, NetRole::Server);
-        let endpoint = server
-            .world_mut()
-            .spawn(NetcodeServer::new(
-                lightyear::netcode::server_plugin::NetcodeConfig {
-                    server_addr_check: false,
-                    ..default()
-                },
-            ))
-            .id();
-        let (client_io, server_io) = CrossbeamIo::new_pair();
-        let link = server
-            .world_mut()
-            .spawn((
-                LinkOf { endpoint },
-                Link::default(),
-                PeerAddr(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1)),
-                Linked,
-                server_io,
-                ReplicationSender,
-                ReplicationReceiver,
-                PingManager::new(PingConfig {
-                    ping_interval: Duration::default(),
-                }),
-            ))
-            .id();
-        let mut client = App::new();
-        client.add_plugins((
-            MinimalPlugins,
-            StatesPlugin,
-            ClientPlugins {
-                tick_duration: TICK,
+        ),
+    );
+    let endpoint = server.spawn(NetcodeServer::new(
+        lightyear::netcode::server_plugin::NetcodeConfig {
+            server_addr_check: false,
+            ..default()
+        },
+    ));
+    let (client_io, server_io) = CrossbeamIo::new_pair();
+    server.spawn((
+        LinkOf { endpoint },
+        Link::default(),
+        PeerAddr(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1)),
+        Linked,
+        server_io,
+        ReplicationSender,
+        ReplicationReceiver,
+        PingManager::new(PingConfig {
+            ping_interval: Duration::default(),
+        }),
+    ));
+    let mut client = side(
+        NetRole::Client,
+        ClientPlugins {
+            tick_duration: TICK,
+        },
+    );
+    let peer = client.spawn((
+        Client,
+        NetcodeClient::new(
+            Authentication::Manual {
+                server_addr: SERVER,
+                protocol_id: 0,
+                private_key: Key::default(),
+                client_id: 0,
             },
-        ));
-        protocol(&mut client, NetRole::Client);
-        client.finish();
-        client.cleanup();
-        let peer = client
-            .world_mut()
-            .spawn((
-                Client,
-                NetcodeClient::new(
-                    Authentication::Manual {
-                        server_addr: SERVER,
-                        protocol_id: 0,
-                        private_key: Key::default(),
-                        client_id: 0,
-                    },
-                    lightyear::netcode::client_plugin::NetcodeConfig::default(),
-                )
-                .unwrap(),
-                ReplicationSender,
-                ReplicationReceiver,
-                PingManager::new(PingConfig {
-                    ping_interval: Duration::default(),
-                }),
-                client_io,
-            ))
-            .id();
-        server.finish();
-        server.cleanup();
-        let now = Instant::now();
-        for app in [&mut server, &mut client] {
-            app.world_mut()
-                .resource_mut::<Time<Real>>()
-                .update_with_instant(now);
-        }
-        server.world_mut().trigger(Start { entity: endpoint });
-        client.world_mut().trigger(Connect { entity: peer });
-        let mut net = Self {
-            server,
-            client,
-            link,
-            now,
-        };
-        for _ in 0..50 {
-            if net.client.world().get::<Connected>(peer).is_some() {
-                break;
-            }
-            net.step(1);
-        }
-        assert!(
-            net.client.world().get::<Connected>(peer).is_some(),
-            "connected"
-        );
-        net
-    }
+            lightyear::netcode::client_plugin::NetcodeConfig::default(),
+        )
+        .unwrap(),
+        ReplicationSender,
+        ReplicationReceiver,
+        PingManager::new(PingConfig {
+            ping_interval: Duration::default(),
+        }),
+        client_io,
+    ));
+    server.trigger(Start { entity: endpoint });
+    client.trigger(Connect { entity: peer });
+    let mut world = TestWorld::new()
+        .with("server", server)
+        .with("client", client);
+    world
+        .until(|world| world["client"].entity(peer).has::<Connected>())
+        .describe("the client connects")
+        .within_ticks(50);
+    world
+}
 
-    /// Runs `n` ticks on both sides.
-    fn step(&mut self, n: usize) {
-        for _ in 0..n {
-            self.now += TICK;
-            // Lightyear reads real time too, as its own stepper does.
-            std::thread::sleep(TICK);
-            for app in [&mut self.client, &mut self.server] {
-                app.insert_resource(TimeUpdateStrategy::ManualInstant(self.now));
-                app.update();
-            }
-        }
-    }
+/// The client's link, on the server.
+fn link(world: &mut TestWorld) -> Entity {
+    world["server"].query::<Entity, With<LinkOf>>().single()
+}
 
-    /// A mage on the server, `controlled` by the client if so, granted
-    /// fireball, and replicated: it, and its mage on the client.
-    fn mage(&mut self, controlled: bool) -> (Entity, Entity) {
-        let mut mage = self.server.world_mut().spawn((
-            Base::<Mana>::default(),
-            Replicate::to_clients(NetworkTarget::All),
-        ));
-        if controlled {
-            mage.insert(ControlledBy {
-                owner: self.link,
-                lifetime: Lifetime::default(),
-            });
-        }
-        let there = mage.id();
-        self.server
-            .world_mut()
-            .grant_ability(there, "fireball", 1.0);
-        for _ in 0..50 {
-            self.step(1);
-            let here = self
-                .client
-                .world()
-                .resource::<ServerEntityMap>()
-                .to_client()
-                .get(&there)
-                .copied();
-            if let Some(here) = here
-                && self
-                    .client
-                    .world()
-                    .get::<Abilities>(here)
+/// What `there`, on the server, is on the client, if it's replicated.
+fn mapped(client: &TestApp, there: Entity) -> Option<Entity> {
+    client
+        .resource::<ServerEntityMap>()
+        .to_client()
+        .get(&there)
+        .copied()
+}
+
+/// A mage on the server, `controlled` by the client if so, granted
+/// fireball, and replicated: it, and its mage on the client.
+fn mage(world: &mut TestWorld, controlled: bool) -> (Entity, Entity) {
+    let link = link(world);
+    let server = &mut world["server"];
+    let there = server.spawn((
+        Base::<Mana>::default(),
+        Replicate::to_clients(NetworkTarget::All),
+    ));
+    if controlled {
+        server.entity_mut(there).insert(ControlledBy {
+            owner: link,
+            lifetime: Lifetime::default(),
+        });
+    }
+    server.world_mut().grant_ability(there, "fireball", 1.0);
+    world
+        .until(|world| {
+            let client = &world["client"];
+            mapped(client, there).is_some_and(|here| {
+                client
+                    .entity(here)
+                    .try_get::<Abilities>()
                     .is_some_and(|abilities| {
-                        abilities.iter().any(|ability| {
-                            self.client.world().get::<GrantedAbility>(ability).is_some()
-                        })
+                        abilities
+                            .iter()
+                            .any(|ability| client.entity(ability).has::<GrantedAbility>())
                     })
-            {
-                return (there, here);
-            }
-        }
-        let map = self
-            .client
-            .world()
-            .resource::<ServerEntityMap>()
-            .to_client()
-            .len();
-        let replicas = self
-            .server
-            .world_mut()
-            .query::<&AbilityReplica>()
-            .iter(self.server.world())
-            .count();
-        let link: Vec<String> = self
-            .server
-            .world()
-            .inspect_entity(self.link)
-            .unwrap()
-            .map(|(_, info)| info.name().to_string())
-            .collect();
-        panic!(
-            "the mage and its fireball didn't replicate: {map} mapped, {replicas} replicas; link: {link:?}"
-        );
-    }
-
-    fn mana(app: &App, mage: Entity) -> f32 {
-        app.world()
-            .value_at(mage, &Mana::ID, &AttributeContext::new())
-            .unwrap()
-    }
-
-    fn effects(app: &App, mage: Entity) -> Vec<(bool, bool)> {
-        app.world()
-            .get::<ActiveEffects>(mage)
-            .map(|effects| effects.iter().collect::<Vec<_>>())
-            .unwrap_or_default()
-            .into_iter()
-            .map(|effect| {
-                (
-                    app.world()
-                        .get::<bevy_mettle_effect::net::PredictedUnder>(effect)
-                        .is_some(),
-                    app.world()
-                        .get::<bevy_mettle_effect::net::Proxy>(effect)
-                        .is_some(),
-                )
             })
-            .collect()
-    }
+        })
+        .describe("the mage and its fireball replicate")
+        .within_ticks(50);
+    (there, mapped(&world["client"], there).unwrap())
+}
+
+/// `mage`'s mana, as `app` reads it.
+fn mana(app: &TestApp, mage: Entity) -> f32 {
+    app.world()
+        .value_at(mage, &Mana::ID, &AttributeContext::new())
+        .unwrap()
+}
+
+/// `mage`'s effects, as `app` has them: whether each is predicted, and
+/// whether it's a proxy of the server's.
+fn effects(app: &TestApp, mage: Entity) -> Vec<(bool, bool)> {
+    app.entity(mage)
+        .try_get::<ActiveEffects>()
+        .into_iter()
+        .flat_map(ActiveEffects::iter)
+        .map(|effect| {
+            let effect = app.entity(effect);
+            (
+                effect.has::<bevy_mettle_effect::net::PredictedUnder>(),
+                effect.has::<bevy_mettle_effect::net::Proxy>(),
+            )
+        })
+        .collect()
+}
+
+/// Whether `a` and `b` are the same mana, to a float's error.
+fn same(a: f32, b: f32) -> bool {
+    (a - b).abs() < 1e-4
 }
 
 #[test]
 fn a_client_predicts_and_the_servers_own_replaces_it() {
-    let mut net = Net::new();
-    let (there, here) = net.mage(true);
-    net.client
+    let mut world = net();
+    let (there, here) = mage(&mut world, true);
+    world["client"]
         .world_mut()
         .activate_ability(here, "fireball")
         .unwrap();
-    net.step(1);
-    assert!(
-        (Net::mana(&net.client, here) - 10.0).abs() < 1e-4,
-        "paid, predicted"
-    );
+    world.tick();
+    assert!(same(mana(&world["client"], here), 10.0), "paid, predicted");
     assert_eq!(
-        Net::effects(&net.client, here),
+        effects(&world["client"], here),
         [(true, false)],
         "a predicted cooldown"
     );
-    net.step(20);
+    world.ticks(20);
     assert!(
-        (Net::mana(&net.server, there) - 10.0).abs() < 1e-4,
+        same(mana(&world["server"], there), 10.0),
         "the server agreed"
     );
-    assert!(
-        (Net::mana(&net.client, here) - 10.0).abs() < 1e-4,
-        "paid once"
-    );
+    assert!(same(mana(&world["client"], here), 10.0), "paid once");
     assert_eq!(
-        Net::effects(&net.client, here),
+        effects(&world["client"], here),
         [(false, true)],
         "the server's, shown"
     );
@@ -329,28 +267,22 @@ fn a_client_predicts_and_the_servers_own_replaces_it() {
 
 #[test]
 fn a_rejected_prediction_is_undone() {
-    let mut net = Net::new();
-    let (there, here) = net.mage(true);
-    net.server
-        .world_mut()
-        .get_mut::<OwnedTags>(there)
+    let mut world = net();
+    let (there, here) = mage(&mut world, true);
+    world["server"]
+        .entity_mut(there)
+        .get_mut::<OwnedTags>()
         .unwrap()
         .add(&Id::from_static("state.stunned"));
-    net.client
+    world["client"]
         .world_mut()
         .activate_ability(here, "fireball")
         .unwrap();
-    net.step(20);
-    assert!(
-        (Net::mana(&net.server, there) - 30.0).abs() < 1e-4,
-        "refused"
-    );
-    assert!(
-        (Net::mana(&net.client, here) - 30.0).abs() < 1e-4,
-        "mana back"
-    );
+    world.ticks(20);
+    assert!(same(mana(&world["server"], there), 30.0), "refused");
+    assert!(same(mana(&world["client"], here), 30.0), "mana back");
     assert_eq!(
-        Net::effects(&net.client, here),
+        effects(&world["client"], here),
         [],
         "the cooldown taken off"
     );
@@ -358,108 +290,81 @@ fn a_rejected_prediction_is_undone() {
 
 #[test]
 fn a_client_cant_ask_for_a_mage_it_doesnt_control() {
-    let mut net = Net::new();
-    let (there, here) = net.mage(false);
-    net.client
+    let mut world = net();
+    let (there, here) = mage(&mut world, false);
+    world["client"]
         .world_mut()
         .activate_ability(here, "fireball")
         .unwrap();
-    net.step(20);
+    world.ticks(20);
+    assert!(same(mana(&world["server"], there), 30.0), "ignored");
     assert!(
-        (Net::mana(&net.server, there) - 30.0).abs() < 1e-4,
-        "ignored"
-    );
-    assert!(
-        (Net::mana(&net.client, here) - 30.0).abs() < 1e-4,
+        same(mana(&world["client"], here), 30.0),
         "rejected, and undone"
     );
-    assert_eq!(Net::effects(&net.client, here), []);
+    assert_eq!(effects(&world["client"], here), []);
 }
 
 #[test]
 fn an_items_modifiers_replicate_and_count_on_the_client() {
-    let mut net = Net::new();
-    let (there, here) = net.mage(true);
+    let mut world = net();
+    let (there, here) = mage(&mut world, true);
     let modifiers = Modifiers(vec![
         Modifier::flat::<Mana>(5.0),
         Modifier::additive::<Mana>(1.0).owner_has("state.stunned"),
         Modifier::flat::<Mana>(100.0).local(),
     ]);
-    let ring = net
-        .server
-        .world_mut()
-        .spawn((
-            ModifierOf(there),
-            modifiers.clone(),
-            Replicate::to_clients(NetworkTarget::All),
-        ))
-        .id();
-    net.step(20);
-    let mapped = net
-        .client
-        .world()
-        .resource::<ServerEntityMap>()
-        .to_client()
-        .get(&ring)
-        .copied()
-        .expect("the ring replicated");
-    assert_eq!(
-        net.client.world().get::<Modifiers>(mapped),
-        Some(&modifiers),
-        "every field, through lightyear's binary format"
-    );
-    assert!(
-        (Net::mana(&net.client, here) - 35.0).abs() < 1e-4,
-        "and counting"
-    );
+    let ring = world["server"].spawn((
+        ModifierOf(there),
+        modifiers.clone(),
+        Replicate::to_clients(NetworkTarget::All),
+    ));
+    world.ticks(20);
+    let client = &world["client"];
+    let ring = mapped(client, ring).expect("the ring replicated");
+    client.entity(ring).assert_eq(modifiers);
+    assert!(same(mana(client, here), 35.0), "and counting");
 }
 
 #[test]
 fn a_confirm_waits_for_the_servers_state_as_of_it() {
-    let mut net = Net::new();
+    let mut world = net();
     // Replication lags the reply: the server's state goes out every 50ms.
-    net.server
-        .insert_resource(ReplicationMetadata::new(Duration::from_millis(50)));
-    let (there, here) = net.mage(true);
-    net.client
+    world["server"].insert_resource(ReplicationMetadata::new(Duration::from_millis(50)));
+    let (there, here) = mage(&mut world, true);
+    world["client"]
         .world_mut()
         .activate_ability(here, "fireball")
         .unwrap();
     for step in 0..30 {
-        net.step(1);
-        let mana = Net::mana(&net.client, here);
+        world.tick();
+        let mana = mana(&world["client"], here);
         assert!(
-            (mana - 10.0).abs() < 1e-4,
+            same(mana, 10.0),
             "paid once, and only once, all along: {mana} at step {step}"
         );
     }
-    assert!((Net::mana(&net.server, there) - 10.0).abs() < 1e-4);
+    assert!(same(mana(&world["server"], there), 10.0));
 }
 
 #[test]
 fn a_shown_effects_source_is_the_clients_own() {
-    let mut net = Net::new();
-    let (_, here) = net.mage(true);
-    net.client
+    let mut world = net();
+    let (_, here) = mage(&mut world, true);
+    world["client"]
         .world_mut()
         .activate_ability(here, "fireball")
         .unwrap();
-    net.step(20);
-    let shown = net
-        .client
-        .world()
-        .get::<ActiveEffects>(here)
-        .unwrap()
+    world.ticks(20);
+    let client = &world["client"];
+    let shown = client
+        .entity(here)
+        .get::<ActiveEffects>()
         .iter()
         .next()
         .unwrap();
     assert_eq!(
-        net.client
-            .world()
-            .get::<ActiveEffect>(shown)
-            .unwrap()
-            .spec()
-            .source,
+        client.entity(shown).get::<ActiveEffect>().spec().source,
         Some(here),
         "mapped from the server's"
     );
@@ -467,101 +372,81 @@ fn a_shown_effects_source_is_the_clients_own() {
 
 #[test]
 fn an_actor_not_replicated_has_its_effects_kept_back_too() {
-    let mut net = Net::new();
-    let (_, here) = net.mage(true);
-    let hidden = net.server.world_mut().spawn(Base::<Mana>::default()).id();
-    net.server.update();
-    net.server
+    let mut world = net();
+    let (_, here) = mage(&mut world, true);
+    let server = &mut world["server"];
+    let hidden = server.spawn(Base::<Mana>::default());
+    server.tick();
+    server
         .world_mut()
         .apply_effect(hidden, EffectSpec::new("fireball.cooldown"));
-    net.step(20);
-    let replicas = net
-        .client
-        .world_mut()
-        .query::<&EffectReplica>()
-        .iter(net.client.world())
-        .count();
-    assert_eq!(replicas, 0, "nothing of an actor the client doesn't see");
-    assert!(net.client.world().get::<Abilities>(here).is_some());
+    world.ticks(20);
+    world["client"].query::<&EffectReplica, ()>().assert_len(0);
+    world["client"].entity(here).assert_has::<Abilities>();
 }
 
 /// `here`'s mana as its `Current` says.
-fn current(app: &App, here: Entity) -> f32 {
-    app.world().get::<Current<Mana>>(here).unwrap().get()
+fn current(app: &TestApp, here: Entity) -> f32 {
+    app.entity(here).get::<Current<Mana>>().get()
 }
 
 #[test]
 fn a_client_shows_the_servers_override_whatever_order_its_sources_came_in() {
-    let mut net = Net::new();
-    let (there, here) = net.mage(true);
-    let ring = |net: &mut Net, value: f32| {
-        net.server
-            .world_mut()
-            .spawn((
-                ModifierOf(there),
-                Modifiers(vec![Modifier::overriding::<Mana>(value)]),
-                Replicate::to_clients(NetworkTarget::All),
-            ))
-            .id()
+    let mut world = net();
+    let (there, here) = mage(&mut world, true);
+    let ring = |world: &mut TestWorld, value: f32| {
+        world["server"].spawn((
+            ModifierOf(there),
+            Modifiers(vec![Modifier::overriding::<Mana>(value)]),
+            Replicate::to_clients(NetworkTarget::All),
+        ))
     };
-    let first = ring(&mut net, 5.0);
-    net.step(10);
-    ring(&mut net, 15.0);
-    net.step(10);
+    let first = ring(&mut world, 5.0);
+    world.ticks(10);
+    ring(&mut world, 15.0);
+    world.ticks(10);
     assert!(
-        (Net::mana(&net.server, there) - 15.0).abs() < 1e-4,
+        same(mana(&world["server"], there), 15.0),
         "the last applied"
     );
     // On the client, the first ring comes (again) after the second.
-    let first = net
-        .client
-        .world()
-        .resource::<ServerEntityMap>()
-        .to_client()
-        .get(&first)
-        .copied()
-        .unwrap();
-    net.client
-        .world_mut()
-        .entity_mut(first)
-        .insert(ModifierOf(here));
-    net.step(2);
+    let first = mapped(&world["client"], first).unwrap();
+    world["client"].entity_mut(first).insert(ModifierOf(here));
+    world.ticks(2);
+    let client = &world["client"];
     let read = AttributeContext::new().tag("state");
-    let local = net.client.world().value_at(here, &Mana::ID, &read).unwrap();
-    assert!((local - 5.0).abs() < 1e-4, "its own fold would say {local}");
-    assert!(
-        (Net::mana(&net.client, here) - 15.0).abs() < 1e-4,
-        "but it shows the server's"
-    );
-    assert!((current(&net.client, here) - 15.0).abs() < 1e-4);
+    let local = client.world().value_at(here, &Mana::ID, &read).unwrap();
+    assert!(same(local, 5.0), "its own fold would say {local}");
+    assert!(same(mana(client, here), 15.0), "but it shows the server's");
+    assert!(same(current(client, here), 15.0));
 }
 
 #[test]
 fn a_prediction_shows_until_answered_then_the_served_value() {
-    let mut net = Net::new();
-    net.server
-        .insert_resource(ReplicationMetadata::new(Duration::from_millis(50)));
-    let (there, here) = net.mage(true);
+    let mut world = net();
+    world["server"].insert_resource(ReplicationMetadata::new(Duration::from_millis(50)));
+    let (there, here) = mage(&mut world, true);
     // A source only the server has: what the client can't work out itself.
-    net.server.world_mut().spawn((
+    world["server"].spawn((
         ModifierOf(there),
         Modifiers(vec![Modifier::flat::<Mana>(100.0)]),
     ));
-    net.step(20);
-    assert!((current(&net.client, here) - 130.0).abs() < 1e-4, "served");
-    net.client
+    world.ticks(20);
+    assert!(same(current(&world["client"], here), 130.0), "served");
+    world["client"]
         .world_mut()
         .activate_ability(here, "fireball")
         .unwrap();
     let mut answered = false;
     for step in 0..30 {
-        net.step(1);
-        let shown = (Net::mana(&net.client, here), current(&net.client, here));
-        if (shown.0 - 110.0).abs() < 1e-4 && (shown.1 - 110.0).abs() < 1e-4 {
+        world.tick();
+        let client = &world["client"];
+        let shown = (mana(client, here), current(client, here));
+        if same(shown.0, 110.0) && same(shown.1, 110.0) {
             answered = true;
         } else {
             assert!(
-                !answered && (shown.0 - 10.0).abs() < 1e-4 && (shown.1 - 10.0).abs() < 1e-4,
+                !answered && same(shown.0, 10.0) && same(shown.1, 10.0),
                 "the prediction, then the served value, nothing between: {shown:?} at {step}"
             );
         }

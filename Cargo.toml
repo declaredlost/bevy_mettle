@@ -64,7 +64,7 @@ lightyear = { version = "0.31", default-features = false, features = ["std"] }
 bevy_replicon = { version = "0.45", default-features = false, features = [] }
 
 # Testing
-bevy_harness = { git = "https://github.com/declaredlost/bevy_harness", version = "0.1.0" }
+bevy_harness = { git = "https://github.com/declaredlost/bevy_harness", branch = "feat/events-and-questions", version = "0.1.0" }
 
 # (De)serialization
 serde = { version = "1.0", features = [] }

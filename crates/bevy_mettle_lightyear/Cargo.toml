@@ -40,5 +40,8 @@ bevy = { workspace = true, features = ["bevy_state"] }
 lightyear = { workspace = true, features = ["client", "server", "replication", "crossbeam", "netcode"] }
 bevy_mettle_core = { workspace = true, features = [] }
 
+# Driving the client and server as apps under test
+bevy_harness = { workspace = true, features = [] }
+
 [lints]
 workspace = true

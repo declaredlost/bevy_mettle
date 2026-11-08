@@ -321,10 +321,7 @@ fn a_change_to_a_base_is_kept_within_a_limit_changed_since_kept() {
     set_base::<MaxLife>(&mut app, npc, 200.0);
     app.world_mut()
         .apply_to_base(npc, &Life::ID, Operation::Flat, 100.0);
-    assert!(close(
-        app.world().get::<Base<Life>>(npc).unwrap().get(),
-        150.0
-    ));
+    assert!(close(app.entity(npc).get::<Base<Life>>().get(), 150.0));
 }
 
 #[test]
@@ -360,7 +357,7 @@ fn taking_a_base_off_takes_the_attribute_away() {
             .value_at(npc, &Damage::ID, &AttributeContext::new()),
         None
     );
-    assert!(app.world().get::<Current<Damage>>(npc).is_none());
+    app.entity(npc).assert_lacks::<Current<Damage>>();
     app.entity_mut(npc).insert(Base::<Damage>::new(4.0));
     app.tick();
     assert!(close(get::<Damage>(&app, npc), 4.0), "and back");
@@ -383,7 +380,7 @@ fn an_actors_attributes_reflect() {
 
     let mut app = app();
     let npc = actor(&mut app, [Modifier::flat::<Damage>(5.0)]);
-    let registry = app.world().resource::<AppTypeRegistry>().clone();
+    let registry = app.resource::<AppTypeRegistry>().clone();
     let registry = registry.read();
     let base = registry
         .get_with_type_path(Base::<Damage>::type_path())
