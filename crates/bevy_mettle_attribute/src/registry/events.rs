@@ -36,6 +36,21 @@ impl<A: Attribute> AttributeChanged<A> {
     }
 }
 
+// By hand: derived, they'd ask `A` for them too, through its marker.
+impl<A: Attribute> Clone for AttributeChanged<A> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<A: Attribute> Copy for AttributeChanged<A> {}
+
+impl<A: Attribute> PartialEq for AttributeChanged<A> {
+    fn eq(&self, other: &Self) -> bool {
+        (self.entity, self.old, self.new) == (other.entity, other.old, other.new)
+    }
+}
+
 impl<A: Attribute> fmt::Debug for AttributeChanged<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AttributeChanged")

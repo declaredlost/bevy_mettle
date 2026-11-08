@@ -147,7 +147,7 @@ impl Game {
             .drain()
             .collect();
         for request in requests {
-            self.server.world_mut().write_message(AbilityRequest {
+            self.server.write(AbilityRequest {
                 actor: self.there,
                 ..request
             });
@@ -165,7 +165,7 @@ impl Game {
             .drain()
             .collect();
         for reply in replies {
-            self.client.world_mut().write_message(AbilityReply {
+            self.client.write(AbilityReply {
                 actor: self.here,
                 ..reply
             });
@@ -188,7 +188,12 @@ impl Game {
             .map(|effects| effects.iter().collect::<Vec<_>>())
             .unwrap_or_default()
             .into_iter()
-            .filter_map(|effect| self.server.world().get::<EffectReplica>(effect).cloned())
+            .filter_map(|effect| {
+                self.server
+                    .entity(effect)
+                    .try_get::<EffectReplica>()
+                    .cloned()
+            })
             .collect();
         for replica in effects {
             self.client.spawn((replica, EffectOf(self.here)));
@@ -199,14 +204,13 @@ impl Game {
     /// The mage's granted `id`, on the client.
     fn ability_here(&self, id: &str) -> Entity {
         self.client
-            .world()
-            .get::<Abilities>(self.here)
-            .unwrap()
+            .entity(self.here)
+            .get::<Abilities>()
             .iter()
             .find(|ability| {
                 self.client
-                    .world()
-                    .get::<GrantedAbility>(*ability)
+                    .entity(*ability)
+                    .try_get::<GrantedAbility>()
                     .is_some_and(|granted| granted.id().as_str() == id)
             })
             .unwrap()
@@ -215,14 +219,13 @@ impl Game {
     /// The mage's granted `id`, on the server.
     fn ability_there(&self, id: &str) -> Entity {
         self.server
-            .world()
-            .get::<Abilities>(self.there)
-            .unwrap()
+            .entity(self.there)
+            .get::<Abilities>()
             .iter()
             .find(|ability| {
                 self.server
-                    .world()
-                    .get::<GrantedAbility>(*ability)
+                    .entity(*ability)
+                    .try_get::<GrantedAbility>()
                     .is_some_and(|granted| granted.id().as_str() == id)
             })
             .unwrap()
@@ -230,15 +233,15 @@ impl Game {
 
     fn cooldowns_here(&self) -> Vec<(bool, bool)> {
         self.client
-            .world()
-            .get::<ActiveEffects>(self.here)
+            .entity(self.here)
+            .try_get::<ActiveEffects>()
             .map(|effects| effects.iter().collect::<Vec<_>>())
             .unwrap_or_default()
             .into_iter()
             .map(|effect| {
                 (
-                    self.client.world().get::<PredictedUnder>(effect).is_some(),
-                    self.client.world().get::<Proxy>(effect).is_some(),
+                    self.client.entity(effect).has::<PredictedUnder>(),
+                    self.client.entity(effect).has::<Proxy>(),
                 )
             })
             .collect()
@@ -246,9 +249,8 @@ impl Game {
 }
 
 fn owns(app: &TestApp, actor: Entity, tag: &'static str) -> bool {
-    app.world()
-        .get::<OwnedTags>(actor)
-        .unwrap()
+    app.entity(actor)
+        .get::<OwnedTags>()
         .contains(&Id::from_static(tag))
 }
 
@@ -319,10 +321,7 @@ fn a_rejected_prediction_is_undone() {
         .iter()
         .next()
         .unwrap();
-    assert!(
-        game.client.world().get::<ActiveAbility>(ability).is_none(),
-        "ended"
-    );
+    assert!(!game.client.entity(ability).has::<ActiveAbility>(), "ended");
 }
 
 #[test]
@@ -348,7 +347,7 @@ fn a_shown_effect_takes_its_tags_with_it_as_it_goes() {
         owns(&game.client, game.here, "cooldown.fireball"),
         "not ticked here"
     );
-    game.client.world_mut().despawn(shown);
+    game.client.entity_mut(shown).despawn();
     game.client.tick();
     assert!(
         !owns(&game.client, game.here, "cooldown.fireball"),
@@ -407,11 +406,10 @@ fn shown(game: &mut Game, effect: &'static str) -> Entity {
     game.server.tick();
     game.answer();
     game.client
-        .world()
-        .get::<ActiveEffects>(game.here)
-        .unwrap()
+        .entity(game.here)
+        .get::<ActiveEffects>()
         .iter()
-        .find(|shown| game.client.world().get::<Proxy>(*shown).is_some())
+        .find(|shown| game.client.entity(*shown).has::<Proxy>())
         .unwrap()
 }
 
@@ -425,8 +423,8 @@ fn a_stack_predicted_onto_the_servers_effect_is_kept_apart() {
     game.client.tick();
     let stacks = |game: &Game| {
         game.client
-            .world()
-            .get::<ActiveEffect>(ward)
+            .entity(ward)
+            .try_get::<ActiveEffect>()
             .map(ActiveEffect::stacks)
     };
     assert_eq!(stacks(&game), Some(2));
@@ -535,7 +533,7 @@ fn another_sources_effect_under_the_same_activation_isnt_taken_for_mine() {
 #[test]
 fn a_request_under_the_servers_bit_is_rejected() {
     let mut game = Game::new();
-    game.server.world_mut().write_message(AbilityRequest {
+    game.server.write(AbilityRequest {
         actor: game.there,
         ability: Id::from_static("fireball"),
         activation: 1 << 63 | 5,
@@ -563,11 +561,7 @@ fn an_abilitys_replica_restated_changes_its_level() {
         .level = 3.0;
     game.client.tick();
     assert_eq!(
-        game.client
-            .world()
-            .get::<GrantedAbility>(ability)
-            .unwrap()
-            .level(),
+        game.client.entity(ability).get::<GrantedAbility>().level(),
         3.0
     );
 }

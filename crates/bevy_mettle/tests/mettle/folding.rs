@@ -177,8 +177,7 @@ fn a_remote_actor_shows_what_it_is_served_but_while_it_predicts() {
     app.entity_mut(npc)
         .insert((Remote, Served::<Damage>::new(42.0)));
     app.tick();
-    let current =
-        |app: &bevy_harness::TestApp| app.world().get::<Current<Damage>>(npc).unwrap().get();
+    let current = |app: &bevy_harness::TestApp| app.entity(npc).get::<Current<Damage>>().get();
     assert!(close(get::<Damage>(&app, npc), 42.0), "served");
     assert!(close(current(&app), 42.0));
     let read = AttributeContext::new().tag("damage");

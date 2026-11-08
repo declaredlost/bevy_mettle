@@ -7,40 +7,43 @@ use bevy_mettle::prelude::*;
 
 use crate::common::{AttackSpeed, Damage, FIRE, Life, Resistance, actor, app, own, set_base};
 
-#[derive(Resource, Default)]
-struct Told(Vec<String>);
-
+/// Records everything these tests ask about.
 fn watch(app: &mut TestApp) {
-    let world = app.world_mut();
-    world.init_resource::<Told>();
-    world.add_observer(
-        |event: On<AttributeChanged<Damage>>, mut told: ResMut<Told>| {
-            told.0
-                .push(format!("damage {} -> {}", event.old, event.new));
-        },
-    );
-    world.add_observer(
-        |event: On<AttributeChanged<AttackSpeed>>, mut told: ResMut<Told>| {
-            told.0
-                .push(format!("attack_speed {} -> {}", event.old, event.new));
-        },
-    );
-    world.add_observer(
-        |event: On<AttributeChanged<Resistance>>, mut told: ResMut<Told>| {
-            told.0
-                .push(format!("resistance {} -> {}", event.old, event.new));
-        },
-    );
-    world.add_observer(|event: On<TagAdded>, mut told: ResMut<Told>| {
-        told.0.push(format!("+{}", event.tag));
-    });
-    world.add_observer(|event: On<TagRemoved>, mut told: ResMut<Told>| {
-        told.0.push(format!("-{}", event.tag));
-    });
+    app.watch_triggered::<AttributeChanged<Damage>>();
+    app.watch_triggered::<AttributeChanged<AttackSpeed>>();
+    app.watch_triggered::<AttributeChanged<Resistance>>();
+    app.watch_triggered::<TagAdded>();
+    app.watch_triggered::<TagRemoved>();
 }
 
+/// What was told since last asked, each as it reads, sorted.
 fn told(app: &mut TestApp) -> Vec<String> {
-    let mut heard = std::mem::take(&mut app.world_mut().resource_mut::<Told>().0);
+    let changed = |name: &str, old: f32, new: f32| format!("{name} {old} -> {new}");
+    let mut heard: Vec<String> = app
+        .read_triggered::<AttributeChanged<Damage>>()
+        .into_iter()
+        .map(|event| changed("damage", event.old, event.new))
+        .chain(
+            app.read_triggered::<AttributeChanged<AttackSpeed>>()
+                .into_iter()
+                .map(|event| changed("attack_speed", event.old, event.new)),
+        )
+        .chain(
+            app.read_triggered::<AttributeChanged<Resistance>>()
+                .into_iter()
+                .map(|event| changed("resistance", event.old, event.new)),
+        )
+        .chain(
+            app.read_triggered::<TagAdded>()
+                .into_iter()
+                .map(|event| format!("+{}", event.tag)),
+        )
+        .chain(
+            app.read_triggered::<TagRemoved>()
+                .into_iter()
+                .map(|event| format!("-{}", event.tag)),
+        )
+        .collect();
     heard.sort();
     heard
 }
@@ -137,7 +140,7 @@ fn current_is_written_only_when_its_value_changes() {
     set_base::<Damage>(&mut app, npc, 20.0);
     app.tick();
     assert_ne!(last(&app), folded, "a value changed");
-    assert_eq!(app.world().get::<Current<Damage>>(npc).unwrap().get(), 25.0);
+    assert_eq!(app.entity(npc).get::<Current<Damage>>().get(), 25.0);
 }
 
 #[test]
@@ -146,12 +149,12 @@ fn current_starts_at_the_base_spawned_with() {
     watch(&mut app);
     let npc = app.spawn(Base::<Life>::new(30.0));
     assert_eq!(
-        app.world().get::<Current<Life>>(npc).unwrap().get(),
+        app.entity(npc).get::<Current<Life>>().get(),
         30.0,
         "before it's worked out"
     );
     app.tick();
-    assert_eq!(app.world().get::<Current<Life>>(npc).unwrap().get(), 30.0);
+    assert_eq!(app.entity(npc).get::<Current<Life>>().get(), 30.0);
     assert!(told(&mut app).is_empty(), "nothing changed");
 }
 
@@ -167,7 +170,7 @@ fn removing_a_tag_not_owned_tells_nothing_and_keeps_the_rest() {
     own(&mut app, npc, "state.moving", false);
     app.tick();
     assert!(told(&mut app).is_empty(), "nothing went");
-    let owned = app.world().get::<OwnedTags>(npc).unwrap();
+    let owned = app.entity(npc).get::<OwnedTags>();
     assert!(owned.contains(&Id::from_static("immune")));
     assert!(owned.contains(&Id::from_static("immune.stun")));
 }
