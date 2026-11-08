@@ -10,8 +10,10 @@ pub mod events;
 pub mod net;
 mod plugin;
 pub mod prelude;
+mod reader;
 mod registry;
 
 pub use self::commands::{AbilityCommands, AbilityWorld};
 pub use self::plugin::{AbilityPlugin, AbilitySystems};
+pub use self::reader::AbilityReader;
 pub use self::registry::{AbilityChecks, AbilityRegistry};

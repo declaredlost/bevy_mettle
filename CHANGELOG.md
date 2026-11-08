@@ -46,6 +46,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sent to the server (`AbilityRequestWith`, `AbilityInput`), which checks it
   again and rejects the activation if it doesn't hold. `Failure::Input`.
 - `replicate_input` in `bevy_mettle_lightyear`.
+- Interrupting abilities: `cancel_if` on an ability, a condition that
+  cancels it as soon as it holds while active (weighed once per actor as
+  its tags change, as it activates, and as its definition is replaced) and
+  keeps it from activating (`Failure::Interrupted`). Over a network, the
+  server interrupts; a client leaves it to the server.
+  `cancel_abilities(tags)` and `cancel_all_abilities()` on an actor.
+- Endings over a network: a server tells a client of the end of an ability
+  run under its activation (`AbilityEnd`), and a client asks the server to
+  cancel its own as it cancels it (`AbilityCancelRequest`); a cancel that
+  overtakes its request is held for it. A client's other endings are its
+  own: the server decides. `bevy_mettle_lightyear` carries both, a cancel
+  after the request it cancels.
+- Committing in parts: `commit_cost()` and `commit_cooldown()` beside
+  `commit_ability()`, each once an activation; `GrantedAbility` says
+  `is_cost_paid()` and `is_cooldown_started()`, each true where there's
+  nothing to commit, and `is_committed()` once both are. A client that
+  can't pay from what it predicts leaves the ability to the server.
+- Asking without doing: `can_activate`, `can_afford` and
+  `cooldown_remaining`, on `AbilityWorld` and the new `AbilityReader` system
+  parameter.
 - Cues (`bevy_mettle_effect::cue`): what's shown of effects and abilities.
   Lasting cues held while an effect counts or an ability is active (`cues`
   in their data), or by `add_cue`, each an entity (`ActiveCue`, `CueOf`);
@@ -59,6 +79,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `bevy_mettle_ability::net` is split by what goes over the wire:
+  `net::request` (`AbilityRequest`, `AbilityRequestWith`, `AbilityReply`),
+  `net::input` (`AbilityInput`), `net::end` (`AbilityEnd`,
+  `AbilityCancelRequest`) and `net::replica` (`AbilityReplica`). The prelude
+  still has them all.
+- `AbilityWorld::end_ability(ability, cancelled)` is `end_ability(ability)`
+  and `cancel_ability(ability)`, as the commands are.
 - `NetRole` is core's, `bevy_mettle_core::net::NetRole`: what every part
   reads, not the effect crate's alone.
 
@@ -103,6 +130,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An ability committing as it activates pays before it starts: before
+  what it cancels, grants or cues, and before its behaviour. One that can't
+  pay by then fails with `Failure::Cost` with nothing started, rather than
+  activating unpaid.
 - Effects and abilities let go of exactly what they started with: an effect
   taken off however it goes (despawned, replicated away) lets go of its
   cues, and an ability ended after its definition was replaced takes off

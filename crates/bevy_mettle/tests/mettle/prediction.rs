@@ -103,7 +103,8 @@ fn world(role: NetRole) -> TestApp {
     let fireball = Ability::new("fireball", "cast")
         .cost("fireball.cost")
         .cooldown("fireball.cooldown")
-        .blocked_by("state.stunned");
+        .blocked_by("state.stunned")
+        .cancel_if(Condition::owner_has("state.stunned"));
     let charge = Ability::new("charge", "cast")
         .cost("fireball.cost")
         .commit(Commit::Manual);
@@ -191,6 +192,18 @@ impl Game {
                 ..request
             });
         }
+        let cancels: Vec<AbilityCancelRequest> = self
+            .client
+            .world_mut()
+            .resource_mut::<Messages<AbilityCancelRequest>>()
+            .drain()
+            .collect();
+        for cancel in cancels {
+            self.server.write(AbilityCancelRequest {
+                actor: self.there,
+                ..cancel
+            });
+        }
         let inputs: Vec<AbilityInput<Aim>> = self
             .client
             .world_mut()
@@ -219,6 +232,18 @@ impl Game {
             self.client.write(AbilityReply {
                 actor: self.here,
                 ..reply
+            });
+        }
+        let ends: Vec<AbilityEnd> = self
+            .server
+            .world_mut()
+            .resource_mut::<Messages<AbilityEnd>>()
+            .drain()
+            .collect();
+        for end in ends {
+            self.client.write(AbilityEnd {
+                actor: self.here,
+                ..end
             });
         }
         let mana = self
@@ -715,4 +740,182 @@ fn new_input_is_predicted_and_cancels_both_sides_if_the_server_rejects_it() {
         close(get::<Mana>(&game.client, game.here), 10.0),
         "paid all the same: it ran"
     );
+}
+
+#[test]
+fn a_cast_the_server_interrupts_ends_on_the_client_too() {
+    let mut game = Game::new();
+    game.client.watch_triggered::<AbilityEnded>();
+    let here = game
+        .client
+        .world_mut()
+        .activate_ability(game.here, "fireball")
+        .unwrap();
+    game.ask();
+    game.answer();
+
+    // The server stuns the mage; the client doesn't see the stun.
+    own(&mut game.server, game.there, "state.stunned", true);
+    game.server.tick();
+    game.server
+        .entity(game.ability_there("fireball"))
+        .assert_lacks::<ActiveAbility>();
+    game.answer();
+    game.client.entity(here).assert_lacks::<ActiveAbility>();
+    game.client
+        .assert_triggered::<AbilityEnded>(|ended| ended.ability == here && ended.cancelled);
+    assert!(
+        close(get::<Mana>(&game.client, game.here), 10.0),
+        "paid all the same"
+    );
+}
+
+/// A fireball cast by the client and served, and its ability on each side.
+fn casting(game: &mut Game) -> (Entity, Entity) {
+    let here = game
+        .client
+        .world_mut()
+        .activate_ability(game.here, "fireball")
+        .unwrap();
+    game.ask();
+    game.answer();
+    let there = game.ability_there("fireball");
+    game.server.entity(there).assert_has::<ActiveAbility>();
+    (here, there)
+}
+
+#[test]
+fn a_cast_the_client_cancels_is_cancelled_on_the_server_too() {
+    let mut game = Game::new();
+    game.server.watch_triggered::<AbilityEnded>();
+    let (here, there) = casting(&mut game);
+    game.client.world_mut().cancel_ability(here);
+    game.ask();
+    game.server.entity(there).assert_lacks::<ActiveAbility>();
+    game.server
+        .assert_triggered::<AbilityEnded>(|ended| ended.ability == there && ended.cancelled);
+}
+
+#[test]
+fn a_cast_the_client_ends_runs_its_course_on_the_server() {
+    let mut game = Game::new();
+    let (here, there) = casting(&mut game);
+    game.client.world_mut().end_ability(here);
+    game.ask();
+    game.server.entity(there).assert_has::<ActiveAbility>();
+}
+
+#[test]
+fn a_client_leaves_interrupting_to_the_server() {
+    let mut game = Game::new();
+    let (here, there) = casting(&mut game);
+
+    // The client sees a stun the server doesn't: what it predicts may be
+    // wrong, so its cast runs on.
+    own(&mut game.client, game.here, "state.stunned", true);
+    game.client.tick();
+    game.client.entity(here).assert_has::<ActiveAbility>();
+    game.ask();
+    game.server.entity(there).assert_has::<ActiveAbility>();
+}
+
+#[test]
+fn a_client_that_cant_pay_from_what_it_predicts_leaves_it_to_the_server() {
+    let mut game = Game::with(&["charge"], &[]);
+    let here = game
+        .client
+        .world_mut()
+        .activate_ability(game.here, "charge")
+        .unwrap();
+    game.ask();
+    game.answer();
+    let there = game.ability_there("charge");
+
+    // The client predicts too little mana; the server has enough.
+    game.client
+        .world_mut()
+        .get_mut::<Base<Mana>>(game.here)
+        .unwrap()
+        .set(5.0);
+    game.client.tick();
+    assert!(!game.client.world_mut().commit_ability(here));
+    game.client.entity(here).assert_has::<ActiveAbility>();
+
+    // The server can't pay either: it cancels, and tells the client.
+    game.server
+        .world_mut()
+        .get_mut::<Base<Mana>>(game.there)
+        .unwrap()
+        .set(5.0);
+    game.server.tick();
+    assert!(!game.server.world_mut().commit_ability(there));
+    game.server.entity(there).assert_lacks::<ActiveAbility>();
+    game.answer();
+    game.client.entity(here).assert_lacks::<ActiveAbility>();
+}
+
+#[test]
+fn a_cancel_that_overtakes_its_cast_is_held_for_it() {
+    let mut game = Game::new();
+    let here = game
+        .client
+        .world_mut()
+        .activate_ability(game.here, "fireball")
+        .unwrap();
+    game.client.world_mut().cancel_ability(here);
+
+    // The cancel arrives a frame before the request.
+    let request: Vec<AbilityRequest> = game
+        .client
+        .world_mut()
+        .resource_mut::<Messages<AbilityRequest>>()
+        .drain()
+        .collect();
+    game.ask();
+    game.client.world_mut().write_message_batch(request);
+    game.ask();
+    game.server
+        .entity(game.ability_there("fireball"))
+        .assert_lacks::<ActiveAbility>();
+}
+
+#[test]
+fn a_cancel_held_past_its_time_is_let_go() {
+    let mut game = Game::new();
+    let here = game
+        .client
+        .world_mut()
+        .activate_ability(game.here, "fireball")
+        .unwrap();
+    game.client.world_mut().cancel_ability(here);
+    let request: Vec<AbilityRequest> = game
+        .client
+        .world_mut()
+        .resource_mut::<Messages<AbilityRequest>>()
+        .drain()
+        .collect();
+    game.ask();
+
+    // The request comes long after: the cancel's past, and the cast runs.
+    game.server.secs(1.5);
+    game.client.world_mut().write_message_batch(request);
+    game.ask();
+    game.server
+        .entity(game.ability_there("fireball"))
+        .assert_has::<ActiveAbility>();
+}
+
+#[test]
+fn a_cancel_asked_with_the_cast_follows_it_to_the_server() {
+    let mut game = Game::new();
+    let here = game
+        .client
+        .world_mut()
+        .activate_ability(game.here, "fireball")
+        .unwrap();
+    game.client.world_mut().cancel_ability(here);
+    game.ask();
+    game.server
+        .entity(game.ability_there("fireball"))
+        .assert_lacks::<ActiveAbility>();
 }

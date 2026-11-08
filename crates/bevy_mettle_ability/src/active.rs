@@ -32,7 +32,10 @@ pub struct GrantedAbility {
     /// The behaviour whose component it activated with, to take off: its
     /// definition may have been replaced since.
     pub(crate) running: Option<Id<AnyBehaviour>>,
-    pub(crate) committed: bool,
+    /// Whether this activation paid its cost.
+    pub(crate) cost_paid: bool,
+    /// Whether this activation started its cooldown.
+    pub(crate) cooldown_started: bool,
 }
 
 impl GrantedAbility {
@@ -44,7 +47,8 @@ impl GrantedAbility {
             granted: Tags::new(),
             cues: Tags::new(),
             running: None,
-            committed: false,
+            cost_paid: false,
+            cooldown_started: false,
         }
     }
 
@@ -72,10 +76,25 @@ impl GrantedAbility {
         self.source
     }
 
-    /// Whether its cost and cooldown are applied, this activation.
+    /// Whether this activation's cost is paid: once it's committed it, or
+    /// its cost alone. One without a cost has nothing to pay.
+    #[must_use]
+    pub fn is_cost_paid(&self) -> bool {
+        self.cost_paid || self.def.cost.is_none()
+    }
+
+    /// Whether this activation's cooldown is started: once it's committed it,
+    /// or its cooldown alone. One without a cooldown has nothing to start.
+    #[must_use]
+    pub fn is_cooldown_started(&self) -> bool {
+        self.cooldown_started || self.def.cooldown.is_none()
+    }
+
+    /// Whether this activation's committed in full: everything it has of a
+    /// cost and a cooldown, paid and started.
     #[must_use]
     pub fn is_committed(&self) -> bool {
-        self.committed
+        self.is_cost_paid() && self.is_cooldown_started()
     }
 }
 

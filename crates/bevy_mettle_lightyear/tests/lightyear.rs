@@ -113,7 +113,8 @@ fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
     let fireball = Ability::new("fireball", "cast")
         .cost("fireball.cost")
         .cooldown("fireball.cooldown")
-        .blocked_by("state.stunned");
+        .blocked_by("state.stunned")
+        .cancel_if(Condition::owner_has("state.stunned"));
     let shot = Ability::new("shot", "shoot").cost("fireball.cost");
     let abilities = AbilityRegistry::check(
         &[fireball, shot],
@@ -798,4 +799,85 @@ fn owner_only_replicas_go_and_come_back_with_their_actor() {
         })
         .describe("its replicas come back on it")
         .within_ticks(50);
+}
+
+/// Whether `app` has `actor`'s fireball active.
+fn casting(app: &TestApp, actor: Entity) -> bool {
+    app.entity(actor)
+        .try_get::<Abilities>()
+        .is_some_and(|abilities| {
+            abilities
+                .iter()
+                .any(|ability| app.entity(ability).has::<ActiveAbility>())
+        })
+}
+
+#[test]
+fn a_cast_the_server_interrupts_ends_on_the_client() {
+    let mut world = net();
+    let (there, here) = mage(&mut world, true);
+    world["client"]
+        .world_mut()
+        .activate_ability(here, "fireball")
+        .unwrap();
+    world
+        .until(|world| casting(&world["server"], there))
+        .describe("the server casts too")
+        .within_ticks(20);
+
+    // Stunned on the server, which doesn't send its owned tags.
+    world["server"]
+        .entity_mut(there)
+        .get_mut::<OwnedTags>()
+        .unwrap()
+        .add(&Id::from_static("state.stunned"));
+    world
+        .until(|world| !casting(&world["server"], there) && !casting(&world["client"], here))
+        .describe("the cast ends on both sides")
+        .within_ticks(20);
+    assert!(
+        same(mana(&world["client"], here), 10.0),
+        "paid all the same"
+    );
+}
+
+#[test]
+fn a_cast_the_client_cancels_is_cancelled_on_the_server() {
+    let mut world = net();
+    let (there, here) = mage(&mut world, true);
+    let cast = world["client"]
+        .world_mut()
+        .activate_ability(here, "fireball")
+        .unwrap();
+    world
+        .until(|world| casting(&world["server"], there))
+        .describe("the server casts too")
+        .within_ticks(20);
+    world["client"].world_mut().cancel_ability(cast);
+    world
+        .until(|world| !casting(&world["server"], there))
+        .describe("the server's cast is cancelled")
+        .within_ticks(20);
+}
+
+#[test]
+fn a_cast_cancelled_as_its_asked_for_never_runs_on_the_server() {
+    let mut world = net();
+    let (there, here) = mage(&mut world, true);
+    world["server"].watch_triggered::<AbilityEnded>();
+    let cast = world["client"]
+        .world_mut()
+        .activate_ability(here, "fireball")
+        .unwrap();
+    world["client"].world_mut().cancel_ability(cast);
+    world
+        .until(|world| same(mana(&world["server"], there), 10.0))
+        .describe("the server casts, and pays")
+        .within_ticks(20);
+    world
+        .until(|world| !casting(&world["server"], there))
+        .describe("the server's cast is cancelled, after it's asked for")
+        .within_ticks(20);
+    world["server"]
+        .assert_triggered::<AbilityEnded>(|ended| ended.entity == there && ended.cancelled);
 }

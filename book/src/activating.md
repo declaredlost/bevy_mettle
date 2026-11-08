@@ -26,7 +26,8 @@ of what it's been granted. Despawning the mage despawns its abilities.
 
 [`GrantedAbility`] tells you which ability it is (`id()`, `def()`), its level
 (`level()`), the effect that granted it if one did (`source()`), and whether
-this activation has paid (`is_committed()`). The level is what the cost's and
+this activation has paid its cost (`is_cost_paid()`), started its cooldown
+(`is_cooldown_started()`), or both (`is_committed()`). The level is what the cost's and
 cooldown's curves are read at.
 
 Granting the same ability twice gives the actor two entities. Activating by
@@ -48,14 +49,17 @@ targets](input.md) covers that. Mettle checks, in this order:
 4. **Not blocked.** The mage owns none of `blocked_by`, and no other active
    ability `blocks` the fireball's tags. Otherwise `Failure::Blocked`.
 5. **Required.** `require` holds. Otherwise `Failure::Requirement`.
+6. **Not interrupted.** `cancel_if` doesn't hold. Otherwise
+   `Failure::Interrupted`.
 
 Then it activates:
 
+- with `Commit::OnActivate`, its cost and cooldown are applied first, so
+  its behaviour starts paid for;
 - active abilities it `cancels` are cancelled;
 - the mage owns what it `grants`;
 - [`ActiveAbility`] is put on the ability's entity, with its behaviour's
   component;
-- with `Commit::OnActivate`, its cost and cooldown are applied;
 - [`AbilityActivated`] is triggered on the mage.
 
 If a check fails, nothing happens but [`AbilityFailed`], triggered on the
@@ -115,7 +119,7 @@ assert!(world.get::<CastFireball>(ability).is_some());
 assert_eq!(world.activate_ability(mage, "fireball"), Err(Failure::Active));
 
 // Ended: no longer casting, but still cooling down.
-world.end_ability(ability, false);
+world.end_ability(ability);
 assert!(world.get::<CastFireball>(ability).is_none());
 let owned = world.get::<OwnedTags>(mage).unwrap();
 assert!(!owned.contains(&Id::from_static("state.casting")));
@@ -182,8 +186,10 @@ These are commands on the ability's entity:
 | Command | What it does |
 |---|---|
 | `commit_ability()` | Pays the cost and starts the cooldown, for a `Commit::Manual` ability. One that can't pay is cancelled. |
-| `end_ability()` | Ends it: its behaviour's component taken off, the tags it granted taken back. |
-| `cancel_ability()` | The same, but told as cancelled. |
+| `commit_cost()` | Pays the cost alone. One that can't is cancelled. |
+| `commit_cooldown()` | Starts the cooldown alone. |
+| `end_ability()` | Ends it: its behaviour's component taken off, the tags it granted taken back. On a client, its own prediction alone. |
+| `cancel_ability()` | The same, but told as cancelled. On a client, the server's copy is cancelled too. |
 | `revoke_ability()` | Takes it away from the actor, cancelling it first if it's active. |
 
 Ending an ability doesn't refund anything. The cost is paid and the cooldown
@@ -194,10 +200,106 @@ So does one whose entity loses its [`GrantedAbility`] some other way, such as
 replication taking it away.
 
 On the actor, the commands are `grant_ability`, `activate_ability`,
-`activate_tagged` and `send_event` (see [Grants and triggers](grants-triggers.md)).
+`activate_tagged` and `send_event` (see [Grants and triggers](grants-triggers.md)),
+and `cancel_abilities(tags)` and `cancel_all_abilities()`: every active
+ability tagged any of `tags` cancelled, or every one, as the actor dies.
 In an exclusive system or a test, [`AbilityWorld`] does the same on the
 `World` at once, and says how it went: `activate_ability` returns the
-ability or the [`Failure`], `commit_ability` whether it could pay.
+ability or the [`Failure`], `commit_ability` whether it could pay;
+`end_ability` and `cancel_ability` end an ability as the commands do.
+
+## Asking
+
+A UI greys out what can't be cast and sweeps cooldowns; an AI picks what it
+can cast. [`AbilityReader`], a system parameter, asks about a granted
+ability with nothing done:
+
+- `can_activate(ability)`: every check activating it makes, `Ok` or the
+  [`Failure`] it would fail with;
+- `can_afford(ability)`: whether its owner could pay its cost;
+- `cooldown_remaining(ability)`: the seconds left on its cooldown, `None` if
+  it isn't cooling down, and `f32::INFINITY` if nothing that cools it runs
+  out. It says cooling down exactly when `can_activate` does.
+
+```rust
+# use bevy::prelude::*;
+# use bevy_mettle::prelude::*;
+fn buttons(abilities: Query<Entity, With<GrantedAbility>>, reader: AbilityReader) {
+    for ability in &abilities {
+        let usable = reader.can_activate(ability).is_ok();
+        let sweep = reader.cooldown_remaining(ability).unwrap_or(0.0);
+        // Grey the button out unless usable; sweep it by what's left.
+#       let _ = (usable, sweep);
+    }
+}
+# App::new().add_systems(Update, buttons);
+```
+
+It reads the whole world, so it doesn't run alongside systems that change
+abilities, effects or tags. [`AbilityWorld`] asks the same of the `World`.
+
+## Interrupted
+
+A stun landing mid-cast should stop the cast. Say what interrupts an ability
+with `cancel_if`, a [condition](conditions.md) weighed as `require` is: in the
+ability's own tags and its owner's.
+
+```rust
+# use bevy::prelude::*;
+# use bevy_mettle::prelude::*;
+# #[derive(Attribute)] #[attribute(base = 100.0, min = 0.0)] struct Mana;
+# #[derive(Component, Default, Behaviour)] struct CastFireball;
+let fireball = Ability::new("fireball", "cast_fireball")
+    .cancel_if(Condition::owner_has("state.stunned"));
+
+# use std::time::Duration;
+# use bevy::time::TimeUpdateStrategy;
+let mut app = App::new();
+app.add_plugins((MinimalPlugins, MettlePlugins))
+#   // Each update moves time on by one fixed step.
+#   .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(1.0 / 64.0)))
+    .add_attribute::<Mana>()
+    .add_behaviour::<CastFireball>()
+    .insert_resource(MettleContent {
+        tags: ["state", "state.stunned"]
+            .into_iter()
+            .map(|id| Tag { id: Id::new(id) })
+            .collect(),
+        abilities: vec![fireball],
+        ..default()
+    });
+app.update();
+let mage = app.world_mut().spawn(Base::<Mana>::default()).id();
+app.world_mut().grant_ability(mage, "fireball", 1.0).unwrap();
+let cast = app.world_mut().activate_ability(mage, "fireball").unwrap();
+
+// Stunned mid-cast: interrupted.
+app.world_mut()
+    .get_mut::<OwnedTags>(mage)
+    .unwrap()
+    .add(&Id::new("state.stunned"));
+app.update();
+# app.update();
+assert!(app.world().get::<ActiveAbility>(cast).is_none());
+
+// Stunned still: it can't start again.
+assert_eq!(
+    app.world_mut().activate_ability(mage, "fireball"),
+    Err(Failure::Interrupted)
+);
+```
+
+It's weighed whenever its owner's tags change, once however many changed,
+so a `cancel_if` of `Not(OwnerHas("state.raging"))` ends a rage as the
+raging stops. It's weighed as the ability activates too, past what it
+grants and cancels, and as its definition is replaced. An interrupted
+ability is cancelled: [`AbilityEnded`] says so, its cost stays paid and its
+cooldown runs. Over a network, the server interrupts: see
+[Prediction](prediction.md#endings-both-ways).
+
+`cancel_if` keeps an ability from starting as well as stopping it once it
+has, so an interruption needs nothing more. `blocked_by` only keeps it from
+starting: for what shouldn't stop a cast already under way.
 
 ## Told
 
@@ -238,6 +340,7 @@ fn out_of_mana(failed: On<AbilityFailed>) {
 [`AbilityActivated`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityActivated.html
 [`AbilityEnded`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityEnded.html
 [`AbilityFailed`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityFailed.html
+[`AbilityReader`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilityReader.html
 [`AbilityWorld`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/trait.AbilityWorld.html
 [`ActiveAbility`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.ActiveAbility.html
 [`Failure`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/enum.Failure.html

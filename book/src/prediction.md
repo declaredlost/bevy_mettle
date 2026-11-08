@@ -220,6 +220,31 @@ assert!(client.world().get::<ActiveEffects>(mage).is_none_or(|effects| effects.i
 client does with a reply. Abilities call them for you as replies arrive. Call
 them yourself only for effects you predict under an activation of your own.
 
+## Endings, both ways
+
+A predicted ability runs on both sides, and the server decides how it ends:
+
+- **The server ends it**, for a client's activation: done, interrupted by a
+  stun only the server sees yet, its cost unpaid at commit, or revoked. It
+  tells that client with an [`AbilityEnd`], and the client ends its copy.
+- **The client cancels it**, its own prediction, with `cancel_ability` or
+  `cancel_abilities`: a channel let go of, a cast called off. It asks the
+  server to cancel its copy with an [`AbilityCancelRequest`].
+- **The client ends it any other way**, and only its own copy ends. A cast
+  that ends itself when its time is up ends on the client first, as the
+  client runs ahead: the server's copy runs its course, to its last frame.
+- **The client leaves to the server** what it would work out from what it
+  predicts, which may be wrong. It doesn't interrupt: a stun it predicts
+  may never land. A commit it can't pay from the mana it predicts returns
+  `false` but leaves the ability running. The server weighs both, and its
+  [`AbilityEnd`] ends the client's copy if it agrees.
+
+Either side ignores an end of what isn't running any more. A cancel that
+gets to the server before the request it cancels is held for it, up to a
+second, and up to 16 for one actor. An
+end isn't a rejection: the cost stays paid and the cooldown runs, on both
+sides. A server's own activations aren't told: a client never runs them.
+
 ## Cues
 
 A client predicts cues with what plays them: a predicted cooldown's cue is
@@ -256,11 +281,13 @@ Ability requests, replies and replicas are handled in [`AbilitySystems`], in
 
 [`AbilityOf`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.AbilityOf.html
 [`AbilityFailed`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityFailed.html
-[`AbilityReplica`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityReplica.html
-[`AbilityReply`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityReply.html
-[`AbilityRequest`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityRequest.html
-[`AbilityRequestWith`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityRequestWith.html
-[`AbilityInput`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityInput.html
+[`AbilityReplica`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/replica/struct.AbilityReplica.html
+[`AbilityReply`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/request/struct.AbilityReply.html
+[`AbilityEnd`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/end/struct.AbilityEnd.html
+[`AbilityCancelRequest`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/end/struct.AbilityCancelRequest.html
+[`AbilityRequest`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/request/struct.AbilityRequest.html
+[`AbilityRequestWith`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/request/struct.AbilityRequestWith.html
+[`AbilityInput`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/input/struct.AbilityInput.html
 [`AbilitySystems`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilitySystems.html
 [`AttributeChanged`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/registry/struct.AttributeChanged.html
 [`confirm_prediction`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/trait.EffectWorld.html#tymethod.confirm_prediction

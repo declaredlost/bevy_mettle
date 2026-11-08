@@ -79,7 +79,7 @@ app.entity(mage).assert::<Current<Mana>>(|mana| mana.get() == 80.0);
 app.entity(fireball).assert_has::<CastFireball>();
 
 // End it, and cast again: still cooling down.
-app.world_mut().end_ability(fireball, false);
+app.world_mut().end_ability(fireball);
 app.world_mut().activate_ability(mage, "fireball").unwrap_err();
 app.assert_triggered::<AbilityFailed>(|failed| failed.reason == Failure::Cooldown);
 

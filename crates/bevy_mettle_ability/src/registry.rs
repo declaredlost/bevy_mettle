@@ -185,8 +185,8 @@ fn check_def(
     ] {
         push(tags.known_all(set.written(), within));
     }
-    if let Some(require) = &def.require {
-        push(require.check(tags, within));
+    for condition in [&def.require, &def.cancel_if].into_iter().flatten() {
+        push(condition.check(tags, within));
     }
     for trigger in &def.triggers {
         let (Trigger::Event(tag) | Trigger::TagAdded(tag) | Trigger::TagPresent(tag)) = trigger;

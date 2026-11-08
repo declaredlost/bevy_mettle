@@ -11,6 +11,22 @@ use crate::common::{Mana, actor, attributes, close, get, own};
 #[derive(Component, Default, Behaviour)]
 struct Cast;
 
+/// A behaviour that notes its caster's mana as it starts ([`witness`]).
+#[derive(Component, Default, Behaviour)]
+struct Witness;
+
+/// The caster's mana as [`Witness`] started.
+#[derive(Resource, Default)]
+struct Witnessed(Option<f32>);
+
+fn witness(add: On<Add<Witness>>, active: Query<&ActiveAbility>, mut commands: Commands) {
+    let actor = active.get(add.entity).unwrap().actor;
+    commands.queue(move |world: &mut World| {
+        let mana = world.get::<Base<Mana>>(actor).map(Base::get);
+        world.insert_resource(Witnessed(mana));
+    });
+}
+
 /// Where a shot is aimed: how far along.
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 struct Aim(f32);
@@ -99,6 +115,8 @@ fn app(abilities: &[Ability]) -> TestApp {
         .with(|app| {
             app.add_behaviour::<Cast>()
                 .add_behaviour::<Shoot>()
+                .add_behaviour::<Witness>()
+                .add_observer(witness)
                 .check_input::<Aim, _>(in_reach);
         })
         .build();
@@ -159,7 +177,7 @@ fn activating_runs_the_behaviour_pays_and_cools_down() {
     assert_eq!(app.entity(ability).get::<ActiveAbility>().actor, mage);
     assert!(close(get::<Mana>(&app, mage), 10.0), "paid");
     assert!(owns(&app, mage, "state.casting"));
-    app.world_mut().end_ability(ability, false);
+    app.world_mut().end_ability(ability);
     app.tick();
     app.entity(ability).assert_lacks::<Cast>();
     assert!(!owns(&app, mage, "state.casting"));
@@ -318,7 +336,7 @@ fn a_cooldown_applied_under_an_activation_can_be_taken_back() {
     let mage = caster(&mut app, &["fireball"]);
     let ability = activate(&mut app, mage, "fireball").unwrap();
     let activation = app.entity(ability).get::<ActiveAbility>().activation;
-    app.world_mut().end_ability(ability, true);
+    app.world_mut().cancel_ability(ability);
     app.world_mut()
         .commands()
         .entity(mage)
@@ -517,7 +535,7 @@ fn an_ability_activates_with_its_input_and_ends_without_it() {
         .assert_eq(Aim(4.0));
     app.tick();
     assert!(close(get::<Mana>(&app, mage), 10.0), "paid");
-    app.world_mut().end_ability(shooting, false);
+    app.world_mut().end_ability(shooting);
     app.entity(shooting)
         .assert_lacks::<Shoot>()
         .assert_lacks::<Aim>();
@@ -624,4 +642,226 @@ fn input_for_another_behaviour_than_the_abilitys_cancels_it() {
         Err(Failure::Input)
     );
     app.entity(shooting).assert_lacks::<Shoot>();
+}
+
+/// A cast a stun interrupts, and a rage that lasts only while raging.
+fn interruptible() -> [Ability; 2] {
+    [
+        Ability::new("cast", "cast")
+            .tag("ability.spell")
+            .cancel_if(Condition::owner_has("state.stunned")),
+        Ability::new("rage", "cast")
+            .tag("ability.channel")
+            .cancel_if(!Condition::owner_has("state.raging")),
+    ]
+}
+
+#[test]
+fn an_active_ability_is_interrupted_as_its_cancel_if_comes_to_hold() {
+    let mut app = app(&interruptible());
+    app.watch_triggered::<AbilityEnded>();
+    let mage = caster(&mut app, &["cast", "rage"]);
+    own(&mut app, mage, "state.raging", true);
+    app.tick();
+    let cast = activate(&mut app, mage, "cast").unwrap();
+    let rage = activate(&mut app, mage, "rage").unwrap();
+
+    // Stunned: the cast is interrupted, the rage goes on.
+    own(&mut app, mage, "state.stunned", true);
+    app.tick();
+    app.entity(cast).assert_lacks::<ActiveAbility>();
+    app.entity(rage).assert_has::<ActiveAbility>();
+    app.assert_triggered::<AbilityEnded>(|ended| ended.ability == cast && ended.cancelled);
+
+    // No longer raging: the rage is.
+    own(&mut app, mage, "state.raging", false);
+    app.tick();
+    app.entity(rage).assert_lacks::<ActiveAbility>();
+}
+
+#[test]
+fn an_ability_whose_cancel_if_holds_cant_activate() {
+    let mut app = app(&interruptible());
+    let mage = caster(&mut app, &["cast"]);
+    own(&mut app, mage, "state.stunned", true);
+    app.tick();
+    assert_eq!(activate(&mut app, mage, "cast"), Err(Failure::Interrupted));
+}
+
+#[test]
+fn an_actors_abilities_are_cancelled_by_tag_or_all_at_once() {
+    let mut app = app(&interruptible());
+    let mage = caster(&mut app, &["cast", "rage"]);
+    own(&mut app, mage, "state.raging", true);
+    app.tick();
+    let cast = activate(&mut app, mage, "cast").unwrap();
+    let rage = activate(&mut app, mage, "rage").unwrap();
+    let spells: Tags = [Id::new("ability.spell")].into_iter().collect();
+    assert_eq!(app.world_mut().cancel_abilities(mage, &spells), [cast]);
+    app.entity(rage).assert_has::<ActiveAbility>();
+    let cast = activate(&mut app, mage, "cast").unwrap();
+    let mut all = app.world_mut().cancel_all_abilities(mage);
+    all.sort();
+    let mut both = vec![cast, rage];
+    both.sort();
+    assert_eq!(all, both);
+}
+
+#[test]
+fn cost_and_cooldown_commit_apart_each_once() {
+    let mut app = app(&[fireball().commit(Commit::Manual)]);
+    let mage = caster(&mut app, &["fireball"]);
+    let ability = activate(&mut app, mage, "fireball").unwrap();
+
+    // The cooldown first: nothing paid yet.
+    assert!(app.world_mut().commit_cooldown(ability));
+    app.tick();
+    assert!(owns(&app, mage, "cooldown.fireball"));
+    assert!(close(get::<Mana>(&app, mage), 30.0), "not paid yet");
+    let granted = app.entity(ability).get::<GrantedAbility>();
+    assert!(granted.is_cooldown_started() && !granted.is_cost_paid());
+
+    // Committing it all now pays the cost alone.
+    assert!(app.world_mut().commit_ability(ability));
+    app.tick();
+    assert!(close(get::<Mana>(&app, mage), 10.0));
+    assert!(app.entity(ability).get::<GrantedAbility>().is_committed());
+    assert!(app.world_mut().commit_cost(ability), "once per activation");
+    app.tick();
+    assert!(close(get::<Mana>(&app, mage), 10.0));
+}
+
+#[test]
+fn a_cost_committed_alone_that_cant_be_paid_cancels() {
+    let mut app = app(&[fireball().commit(Commit::Manual)]);
+    let mage = caster(&mut app, &["fireball"]);
+    let ability = activate(&mut app, mage, "fireball").unwrap();
+    app.world_mut()
+        .get_mut::<Base<Mana>>(mage)
+        .unwrap()
+        .set(5.0);
+    app.tick();
+    assert!(!app.world_mut().commit_cost(ability));
+    app.entity(ability).assert_lacks::<ActiveAbility>();
+    assert!(!owns(&app, mage, "cooldown.fireball"), "nor cooling down");
+}
+
+#[test]
+fn an_ability_is_asked_about_with_nothing_done() {
+    use bevy::ecs::system::RunSystemOnce;
+
+    let mut app = app(&[fireball()]);
+    let mage = actor(&mut app, []);
+    let ability = app
+        .world_mut()
+        .grant_ability(mage, "fireball", 1.0)
+        .unwrap();
+    app.tick();
+    let asked = |app: &mut TestApp| {
+        app.world_mut()
+            .run_system_once(move |reader: AbilityReader| {
+                (
+                    reader.can_activate(ability),
+                    reader.can_afford(ability),
+                    reader.cooldown_remaining(ability),
+                )
+            })
+            .unwrap()
+    };
+    assert_eq!(asked(&mut app), (Ok(()), true, None));
+    assert!(close(get::<Mana>(&app, mage), 30.0), "nothing paid asking");
+
+    // Cast, ticked a step, ended, and a quarter second on: 10 mana left.
+    assert_eq!(activate(&mut app, mage, "fireball"), Ok(ability));
+    app.world_mut().end_ability(ability);
+    app.secs(0.25);
+    let (can, affords, remaining) = asked(&mut app);
+    assert_eq!(can, Err(Failure::Cooldown));
+    assert!(!affords);
+    assert!(
+        remaining.is_some_and(|left| close(left, 0.75 - 1.0 / 64.0)),
+        "{remaining:?}"
+    );
+    assert_eq!(app.world().can_activate(ability), can, "as the world says");
+
+    app.secs(1.0);
+    assert_eq!(asked(&mut app), (Err(Failure::Cost), false, None));
+}
+
+#[test]
+fn an_ability_committing_as_it_activates_pays_before_it_starts() {
+    let mut app = app(&[Ability::new("witness", "witness").cost("fireball.cost")]);
+    let mage = caster(&mut app, &["witness"]);
+    activate(&mut app, mage, "witness").unwrap();
+    let Witnessed(mana) = app.world().resource::<Witnessed>();
+    assert!(
+        mana.is_some_and(|mana| close(mana, 10.0)),
+        "paid as its behaviour started: {mana:?}"
+    );
+}
+
+#[test]
+fn an_ability_without_a_cooldown_is_committed_once_it_pays() {
+    let mut app = app(&[Ability::new("witness", "witness")
+        .cost("fireball.cost")
+        .commit(Commit::Manual)]);
+    let mage = caster(&mut app, &["witness"]);
+    let ability = activate(&mut app, mage, "witness").unwrap();
+    let granted = app.entity(ability).get::<GrantedAbility>();
+    assert!(granted.is_cooldown_started(), "nothing to start");
+    assert!(!granted.is_committed());
+    assert!(app.world_mut().commit_cost(ability));
+    assert!(app.entity(ability).get::<GrantedAbility>().is_committed());
+}
+
+#[test]
+fn an_ability_its_own_grants_interrupt_ends_as_it_starts() {
+    let reckless = Ability::new("reckless", "cast")
+        .grant("state.stunned")
+        .cancel_if(Condition::owner_has("state.stunned"));
+    let mut app = app(&[reckless]);
+    let mage = caster(&mut app, &["reckless"]);
+    let ability = activate(&mut app, mage, "reckless").unwrap();
+    app.entity(ability).assert_lacks::<ActiveAbility>();
+    assert!(!owns(&app, mage, "state.stunned"), "its grants taken back");
+}
+
+#[test]
+fn a_new_definition_that_interrupts_an_active_ability_cancels_it() {
+    let mut app = app(&[fireball()]);
+    let mage = caster(&mut app, &["fireball"]);
+    let ability = activate(&mut app, mage, "fireball").unwrap();
+    own(&mut app, mage, "state.stunned", true);
+    app.tick();
+    app.entity(ability).assert_has::<ActiveAbility>();
+
+    let world = app.world_mut();
+    let effects = world.resource::<EffectRegistry>().clone();
+    let registry = AbilityRegistry::check(
+        &[
+            fireball().cancel_if(Condition::owner_has("state.stunned")),
+            channel(),
+        ],
+        &[],
+        AbilityChecks {
+            tags: &tags(),
+            effects: &effects,
+            behaviours: world.resource::<Behaviours>(),
+        },
+    )
+    .unwrap();
+    world.insert_resource(registry);
+    app.tick();
+    app.entity(ability).assert_lacks::<ActiveAbility>();
+}
+
+#[test]
+fn a_cooldown_owned_without_an_effect_has_no_end() {
+    let mut app = app(&[fireball()]);
+    let mage = caster(&mut app, &["fireball"]);
+    let ability = app.entity(mage).get::<Abilities>().iter().next().unwrap();
+    own(&mut app, mage, "cooldown.fireball", true);
+    app.tick();
+    assert_eq!(app.world().can_activate(ability), Err(Failure::Cooldown));
+    assert_eq!(app.world().cooldown_remaining(ability), Some(f32::INFINITY));
 }

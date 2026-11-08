@@ -54,6 +54,7 @@ assert_eq!(fireball.commit, Commit::OnActivate);
 | `cost` | An instant effect it pays as it commits. It can't activate if paying would take an attribute below 0. |
 | `cooldown` | A lasting effect applied as it commits. It can't activate while its owner owns a tag that effect grants. |
 | `require` | A [condition](conditions.md) that has to hold for it to activate. |
+| `cancel_if` | A condition that interrupts it: while it's active, it's cancelled as soon as this holds. See [Granting and activating](activating.md#interrupted). |
 | `blocked_by` | It can't activate while its owner owns any of these tags. |
 | `cancels` | Active abilities tagged any of these are cancelled as it activates. |
 | `blocks` | Other abilities tagged any of these can't activate while it's active. |
@@ -149,7 +150,10 @@ cooldown scaled by a curve reads it at the ability's level.
   pay then, the ability is cancelled. Until it commits, the cooldown hasn't
   started, so cancelling a cast costs nothing.
 
-Committing twice in one activation does nothing the second time.
+The cost and the cooldown commit apart too, with `commit_cost` and
+`commit_cooldown`: a charged shot starts its cooldown as it's pressed and
+pays as it's let go. Each commits once an activation; committing again does
+nothing.
 
 ## Checking them
 

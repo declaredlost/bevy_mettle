@@ -62,6 +62,14 @@ pub struct Ability {
         skip_serializing_if = "Option::is_none"
     )]
     pub require: Option<Condition>,
+    /// What interrupts it: while active, it's cancelled as soon as this holds,
+    /// weighed as `require` is; holding already, it can't activate.
+    #[serde(
+        default,
+        with = "bevy_mettle_core::optional",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cancel_if: Option<Condition>,
     /// It can't activate while its owner owns any of these.
     #[serde(default, skip_serializing_if = "Tags::is_empty")]
     pub blocked_by: Tags,
@@ -131,6 +139,7 @@ impl Ability {
             cost: None,
             cooldown: None,
             require: None,
+            cancel_if: None,
             blocked_by: Tags::new(),
             cancels: Tags::new(),
             blocks: Tags::new(),
@@ -166,6 +175,14 @@ impl Ability {
     #[must_use]
     pub fn require(mut self, require: Condition) -> Self {
         self.require = Some(require);
+        self
+    }
+
+    /// Interrupted as soon as `cancel_if` holds while it's active: stunned
+    /// mid-cast.
+    #[must_use]
+    pub fn cancel_if(mut self, cancel_if: Condition) -> Self {
+        self.cancel_if = Some(cancel_if);
         self
     }
 
