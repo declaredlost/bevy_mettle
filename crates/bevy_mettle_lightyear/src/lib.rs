@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 #![doc = include_str!("../README.md")]
 
-use std::collections::HashMap;
+pub mod prelude;
 
 use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::ecs::message::Messages;
@@ -10,7 +10,9 @@ use bevy::reflect::TypePath;
 use bevy_mettle_ability::AbilitySystems;
 use bevy_mettle_ability::active::AbilityOf;
 use bevy_mettle_ability::events::Failure;
-use bevy_mettle_ability::net::{AbilityReplica, AbilityReply, AbilityRequest};
+use bevy_mettle_ability::net::{
+    AbilityInput, AbilityReplica, AbilityReply, AbilityRequest, AbilityRequestWith,
+};
 use bevy_mettle_attribute::authority::{self, Served};
 use bevy_mettle_attribute::registry::AttributeState;
 use bevy_mettle_attribute::{Attribute, Base, Current};
@@ -21,6 +23,7 @@ use bevy_replicon::prelude::RepliconTick;
 use bevy_replicon::server::server_tick::ServerTick;
 use lightyear::prelude::server::ClientOf;
 use lightyear::prelude::*;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 /// The channel mettle's messages go on: reliable and ordered.
@@ -72,8 +75,7 @@ impl Plugin for MettleNetPlugin {
         app.component::<EffectOf>().replicate();
         app.component::<AbilityReplica>().replicate();
         app.component::<AbilityOf>().replicate();
-        app.init_resource::<Asked>()
-            .init_resource::<Held>()
+        app.init_resource::<Held>()
             .add_systems(
                 PreUpdate,
                 (
@@ -95,13 +97,20 @@ impl Plugin for MettleNetPlugin {
     }
 }
 
-/// Replicating attributes over lightyear: `replicate_attribute::<A>()`.
+/// Replicating attributes, and sending abilities' input, over lightyear.
 pub trait MettleNetApp {
     /// Replicates `A` from the server: its [`Base`], what predictions are
     /// worked out on, and its [`Served`] value, what clients show.
     ///
     /// On the server, every actor with `Base<A>` serves `A`.
     fn replicate_attribute<A: Attribute>(&mut self) -> &mut Self;
+
+    /// Sends `I`, a behaviour's input, from clients to the server: activations
+    /// with it, and new input to activations running, taken only for actors
+    /// [`ControlledBy`] the client sending it, on [`MettleChannel`].
+    fn replicate_input<I>(&mut self) -> &mut Self
+    where
+        I: Component + Clone + Serialize + DeserializeOwned + MapEntities;
 }
 
 impl MettleNetApp for App {
@@ -109,6 +118,29 @@ impl MettleNetApp for App {
         self.component::<Base<A>>().replicate();
         self.component::<Served<A>>().replicate();
         self.add_systems(Update, serve::<A>.run_if(resource_equals(NetRole::Server)))
+    }
+
+    fn replicate_input<I>(&mut self) -> &mut Self
+    where
+        I: Component + Clone + Serialize + DeserializeOwned + MapEntities,
+    {
+        self.register_message::<AbilityRequestWith<I>>()
+            .add_map_entities()
+            .add_direction(NetworkDirection::ClientToServer);
+        self.register_message::<AbilityInput<I>>()
+            .add_map_entities()
+            .add_direction(NetworkDirection::ClientToServer);
+        self.add_systems(
+            PreUpdate,
+            hear_input::<I>
+                .run_if(resource_equals(NetRole::Server))
+                .after(MessageSystems::Receive)
+                .before(AbilitySystems),
+        )
+        .add_systems(
+            Update,
+            ask_with::<I>.run_if(resource_equals(NetRole::Client)),
+        )
     }
 }
 
@@ -156,14 +188,93 @@ impl MapEntities for Answer {
     }
 }
 
-/// On a server: which client asked for each activation, to answer.
-#[derive(Resource, Default)]
-struct Asked(HashMap<(Entity, u64), Entity>);
-
 /// On a client: replies heard, held until the state as of them arrives, and
 /// how many frames each has been.
 #[derive(Resource, Default)]
 struct Held(Vec<(Answer, u32)>);
+
+/// On a client: sends the requests with input, and the new input, mettle
+/// wrote to the server.
+fn ask_with<I: Component + Clone + Serialize + DeserializeOwned + MapEntities>(
+    mut requests: ResMut<Messages<AbilityRequestWith<I>>>,
+    mut inputs: ResMut<Messages<AbilityInput<I>>>,
+    mut senders: Query<
+        (
+            &mut MessageSender<AbilityRequestWith<I>>,
+            &mut MessageSender<AbilityInput<I>>,
+        ),
+        With<Client>,
+    >,
+) {
+    for request in requests.drain() {
+        for (mut sender, _) in &mut senders {
+            sender.send::<MettleChannel>(request.clone());
+        }
+    }
+    for input in inputs.drain() {
+        for (_, mut sender) in &mut senders {
+            sender.send::<MettleChannel>(input.clone());
+        }
+    }
+}
+
+/// A client's link, as the server hears its input on it. Lightyear gives a
+/// link a receiver as its first message of that kind arrives, so either may
+/// not be there yet.
+type Giving<I> = (
+    Entity,
+    Option<&'static mut MessageReceiver<AbilityRequestWith<I>>>,
+    Option<&'static mut MessageReceiver<AbilityInput<I>>>,
+    &'static mut MessageSender<Answer>,
+);
+
+/// On a server: takes each client's requests with input, and new input, for
+/// actors it controls; rejects requests for the rest back to it, and drops
+/// input for them.
+fn hear_input<I: Component + Clone + Serialize + DeserializeOwned + MapEntities>(
+    mut links: Query<Giving<I>, With<ClientOf>>,
+    controlled: Query<&ControlledBy>,
+    tick: Res<ServerTick>,
+    mut requests: MessageWriter<AbilityRequestWith<I>>,
+    mut inputs: MessageWriter<AbilityInput<I>>,
+) {
+    let controls = |actor: Entity, link: Entity| {
+        controlled
+            .get(actor)
+            .is_ok_and(|controlled| controlled.owner == link)
+    };
+    for (link, mut asked, mut given, mut sender) in &mut links {
+        for request in asked.iter_mut().flat_map(|asked| asked.receive()) {
+            if controls(request.actor, link) {
+                requests.write(request);
+            } else {
+                warn!(
+                    "a client asked to activate `{}` for {}, which it doesn't control: rejected",
+                    request.ability, request.actor
+                );
+                sender.send::<MettleChannel>(Answer {
+                    reply: AbilityReply {
+                        actor: request.actor,
+                        ability: request.ability,
+                        activation: request.activation,
+                        rejected: Some(Failure::NotGranted),
+                    },
+                    tick: **tick,
+                });
+            }
+        }
+        for input in given.iter_mut().flat_map(|given| given.receive()) {
+            if controls(input.actor, link) {
+                inputs.write(input);
+            } else {
+                warn!(
+                    "a client gave input for {}, which it doesn't control: dropped",
+                    input.actor
+                );
+            }
+        }
+    }
+}
 
 /// On a client: sends the requests mettle wrote to the server.
 fn ask(
@@ -190,7 +301,6 @@ fn hear_requests(
     mut links: Query<Asking, With<ClientOf>>,
     controlled: Query<&ControlledBy>,
     tick: Res<ServerTick>,
-    mut asked: ResMut<Asked>,
     mut requests: MessageWriter<AbilityRequest>,
 ) {
     for (link, mut receiver, mut sender) in &mut links {
@@ -199,7 +309,6 @@ fn hear_requests(
                 .get(request.actor)
                 .is_ok_and(|controlled| controlled.owner == link)
             {
-                asked.0.insert((request.actor, request.activation), link);
                 requests.write(request);
             } else {
                 warn!(
@@ -220,12 +329,14 @@ fn hear_requests(
     }
 }
 
-/// On a server: sends each reply mettle wrote to the client that asked, with
-/// the tick this frame's state goes out at: this one's, if replication's tick
-/// came round this frame, else the next.
+/// On a server: sends each reply mettle wrote to the client controlling its
+/// actor, the only one a request is taken from, with the tick this frame's
+/// state goes out at: this one's, if replication's tick came round this
+/// frame, else the next. Later replies too: a running activation's input
+/// rejected.
 fn reply(
     mut replies: ResMut<Messages<AbilityReply>>,
-    mut asked: ResMut<Asked>,
+    controlled: Query<&ControlledBy>,
     mut senders: Query<&mut MessageSender<Answer>>,
     tick: Res<ServerTick>,
 ) {
@@ -235,7 +346,10 @@ fn reply(
         **tick + 1
     };
     for reply in replies.drain() {
-        let Some(link) = asked.0.remove(&(reply.actor, reply.activation)) else {
+        let Ok(link) = controlled
+            .get(reply.actor)
+            .map(|controlled| controlled.owner)
+        else {
             continue;
         };
         if let Ok(mut sender) = senders.get_mut(link) {

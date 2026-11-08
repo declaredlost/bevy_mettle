@@ -1,5 +1,6 @@
-//! `#[derive(IdTarget)]`, re-exported by `bevy_mettle_core`, and
-//! `#[derive(Attribute)]`, by `bevy_mettle_attribute`: their documentation is
+//! `#[derive(IdTarget)]`, re-exported by `bevy_mettle_core`;
+//! `#[derive(Attribute)]`, by `bevy_mettle_attribute`; and
+//! `#[derive(Behaviour)]`, by `bevy_mettle_ability`: their documentation is
 //! there.
 
 use proc_macro::TokenStream;
@@ -8,7 +9,8 @@ use proc_macro2::{Literal, Span};
 use quote::{format_ident, quote, quote_spanned};
 use syn::spanned::Spanned;
 use syn::{
-    DeriveInput, Error, Expr, ExprLit, ExprUnary, Ident, Lit, LitStr, Path, UnOp, parse_macro_input,
+    DeriveInput, Error, Expr, ExprLit, ExprUnary, Ident, Lit, LitStr, Path, Type, UnOp,
+    parse_macro_input,
 };
 
 /// An attribute: a marker type, its settings on `#[attribute(..)]`.
@@ -24,6 +26,80 @@ pub fn derive_attribute(input: TokenStream) -> TokenStream {
     expand(&input)
         .unwrap_or_else(Error::into_compile_error)
         .into()
+}
+
+/// A behaviour: what runs an ability, its settings on `#[behaviour(..)]`.
+///
+/// ```ignore
+/// #[derive(Component, Default, Behaviour)]
+/// #[behaviour(name = "cast_fireball", input = Aim)]
+/// pub struct CastFireball { timer: f32 }
+/// ```
+#[proc_macro_derive(Behaviour, attributes(behaviour))]
+pub fn derive_behaviour(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    expand_behaviour(&input)
+        .unwrap_or_else(Error::into_compile_error)
+        .into()
+}
+
+/// What `#[behaviour(..)]` says.
+#[derive(Default)]
+struct BehaviourSettings {
+    name: Option<LitStr>,
+    input: Option<Type>,
+}
+
+fn expand_behaviour(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    if !input.generics.params.is_empty() {
+        return Err(Error::new_spanned(
+            &input.generics,
+            "a behaviour can't be generic",
+        ));
+    }
+    let settings = behaviour_settings(input)?;
+    let krate = path("bevy_mettle_ability", "ability");
+    let ident = &input.ident;
+    let name = settings
+        .name
+        .unwrap_or_else(|| LitStr::new(&snake(&ident.to_string()), Span::call_site()));
+    let input = settings
+        .input
+        .map_or_else(|| quote!(#krate::data::NoInput), |input| quote!(#input));
+    Ok(quote! {
+        impl #krate::data::Behaviour for #ident {
+            const NAME: &'static str = #name;
+            type Input = #input;
+        }
+    })
+}
+
+/// Reads `#[behaviour(..)]`.
+fn behaviour_settings(input: &DeriveInput) -> syn::Result<BehaviourSettings> {
+    let mut settings = BehaviourSettings::default();
+    for attr in input
+        .attrs
+        .iter()
+        .filter(|attr| attr.path().is_ident("behaviour"))
+    {
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("name") {
+                if settings.name.is_some() {
+                    return Err(meta.error("`name` is given twice"));
+                }
+                settings.name = Some(meta.value()?.parse()?);
+            } else if meta.path.is_ident("input") {
+                if settings.input.is_some() {
+                    return Err(meta.error("`input` is given twice"));
+                }
+                settings.input = Some(meta.value()?.parse()?);
+            } else {
+                return Err(meta.error("expected `name` or `input`"));
+            }
+            Ok(())
+        })?;
+    }
+    Ok(settings)
 }
 
 /// Derives `IdTarget`: named as the type is in `snake_case`, unless overridden.
@@ -289,7 +365,7 @@ fn snake(name: &str) -> String {
 mod tests {
     use syn::parse_quote;
 
-    use super::{settings, snake};
+    use super::{behaviour_settings, settings, snake};
 
     #[test]
     fn a_setting_given_twice_is_an_error() {
@@ -320,5 +396,28 @@ mod tests {
         assert_eq!(snake("MovementSpeed"), "movement_speed");
         assert_eq!(snake("MaxHP"), "max_hp");
         assert_eq!(snake("HPRegen"), "hp_regen");
+    }
+
+    #[test]
+    fn a_behaviour_setting_given_twice_is_an_error() {
+        let input = parse_quote! {
+            #[behaviour(name = "a", name = "b")]
+            struct Cast;
+        };
+        let error = behaviour_settings(&input).err().expect("an error");
+        assert!(error.to_string().contains("given twice"), "{error}");
+    }
+
+    #[test]
+    fn a_behaviour_setting_that_isnt_one_is_an_error() {
+        let input = parse_quote! {
+            #[behaviour(speed = 2)]
+            struct Cast;
+        };
+        let error = behaviour_settings(&input).err().expect("an error");
+        assert!(
+            error.to_string().contains("expected `name` or `input`"),
+            "{error}"
+        );
     }
 }

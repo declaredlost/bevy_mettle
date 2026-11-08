@@ -1,7 +1,7 @@
-use bevy::ecs::intern::Interned;
-use bevy::ecs::schedule::ScheduleLabel;
+use bevy::ecs::schedule::{InternedScheduleLabel, ScheduleLabel};
 use bevy::prelude::*;
 
+use crate::code::EffectCode;
 use crate::net::{self, NetRole};
 use crate::{EffectRegistry, systems};
 
@@ -15,7 +15,7 @@ pub struct EffectSystems;
 /// their new definitions as the [`EffectRegistry`] is replaced. Starts with an
 /// empty registry; the game inserts one built from its data.
 pub struct EffectPlugin {
-    schedule: Interned<dyn ScheduleLabel>,
+    schedule: InternedScheduleLabel,
 }
 
 impl EffectPlugin {
@@ -24,6 +24,12 @@ impl EffectPlugin {
         Self {
             schedule: schedule.intern(),
         }
+    }
+
+    /// The schedule it ticks effects in.
+    #[must_use]
+    pub fn schedule(&self) -> InternedScheduleLabel {
+        self.schedule
     }
 }
 
@@ -37,6 +43,7 @@ impl Default for EffectPlugin {
 impl Plugin for EffectPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<EffectRegistry>()
+            .init_resource::<EffectCode>()
             .init_resource::<NetRole>()
             .init_resource::<net::Predictions>()
             .add_systems(

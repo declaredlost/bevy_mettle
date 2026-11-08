@@ -15,6 +15,9 @@ target/
 *.pdb
 rustc-ice-*.txt
 
+# The book, built by `mdbook build book`
+/book/book/
+
 # Generated files
 *.backup
 

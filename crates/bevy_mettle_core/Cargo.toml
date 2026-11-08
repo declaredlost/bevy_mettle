@@ -3,7 +3,9 @@
 [package]
 name = "bevy_mettle_core"
 description = "What bevy_mettle's crates share: gameplay tags and the tags an actor owns, curve tables, and the condition language"
+readme = "./README.md"
 keywords = ["bevy", "gameplay", "tags", "game"]
+categories = ["game-development"]
 
 version = { workspace = true }
 rust-version = { workspace = true }
@@ -13,6 +15,11 @@ publish = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # The Id derive

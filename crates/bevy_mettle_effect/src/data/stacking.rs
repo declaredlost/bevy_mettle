@@ -3,12 +3,19 @@
 use bevy_mettle_core::Id;
 use serde::{Deserialize, Serialize};
 
-use crate::Effect;
+use crate::data::Effect;
 
 /// How an effect applied again onto its target stacks, up to a limit.
 ///
 /// Into one active effect, its modifiers' amounts counted once per stack, up to
 /// `limit`.
+///
+/// A stack is a count on the effect as first applied: its spec (level, params,
+/// source) and what it captured stay as they were, and applying again adds a
+/// stack and, as `reapply` says, its time; the new spec goes only to the
+/// effects it chains. Stack `by` source to keep each source's applications
+/// apart. At the limit, applying again applies `overflow` instead of the
+/// effect's own `on_apply`.
 ///
 /// ```ron
 /// (by: Target, limit: 3, reapply: Refresh, expire: RemoveOne, overflow: ["ignited"])

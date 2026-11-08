@@ -1,0 +1,245 @@
+# Granting and activating
+
+An actor can only use abilities it's been granted. Granting gives it an
+entity for the ability. Activating runs it. Your behaviour system does the
+work and ends it.
+
+## Granting
+
+Grant the fireball to the mage, at level 1:
+
+```rust
+# use bevy::prelude::*;
+# use bevy_mettle::prelude::*;
+fn spawn_mage(mut commands: Commands) {
+    commands
+        .spawn((Base::<Life>::default(), Base::<Mana>::default()))
+        .grant_ability("fireball", 1.0);
+}
+# #[derive(Attribute)] #[attribute(base = 100.0, min = 0.0)] struct Life;
+# #[derive(Attribute)] #[attribute(base = 100.0, min = 0.0)] struct Mana;
+```
+
+The granted ability is an entity of its own, with a [`GrantedAbility`] and
+an [`AbilityOf`] pointing at the mage. The mage gets [`Abilities`], the list
+of what it's been granted. Despawning the mage despawns its abilities.
+
+[`GrantedAbility`] tells you which ability it is (`id()`, `def()`), its level
+(`level()`), the effect that granted it if one did (`source()`), and whether
+this activation has paid (`is_committed()`). The level is what the cost's and
+cooldown's curves are read at.
+
+Granting the same ability twice gives the actor two entities. Activating by
+id uses the first.
+
+## Activating
+
+`activate_ability("fireball")` on the mage activates its first granted
+fireball. An ability whose behaviour takes input, such as an aim, is
+activated with it: `activate_ability_with::<CastFireball>("fireball", Aim(at))`. [Input and
+targets](input.md) covers that. Mettle checks, in this order:
+
+1. **Granted.** The mage has a fireball, and it isn't active already.
+   Otherwise `Failure::NotGranted` or `Failure::Active`.
+2. **Not cooling down.** The mage owns no tag the cooldown effect grants.
+   Otherwise `Failure::Cooldown`.
+3. **Affordable.** Paying the cost leaves no attribute below 0. Otherwise
+   `Failure::Cost`.
+4. **Not blocked.** The mage owns none of `blocked_by`, and no other active
+   ability `blocks` the fireball's tags. Otherwise `Failure::Blocked`.
+5. **Required.** `require` holds. Otherwise `Failure::Requirement`.
+
+Then it activates:
+
+- active abilities it `cancels` are cancelled;
+- the mage owns what it `grants`;
+- [`ActiveAbility`] is put on the ability's entity, with its behaviour's
+  component;
+- with `Commit::OnActivate`, its cost and cooldown are applied;
+- [`AbilityActivated`] is triggered on the mage.
+
+If a check fails, nothing happens but [`AbilityFailed`], triggered on the
+mage with the reason.
+
+Here's the whole round, run on the world directly:
+
+```rust
+# use bevy::prelude::*;
+# use bevy_mettle::prelude::*;
+# #[derive(Attribute)]
+# #[attribute(base = 100.0, min = 0.0)]
+# struct Mana;
+# #[derive(Component, Default, Behaviour)]
+# struct CastFireball;
+# use core::time::Duration;
+# use bevy::time::TimeUpdateStrategy;
+# let mut app = App::new();
+# app.add_plugins((MinimalPlugins, MettlePlugins))
+#     .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(100)))
+#     .add_attribute::<Mana>()
+#     .add_behaviour::<CastFireball>();
+# let tags: Vec<Tag> = ["state", "state.casting", "cooldown", "cooldown.fireball"]
+#     .into_iter()
+#     .map(|id| Tag { id: Id::from_static(id) })
+#     .collect();
+# let tags = TagTree::build(&tags).unwrap();
+# let effects = EffectRegistry::check(&[ Effect::instant("fireball.cost") .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)), Effect::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"), ], EffectChecks { tags: &tags, curves: &CurveTable::default(), attributes: app.world().resource::<AttributeRegistry>(), code: &EffectCode::new() })
+# .unwrap();
+# let fireball = Ability::new("fireball", "cast_fireball")
+#     .cost("fireball.cost")
+#     .cooldown("fireball.cooldown")
+#     .grant("state.casting");
+# let abilities = AbilityRegistry::check(&[fireball], &[], AbilityChecks { tags: &tags, effects: &effects, behaviours: app.world().resource::<Behaviours>() })
+# .unwrap();
+# app.insert_resource(effects).insert_resource(abilities);
+let mage = app.world_mut().spawn(Base::<Mana>::default()).id();
+// A tick, so its attributes are worked out.
+app.update();
+app.update();
+let world = app.world_mut();
+
+// Not granted yet.
+assert_eq!(world.activate_ability(mage, "fireball"), Err(Failure::NotGranted));
+
+world.grant_ability(mage, "fireball", 1.0);
+let ability = world.activate_ability(mage, "fireball").unwrap();
+
+// Paid, casting, cooling down, and running its behaviour.
+assert_eq!(world.get::<Base<Mana>>(mage).unwrap().get(), 80.0);
+let owned = world.get::<OwnedTags>(mage).unwrap();
+assert!(owned.contains(&Id::from_static("state.casting")));
+assert!(owned.contains(&Id::from_static("cooldown.fireball")));
+assert!(world.get::<CastFireball>(ability).is_some());
+
+// Once is enough.
+assert_eq!(world.activate_ability(mage, "fireball"), Err(Failure::Active));
+
+// Ended: no longer casting, but still cooling down.
+world.end_ability(ability, false);
+assert!(world.get::<CastFireball>(ability).is_none());
+let owned = world.get::<OwnedTags>(mage).unwrap();
+assert!(!owned.contains(&Id::from_static("state.casting")));
+assert_eq!(world.activate_ability(mage, "fireball"), Err(Failure::Cooldown));
+
+// Two and a half seconds later, the cooldown has run out.
+for _ in 0..25 {
+    app.update();
+}
+assert!(app.world_mut().activate_ability(mage, "fireball").is_ok());
+```
+
+## Running the behaviour
+
+Your system finds the ability by its behaviour's component, and ends it when
+it's done. The fireball takes half a second to cast:
+
+```rust
+# use bevy::prelude::*;
+# use bevy_mettle::prelude::*;
+#[derive(Component, Default, Behaviour)]
+struct CastFireball {
+    timer: f32,
+}
+
+fn cast_fireball(
+    mut casting: Query<(Entity, &ActiveAbility, &mut CastFireball)>,
+    time: Res<Time>,
+    mut commands: Commands,
+) {
+    for (ability, active, mut cast) in &mut casting {
+        cast.timer += time.delta_secs();
+        if cast.timer > 0.5 {
+            // Spawn the projectile from `active.actor` here.
+            commands.entity(ability).end_ability();
+        }
+    }
+}
+```
+
+[`ActiveAbility`] says who it's active for (`actor`), at what level, under
+which activation, and the gameplay event that triggered it, if one did.
+
+Add it like any other system:
+
+```rust,no_run
+# use bevy::prelude::*;
+# use bevy_mettle::prelude::*;
+# #[derive(Component, Default, Behaviour)] struct CastFireball;
+# fn cast_fireball() {}
+fn main() {
+    App::new()
+        .add_plugins((DefaultPlugins, MettlePlugins))
+        .add_behaviour::<CastFireball>()
+        .add_systems(Update, cast_fireball)
+        .run();
+}
+```
+
+## Committing, ending, cancelling, revoking
+
+These are commands on the ability's entity:
+
+| Command | What it does |
+|---|---|
+| `commit_ability()` | Pays the cost and starts the cooldown, for a `Commit::Manual` ability. One that can't pay is cancelled. |
+| `end_ability()` | Ends it: its behaviour's component taken off, the tags it granted taken back. |
+| `cancel_ability()` | The same, but told as cancelled. |
+| `revoke_ability()` | Takes it away from the actor, cancelling it first if it's active. |
+
+Ending an ability doesn't refund anything. The cost is paid and the cooldown
+runs its course.
+
+An ability despawned while it's active takes back the tags it granted too.
+So does one whose entity loses its [`GrantedAbility`] some other way, such as
+replication taking it away.
+
+On the actor, the commands are `grant_ability`, `activate_ability`,
+`activate_tagged` and `send_event` (see [Grants and triggers](grants-triggers.md)).
+In an exclusive system or a test, [`AbilityWorld`] does the same on the
+`World` at once, and says how it went: `activate_ability` returns the
+ability or the [`Failure`], `commit_ability` whether it could pay.
+
+## Told
+
+Three entity events are triggered on the actor:
+
+- [`AbilityActivated`]: which ability, its entity, and the activation.
+- [`AbilityFailed`]: which ability, and why, as a [`Failure`].
+- [`AbilityEnded`]: which ability, its entity, and whether it was cancelled.
+
+Observe them on the mage, or globally, for sounds, animations and UI:
+
+```rust
+# use bevy::prelude::*;
+# use bevy_mettle::prelude::*;
+fn out_of_mana(failed: On<AbilityFailed>) {
+    if failed.reason == Failure::Cost {
+        info!("{} can't afford {}", failed.entity, failed.id);
+    }
+}
+```
+
+## Pitfalls
+
+- **Owned tags.** An actor needs [`OwnedTags`] to activate anything. Any
+  `Base<A>` brings it, so an actor with attributes has it.
+- **Freshly spawned.** The cost is checked against the actor's values as
+  they were last worked out. An actor spawned this tick has none yet, so its
+  bases count, as its `Current`s do until then: modifiers from what it
+  spawned with count only once its attributes are worked out.
+- **Commands run later.** `activate_ability` as a command runs when commands
+  are applied, and says nothing back. Observe [`AbilityFailed`] to hear why
+  one didn't activate.
+- **Ending isn't refunding.** Cancel a `Commit::Manual` ability before it
+  commits if you don't want it to cost anything.
+
+[`Abilities`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.Abilities.html
+[`AbilityOf`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.AbilityOf.html
+[`AbilityActivated`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityActivated.html
+[`AbilityEnded`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityEnded.html
+[`AbilityFailed`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityFailed.html
+[`AbilityWorld`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/trait.AbilityWorld.html
+[`ActiveAbility`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.ActiveAbility.html
+[`Failure`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/enum.Failure.html
+[`GrantedAbility`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.GrantedAbility.html
+[`OwnedTags`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.OwnedTags.html

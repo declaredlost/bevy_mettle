@@ -1,20 +1,26 @@
 //! What using effects takes: `use bevy_mettle_effect::prelude::*`.
+//!
+//! Attributes are `bevy_mettle_attribute`'s, and tags, curves and conditions
+//! `bevy_mettle_core`'s, each in its own prelude. Naming executions and
+//! calculations by id takes [`Execution`](crate::code::Execution) and
+//! [`Calculation`](crate::code::Calculation) too.
 
-#[doc(hidden)]
+#[doc(no_inline)]
 pub use crate::active::{ActiveEffect, ActiveEffects, EffectOf};
-#[doc(hidden)]
-pub use crate::code::{BaseChange, EffectCode, EffectContext};
-#[doc(hidden)]
+#[doc(no_inline)]
+pub use crate::code::{BaseChange, EffectCode, EffectCodeApp, EffectContext};
+#[doc(no_inline)]
 pub use crate::data::{
-    Capture, EffectDuration, EffectModifier, Expire, Magnitude, Reapply, StackBy, Stacking,
+    Capture, Effect, EffectDuration, EffectModifier, Expire, Magnitude, Reapply, StackBy, Stacking,
 };
-#[doc(hidden)]
+#[doc(no_inline)]
 pub use crate::events::{
     Blocked, EffectApplied, EffectBlocked, EffectExecuted, EffectRemoved, EffectStacked,
 };
-#[doc(hidden)]
+#[doc(no_inline)]
 pub use crate::net::{EffectReplica, NetRole, PredictedUnder, Proxy};
-#[doc(hidden)]
+#[doc(no_inline)]
 pub use crate::{
-    Effect, EffectCommands, EffectPlugin, EffectRegistry, EffectSpec, EffectSystems, EffectWorld,
+    EffectChecks, EffectCommands, EffectPlugin, EffectRegistry, EffectSpec, EffectSystems,
+    EffectWorld,
 };

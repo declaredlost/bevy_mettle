@@ -3,7 +3,9 @@
 [package]
 name = "bevy_mettle"
 description = "A gameplay framework for Bevy in the spirit of Unreal's Gameplay Ability System: attributes, effects and abilities, its crates behind features"
+readme = "./README.md"
 keywords = ["bevy", "gameplay", "attributes", "abilities"]
+categories = ["game-development"]
 
 version = { workspace = true }
 rust-version = { workspace = true }
@@ -13,37 +15,50 @@ publish = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = ["attribute", "effect", "ability"]
-# Attributes: bases, modifiers, reads
+# Attributes: `bevy_mettle_attribute`, as `bevy_mettle::attribute`
 attribute = ["dep:bevy_mettle_attribute"]
-# Effects: instant, timed, periodic, stacking
+# Effects: `bevy_mettle_effect`, as `bevy_mettle::effect`
 effect = ["attribute", "dep:bevy_mettle_effect"]
-# Abilities: granted, activated, committed, ended
+# Abilities: `bevy_mettle_ability`, as `bevy_mettle::ability`
 ability = ["effect", "dep:bevy_mettle_ability"]
+# Prediction over lightyear: `bevy_mettle_lightyear`, as
+# `bevy_mettle::lightyear`
+lightyear = ["ability", "dep:bevy_mettle_lightyear"]
 
 [dependencies]
-# The schema, tags and the condition language
+# Gameplay tags, curves and conditions: always there
 bevy_mettle_core = { workspace = true, features = [] }
 
-# What the features bring
-bevy_mettle_ability = { workspace = true, features = [], optional = true }
+# The parts, each behind its feature
 bevy_mettle_attribute = { workspace = true, features = [], optional = true }
 bevy_mettle_effect = { workspace = true, features = [], optional = true }
+bevy_mettle_ability = { workspace = true, features = [], optional = true }
+bevy_mettle_lightyear = { workspace = true, features = [], optional = true }
 
-[dev-dependencies]
-# Game engine
-bevy = { workspace = true, features = [] }
+# Game engine: the plugin group, and logging content rejected
+bevy = { workspace = true, features = ["bevy_log"] }
 
-# (De)serialization
+# (De)serialization: the content a game hands over
 serde = { workspace = true, features = ["derive"] }
 
+[dev-dependencies]
 # Testing the plugin in a real app
 bevy_harness = { workspace = true, features = [] }
 
 # Definitions as a game would write them
 ron = { workspace = true, features = [] }
+
+# A server and a client, to add the plugins after lightyear's
+lightyear = { workspace = true, features = ["client", "server", "replication"] }
+bevy = { workspace = true, features = ["bevy_state"] }
 
 [lints]
 workspace = true

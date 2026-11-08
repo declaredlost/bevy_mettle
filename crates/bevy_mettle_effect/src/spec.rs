@@ -6,7 +6,7 @@ use bevy_mettle_core::Id;
 use bevy_mettle_core::tag::Tag;
 use serde::{Deserialize, Serialize};
 
-use crate::Effect;
+use crate::data::Effect;
 
 /// An effect about to be applied: which, at what level, with what, from whom.
 ///

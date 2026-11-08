@@ -3,7 +3,9 @@
 [package]
 name = "bevy_mettle_macros"
 description = "bevy_mettle's derives: what ids name, and attributes"
+readme = "./README.md"
 keywords = ["bevy", "attributes", "macro"]
+categories = ["game-development"]
 
 version = { workspace = true }
 rust-version = { workspace = true }
@@ -13,9 +15,14 @@ publish = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
+documentation = { workspace = true }
 
 [lib]
 proc-macro = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # Finding the crate the derive names

@@ -8,8 +8,26 @@ use bevy_mettle::prelude::*;
 use crate::common::{Mana, actor, attributes, close, get, own};
 
 /// The behaviour every ability here is run by.
-#[derive(Component, Default)]
+#[derive(Component, Default, Behaviour)]
 struct Cast;
+
+/// Where a shot is aimed: how far along.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+struct Aim(f32);
+
+/// A shot being fired: aimed.
+#[derive(Component, Default, Behaviour)]
+#[behaviour(input = Aim)]
+struct Shoot;
+
+/// Whether `check`'s aim is within reach: 10 along, either way.
+fn in_reach(In(check): In<InputCheck<Aim>>) -> bool {
+    check.input.0.abs() <= 10.0
+}
+
+fn shot() -> Ability {
+    Ability::new("shot", "shoot").cost("fireball.cost")
+}
 
 const TAGS: &[&str] = &[
     "damage",
@@ -79,25 +97,31 @@ fn app(abilities: &[Ability]) -> TestApp {
         .with(attributes)
         .plugins((EffectPlugin::default(), AbilityPlugin))
         .with(|app| {
-            app.add_behaviour::<Cast>("cast");
+            app.add_behaviour::<Cast>()
+                .add_behaviour::<Shoot>()
+                .check_input::<Aim, _>(in_reach);
         })
         .build();
     let world = app.world_mut();
     let attributes = world.resource::<AttributeRegistry>().clone();
-    let effects = EffectRegistry::build(
+    let effects = EffectRegistry::check(
         &effects(),
-        &tags(),
-        &CurveTable::default(),
-        &attributes,
-        &EffectCode::new(),
+        EffectChecks {
+            tags: &tags(),
+            curves: &CurveTable::default(),
+            attributes: &attributes,
+            code: &EffectCode::new(),
+        },
     )
     .unwrap();
-    let abilities = AbilityRegistry::build(
+    let abilities = AbilityRegistry::check(
         &abilities,
         &[Grant::new("staff", ["channel"])],
-        &tags(),
-        &effects,
-        world.resource::<Behaviours>(),
+        AbilityChecks {
+            tags: &tags(),
+            effects: &effects,
+            behaviours: world.resource::<Behaviours>(),
+        },
     )
     .unwrap();
     world.insert_resource(effects);
@@ -338,12 +362,14 @@ fn a_registry_reports_everything_wrong_at_once() {
         .build();
     let world = app.world_mut();
     let attributes = world.resource::<AttributeRegistry>().clone();
-    let effects = EffectRegistry::build(
+    let effects = EffectRegistry::check(
         &effects(),
-        &tags(),
-        &CurveTable::default(),
-        &attributes,
-        &EffectCode::new(),
+        EffectChecks {
+            tags: &tags(),
+            curves: &CurveTable::default(),
+            attributes: &attributes,
+            code: &EffectCode::new(),
+        },
     )
     .unwrap();
     let bad = Ability::new("bad", "nowhere")
@@ -355,12 +381,14 @@ fn a_registry_reports_everything_wrong_at_once() {
         Grant::new("staf", ["channel"]),
         Grant::new("fireball.cost", ["bad"]),
     ];
-    let errors = AbilityRegistry::build(
+    let errors = AbilityRegistry::check(
         &[bad],
         &grants,
-        &tags(),
-        &effects,
-        world.resource::<Behaviours>(),
+        AbilityChecks {
+            tags: &tags(),
+            effects: &effects,
+            behaviours: world.resource::<Behaviours>(),
+        },
     )
     .unwrap_err()
     .to_string();
@@ -393,6 +421,28 @@ fn a_cost_is_checked_change_after_change() {
         "50 can't pay 30 twice"
     );
     assert!(close(get::<Mana>(&app, mage), 50.0));
+}
+
+#[test]
+fn an_actor_spawned_this_frame_pays_from_its_bases() {
+    let mut app = app(&[fireball()]);
+    let rich = app.spawn(Base::<Mana>::default());
+    let poor = app.spawn(Base::<Mana>::new(10.0));
+    for mage in [rich, poor] {
+        app.world_mut()
+            .grant_ability(mage, "fireball", 1.0)
+            .unwrap();
+    }
+    // Nothing worked out yet: no tick since they were spawned.
+    assert!(app.world_mut().activate_ability(rich, "fireball").is_ok());
+    assert_eq!(
+        app.world_mut().activate_ability(poor, "fireball"),
+        Err(Failure::Cost),
+        "10 can't pay 20"
+    );
+    app.tick();
+    assert!(close(get::<Mana>(&app, rich), 10.0), "paid");
+    assert!(close(get::<Mana>(&app, poor), 10.0));
 }
 
 #[test]
@@ -436,12 +486,14 @@ fn a_new_registry_gives_granted_abilities_their_new_definitions() {
     let world = app.world_mut();
     let effects = world.resource::<EffectRegistry>().clone();
     let free = fireball().commit(Commit::Manual);
-    let registry = AbilityRegistry::build(
+    let registry = AbilityRegistry::check(
         &[free, channel()],
         &[],
-        &tags(),
-        &effects,
-        world.resource::<Behaviours>(),
+        AbilityChecks {
+            tags: &tags(),
+            effects: &effects,
+            behaviours: world.resource::<Behaviours>(),
+        },
     )
     .unwrap();
     world.insert_resource(registry);
@@ -450,4 +502,126 @@ fn a_new_registry_gives_granted_abilities_their_new_definitions() {
         app.entity(ability).get::<GrantedAbility>().def().commit,
         Commit::Manual
     );
+}
+
+#[test]
+fn an_ability_activates_with_its_input_and_ends_without_it() {
+    let mut app = app(&[shot()]);
+    let mage = caster(&mut app, &["shot"]);
+    let shooting = app
+        .world_mut()
+        .activate_ability_with::<Shoot>(mage, "shot", Aim(4.0))
+        .unwrap();
+    app.entity(shooting)
+        .assert_has::<Shoot>()
+        .assert_eq(Aim(4.0));
+    app.tick();
+    assert!(close(get::<Mana>(&app, mage), 10.0), "paid");
+    app.world_mut().end_ability(shooting, false);
+    app.entity(shooting)
+        .assert_lacks::<Shoot>()
+        .assert_lacks::<Aim>();
+}
+
+#[test]
+fn input_has_to_be_given_for_the_abilitys_behaviour() {
+    let mut app = app(&[shot(), fireball()]);
+    app.watch_triggered::<AbilityFailed>();
+    let mage = caster(&mut app, &["shot", "fireball"]);
+    let world = app.world_mut();
+    assert_eq!(
+        world.activate_ability(mage, "shot"),
+        Err(Failure::Input),
+        "none given"
+    );
+    assert_eq!(
+        world.activate_ability_with::<Shoot>(mage, "fireball", Aim(1.0)),
+        Err(Failure::Input),
+        "for another behaviour than the ability's"
+    );
+    assert_eq!(app.read_triggered::<AbilityFailed>().len(), 2, "each told");
+    app.tick();
+    assert!(close(get::<Mana>(&app, mage), 30.0), "nothing paid");
+}
+
+#[test]
+fn input_that_fails_its_check_rejects_the_activation_before_anything_is_paid() {
+    let mut app = app(&[shot()]);
+    let mage = caster(&mut app, &["shot"]);
+    assert_eq!(
+        app.world_mut()
+            .activate_ability_with::<Shoot>(mage, "shot", Aim(12.0)),
+        Err(Failure::Input)
+    );
+    app.tick();
+    assert!(close(get::<Mana>(&app, mage), 30.0));
+    app.query::<(), With<Shoot>>().assert_len(0);
+}
+
+#[test]
+fn new_input_replaces_the_old_and_input_that_fails_cancels_the_ability() {
+    let mut app = app(&[shot()]);
+    app.watch_triggered::<AbilityEnded>();
+    app.watch_triggered::<AbilityFailed>();
+    let mage = caster(&mut app, &["shot"]);
+    let shooting = app
+        .world_mut()
+        .activate_ability_with::<Shoot>(mage, "shot", Aim(4.0))
+        .unwrap();
+    app.world_mut()
+        .set_input::<Shoot>(shooting, Aim(-6.0))
+        .unwrap();
+    app.entity(shooting).assert_eq(Aim(-6.0));
+    assert_eq!(
+        app.world_mut().set_input::<Shoot>(shooting, Aim(30.0)),
+        Err(Failure::Input)
+    );
+    app.entity(shooting)
+        .assert_lacks::<Shoot>()
+        .assert_lacks::<Aim>();
+    app.assert_triggered::<AbilityEnded>(|ended| ended.cancelled);
+    app.assert_triggered::<AbilityFailed>(|failed| failed.reason == Failure::Input);
+    assert_eq!(
+        app.world_mut().set_input::<Shoot>(shooting, Aim(1.0)),
+        Err(Failure::Input),
+        "no longer active"
+    );
+}
+
+#[test]
+fn an_ability_whose_behaviour_takes_input_cant_be_triggered() {
+    let app = app(&[]);
+    let triggered =
+        Ability::new("snap_shot", "shoot").trigger(Trigger::Event(Id::new("event.parried")));
+    let effects = app.resource::<EffectRegistry>().clone();
+    let errors = AbilityRegistry::check(
+        &[triggered],
+        &[],
+        AbilityChecks {
+            tags: &tags(),
+            effects: &effects,
+            behaviours: app.resource::<Behaviours>(),
+        },
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        errors.contains("triggers on an ability whose behaviour takes"),
+        "{errors}"
+    );
+}
+
+#[test]
+fn input_for_another_behaviour_than_the_abilitys_cancels_it() {
+    let mut app = app(&[shot()]);
+    let mage = caster(&mut app, &["shot"]);
+    let shooting = app
+        .world_mut()
+        .activate_ability_with::<Shoot>(mage, "shot", Aim(4.0))
+        .unwrap();
+    assert_eq!(
+        app.world_mut().set_input::<Cast>(shooting, NoInput),
+        Err(Failure::Input)
+    );
+    app.entity(shooting).assert_lacks::<Shoot>();
 }

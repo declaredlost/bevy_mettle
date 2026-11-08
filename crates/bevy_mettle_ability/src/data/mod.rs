@@ -5,10 +5,12 @@ mod behaviour;
 use bevy_mettle_core::condition::Condition;
 use bevy_mettle_core::tag::{Tag, Tags};
 use bevy_mettle_core::{Id, IdTarget};
-use bevy_mettle_effect::Effect;
+use bevy_mettle_effect::data::Effect;
+pub use bevy_mettle_macros::Behaviour;
 use serde::{Deserialize, Serialize};
 
-pub use self::behaviour::{Behaviour, BehaviourApp, Behaviours};
+pub(crate) use self::behaviour::InputChecks;
+pub use self::behaviour::{AnyBehaviour, Behaviour, BehaviourApp, Behaviours, InputCheck, NoInput};
 
 /// An ability, as data: what runs it, what it costs, and what activates it.
 ///
@@ -39,7 +41,7 @@ pub struct Ability {
     #[serde(default, skip_serializing_if = "Tags::is_empty")]
     pub tags: Tags,
     /// The behaviour that runs it, registered in code.
-    pub behaviour: Id<Behaviour>,
+    pub behaviour: Id<AnyBehaviour>,
     /// An instant effect it costs, applied to its owner as it commits: it can't
     /// activate if paying would take an attribute below 0.
     #[serde(
@@ -122,7 +124,7 @@ impl Ability {
     /// An ability called `id`, run by `behaviour`, costing nothing yet: for
     /// abilities defined in code.
     #[must_use]
-    pub fn new(id: impl Into<Id<Ability>>, behaviour: impl Into<Id<Behaviour>>) -> Self {
+    pub fn new(id: impl Into<Id<Ability>>, behaviour: impl Into<Id<AnyBehaviour>>) -> Self {
         Self {
             id: id.into(),
             tags: Tags::new(),

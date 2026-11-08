@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 use std::hash::Hasher;
 use std::sync::Arc;
 
+use bevy_ecs::resource::Resource;
 use fnv::FnvHasher;
 
 use super::Tag;
@@ -12,8 +13,9 @@ use crate::{Id, MettleError, MettleErrors};
 /// The tags there are, checked: each a path whose parent is a tag too.
 ///
 /// So the tree has no gaps. What data naming tags is checked against. Cheap to
-/// clone; empty by default.
-#[derive(Debug, Clone, Default)]
+/// clone; empty by default. A resource: the tags the app's content was checked
+/// against.
+#[derive(Resource, Debug, Clone, Default)]
 pub struct TagTree(Arc<BTreeSet<Id<Tag>>>);
 
 impl TagTree {

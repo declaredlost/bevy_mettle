@@ -8,6 +8,7 @@ use bevy_curve::{
     ConstantCurve, Curve as BevyCurve, EaseFunction, Interval, UnevenSampleAutoCurve,
     UnevenSampleCurve,
 };
+use bevy_ecs::resource::Resource;
 use serde::{Deserialize, Serialize};
 
 use crate::{Id, IdTarget, MettleError, MettleErrors};
@@ -94,7 +95,8 @@ impl LevelCurve {
 /// The curves there are, checked and built as Bevy's curves.
 ///
 /// Each with keys, all finite, levels rising. Cheap to clone; empty by default.
-#[derive(Clone, Default)]
+/// A resource: the curves the app's content was checked against.
+#[derive(Resource, Clone, Default)]
 pub struct CurveTable(Arc<HashMap<Id<LevelCurve>, Arc<Built>>>);
 
 impl fmt::Debug for CurveTable {

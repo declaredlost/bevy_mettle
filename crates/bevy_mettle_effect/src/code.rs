@@ -124,8 +124,10 @@ pub type CalculationFn = Arc<dyn Fn(&EffectContext) -> f32 + Send + Sync>;
 
 /// What effects run in code, by name: their executions and calculations.
 ///
-/// What effects' data names, and their registry is checked against.
-#[derive(Clone, Default)]
+/// What effects' data names, and their registry is checked against. A
+/// resource, added to with [`add_execution`](EffectCodeApp::add_execution) and
+/// [`add_calculation`](EffectCodeApp::add_calculation).
+#[derive(Resource, Clone, Default)]
 pub struct EffectCode {
     pub(crate) executions: HashMap<Id<Execution>, ExecutionFn>,
     pub(crate) calculations: HashMap<Id<Calculation>, CalculationFn>,
@@ -173,3 +175,44 @@ pub enum Execution {}
 #[derive(IdTarget)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Calculation {}
+
+/// Adding effect code to an app: executions and calculations by name.
+pub trait EffectCodeApp {
+    /// Adds the execution `name`: a formula run as an effect naming it
+    /// executes, such as damage.
+    fn add_execution(
+        &mut self,
+        name: impl Into<Id<Execution>>,
+        execution: impl Fn(&EffectContext) -> Vec<BaseChange> + Send + Sync + 'static,
+    ) -> &mut Self;
+
+    /// Adds the calculation `name`: a magnitude an effect naming it works out
+    /// in code.
+    fn add_calculation(
+        &mut self,
+        name: impl Into<Id<Calculation>>,
+        calculation: impl Fn(&EffectContext) -> f32 + Send + Sync + 'static,
+    ) -> &mut Self;
+}
+
+impl EffectCodeApp for App {
+    fn add_execution(
+        &mut self,
+        name: impl Into<Id<Execution>>,
+        execution: impl Fn(&EffectContext) -> Vec<BaseChange> + Send + Sync + 'static,
+    ) -> &mut Self {
+        let mut code = self.world_mut().get_resource_or_init::<EffectCode>();
+        code.executions.insert(name.into(), Arc::new(execution));
+        self
+    }
+
+    fn add_calculation(
+        &mut self,
+        name: impl Into<Id<Calculation>>,
+        calculation: impl Fn(&EffectContext) -> f32 + Send + Sync + 'static,
+    ) -> &mut Self {
+        let mut code = self.world_mut().get_resource_or_init::<EffectCode>();
+        code.calculations.insert(name.into(), Arc::new(calculation));
+        self
+    }
+}

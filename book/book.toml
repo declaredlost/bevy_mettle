@@ -1,0 +1,23 @@
+[book]
+title = "The bevy_mettle Book"
+authors = ["Oleh Martsokha"]
+description = "A guide to gameplay with bevy_mettle: attributes, effects and abilities for Bevy, in the spirit of Unreal's Gameplay Ability System."
+language = "en"
+
+[rust]
+edition = "2024"
+
+[output.html]
+site-url = "/bevy_mettle/"
+git-repository-url = "https://github.com/declaredlost/bevy_mettle"
+edit-url-template = "https://github.com/declaredlost/bevy_mettle/edit/main/book/{path}"
+default-theme = "light"
+preferred-dark-theme = "navy"
+# The chapters are short, so the sidebar lists chapters only, not the
+# current page's headings.
+sidebar-header-nav = false
+
+# The playground has no bevy_mettle, so examples can't run there. They're
+# compiled, and run where they can, by `cargo test` instead.
+[output.html.playground]
+runnable = false

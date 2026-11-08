@@ -12,12 +12,12 @@ use bevy_mettle_core::tag::{OwnedTags, Tag, TagCounts, Tags};
 
 use crate::active::{ActiveEffect, ActiveEffects, EffectOf};
 use crate::code::{BaseChange, EffectContext};
-use crate::data::{Capture, EffectDuration, Expire, Magnitude, Reapply, StackBy, Stacking};
+use crate::data::{Capture, Effect, EffectDuration, Expire, Magnitude, Reapply, StackBy, Stacking};
 use crate::events::{
     Blocked, EffectApplied, EffectBlocked, EffectExecuted, EffectRemoved, EffectStacked,
 };
 use crate::net::{self, EffectReplica};
-use crate::{Effect, EffectRegistry, EffectSpec};
+use crate::{EffectRegistry, EffectSpec};
 
 /// How deep effects applying effects go before it's taken for a loop.
 const DEPTH: u32 = 16;
@@ -218,6 +218,7 @@ fn spawn(
                 source_tags: source_tags.clone(),
                 predicted: 0,
                 captured: captured.clone(),
+                removing: false,
             },
             EffectOf(target),
         ))
@@ -306,6 +307,10 @@ fn stack_of(
 
 /// Stacks `spec` onto `existing`, or, at the limit, applies its overflow
 /// instead.
+///
+/// Only a stack: `existing` keeps the spec it was first applied with, and
+/// `spec`'s level, params and source go only to what it chains: its
+/// `on_apply`, or at the limit its overflow.
 fn stack(
     world: &mut World,
     registry: &EffectRegistry,
@@ -660,6 +665,7 @@ pub(crate) fn remove(world: &mut World, effect: Entity, expired: bool, depth: u3
     if !active.inhibited {
         deactivate(world, effect);
     }
+    mark_removing(world, effect);
     world.despawn(effect);
     world.trigger(EffectRemoved {
         entity: target,
@@ -876,7 +882,36 @@ pub(crate) fn remove_quietly(world: &mut World, effect: Entity) {
     if !active.inhibited {
         deactivate(world, effect);
     }
+    mark_removing(world, effect);
     world.despawn(effect);
+}
+
+/// Marks `effect` as being taken off by mettle, which tells of it itself.
+fn mark_removing(world: &mut World, effect: Entity) {
+    if let Some(mut active) = world.get_mut::<ActiveEffect>(effect) {
+        active.removing = true;
+    }
+}
+
+/// `effect`, taken off `target` by the game rather than through
+/// `remove_effect`: told and chained as removed, if `target`'s still there.
+pub(crate) fn removed_unasked(
+    world: &mut World,
+    target: Entity,
+    effect: Entity,
+    def: &Effect,
+    spec: &EffectSpec,
+) {
+    if world.get_entity(target).is_err() {
+        return;
+    }
+    world.trigger(EffectRemoved {
+        entity: target,
+        effect,
+        id: def.id.clone(),
+        expired: false,
+    });
+    chain(world, target, spec, &def.on_remove, 0);
 }
 
 /// Takes the stack a prediction added off `effect`. The server's effect, shown
@@ -948,6 +983,7 @@ pub(crate) fn show(
             source_tags: counts(&replica.source_tags),
             predicted: 0,
             captured: replica.captured.clone(),
+            removing: false,
         },
         net::Proxy,
     ));
