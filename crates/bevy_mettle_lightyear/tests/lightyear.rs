@@ -63,7 +63,7 @@ fn in_reach(In(check): In<InputCheck<Aim>>, reach: Res<Reach>) -> bool {
 }
 
 /// What both sides have: mettle, fireball, and what's carried.
-fn protocol(app: &mut App, role: NetRole) {
+fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
     app.insert_resource(role)
         .add_attribute::<Mana>()
         .add_plugins((EffectPlugin::default(), AbilityPlugin))
@@ -71,25 +71,36 @@ fn protocol(app: &mut App, role: NetRole) {
         .add_behaviour::<Shoot>()
         .check_input::<Aim, _>(in_reach)
         .insert_resource(Reach(if role == NetRole::Server { 10.0 } else { 100.0 }))
-        .add_plugins(MettleNetPlugin)
+        .add_plugins(MettleNetPlugin { replicas })
         .replicate_attribute::<Mana>()
         .replicate_input::<Aim>();
     // A game replicating its items' modifiers, as they're rolled.
     app.component::<Modifiers>().replicate();
     app.component::<ModifierOf>().replicate();
-    let tags: Vec<Tag> = ["state", "state.stunned", "cooldown", "cooldown.fireball"]
-        .into_iter()
-        .map(|id| Tag {
-            id: Id::from_static(id),
-        })
-        .collect();
+    let tags: Vec<Tag> = [
+        "state",
+        "state.stunned",
+        "cooldown",
+        "cooldown.fireball",
+        "cue",
+        "cue.cooling",
+        "cue.hit",
+    ]
+    .into_iter()
+    .map(|id| Tag {
+        id: Id::from_static(id),
+    })
+    .collect();
     let tags = TagTree::build(&tags).unwrap();
     let world = app.world_mut();
     let effects = EffectRegistry::check(
         &[
             Effect::instant("fireball.cost")
-                .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-            Effect::lasting("fireball.cooldown", 1.0).grant("cooldown.fireball"),
+                .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0))
+                .cue("cue.hit"),
+            Effect::lasting("fireball.cooldown", 1.0)
+                .grant("cooldown.fireball")
+                .cue("cue.cooling"),
         ],
         EffectChecks {
             tags: &tags,
@@ -119,10 +130,10 @@ fn protocol(app: &mut App, role: NetRole) {
 }
 
 /// The app of one side, `role`, on `plugins`: lightyear's, with mettle.
-fn side<M>(role: NetRole, plugins: impl Plugins<M>) -> TestApp {
+fn side<M>(role: NetRole, replicas: Replicas, plugins: impl Plugins<M>) -> TestApp {
     TestApp::builder()
         .plugins((StatesPlugin, plugins))
-        .with(|app| protocol(app, role))
+        .with(move |app| protocol(app, role, replicas))
         .fixed_hz(1.0 / TICK.as_secs_f64())
         .build()
 }
@@ -130,8 +141,14 @@ fn side<M>(role: NetRole, plugins: impl Plugins<M>) -> TestApp {
 /// A server, as `"server"`, and a client, as `"client"`, connected over
 /// crossbeam: the server ticked first, then the client.
 fn net() -> TestWorld {
+    net_with(Replicas::Owner)
+}
+
+/// As [`net`], replicas sent as `replicas` says.
+fn net_with(replicas: Replicas) -> TestWorld {
     let mut server = side(
         NetRole::Server,
+        replicas,
         (
             ServerPlugins {
                 tick_duration: TICK,
@@ -160,6 +177,7 @@ fn net() -> TestWorld {
     ));
     let mut client = side(
         NetRole::Client,
+        replicas,
         ClientPlugins {
             tick_duration: TICK,
         },
@@ -326,7 +344,8 @@ fn a_rejected_prediction_is_undone() {
 
 #[test]
 fn a_client_cant_ask_for_a_mage_it_doesnt_control() {
-    let mut world = net();
+    // Its replicas sent to every client, so this one sees the fireball.
+    let mut world = net_with(Replicas::Everyone);
     let (there, here) = mage(&mut world, false);
     world["client"]
         .world_mut()
@@ -596,4 +615,187 @@ fn a_shot_aimed_again_past_reach_is_cancelled_on_both_sides() {
         })
         .describe("both sides cancel the shot")
         .within_ticks(20);
+}
+
+/// The tags of the lasting cues `app` shows on `actor`.
+fn cues(app: &TestApp, actor: Entity) -> Vec<String> {
+    app.entity(actor)
+        .try_get::<ActiveCues>()
+        .map(|cues| cues.iter().collect::<Vec<_>>())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|cue| app.entity(cue).get::<ActiveCue>().tag.to_string())
+        .collect()
+}
+
+#[test]
+fn another_clients_actor_shows_its_cues_but_not_its_effects() {
+    let mut world = net();
+    // No client controls it, so its replicas go to none: only the actor
+    // itself is waited for.
+    let there = world["server"].spawn((
+        Base::<Mana>::default(),
+        Replicate::to_clients(NetworkTarget::All),
+    ));
+    world["server"]
+        .world_mut()
+        .grant_ability(there, "fireball", 1.0)
+        .unwrap();
+    world
+        .until(|world| mapped(&world["client"], there).is_some())
+        .describe("the actor replicates")
+        .within_ticks(50);
+    let here = mapped(&world["client"], there).unwrap();
+    world.ticks(10);
+    world["client"].entity(here).assert_lacks::<Abilities>();
+    world["client"].watch_triggered::<CueExecuted>();
+    let server = world["server"].world_mut();
+    server.apply_effect(there, EffectSpec::new("fireball.cooldown"));
+    server.apply_effect(there, EffectSpec::new("fireball.cost"));
+    world
+        .until(|world| cues(&world["client"], here) == ["cue.cooling"])
+        .describe("the client shows the cooldown's cue")
+        .within_ticks(20);
+    world.ticks(10);
+    let client = &mut world["client"];
+    assert_eq!(effects(client, here), [], "its effects stay the server's");
+    let played = client.read_triggered::<CueExecuted>();
+    assert_eq!(played.len(), 1, "the hit, once");
+    assert_eq!(played[0].tag.as_str(), "cue.hit");
+    assert!(same(played[0].magnitude, -20.0));
+}
+
+#[test]
+fn a_one_shot_a_client_predicted_plays_once() {
+    let mut world = net();
+    let (_, here) = mage(&mut world, true);
+    world["client"].watch_triggered::<CueExecuted>();
+    world["client"]
+        .world_mut()
+        .activate_ability(here, "fireball")
+        .unwrap();
+    world.ticks(30);
+    let played: Vec<_> = world["client"]
+        .read_triggered::<CueExecuted>()
+        .into_iter()
+        .filter(|executed| executed.tag.as_str() == "cue.hit")
+        .collect();
+    assert_eq!(
+        played.len(),
+        1,
+        "predicted, and the server's not played again"
+    );
+    assert!(played[0].activation.is_some());
+}
+
+#[test]
+fn a_client_coming_to_see_an_actor_joins_its_cues() {
+    let mut world = net();
+    world["client"].watch_triggered::<CueAdded>();
+    let there = world["server"].spawn((
+        Base::<Mana>::default(),
+        Replicate::to_clients(NetworkTarget::All),
+    ));
+    world["server"]
+        .world_mut()
+        .apply_effect(there, EffectSpec::new("fireball.cooldown"));
+    world
+        .until(|world| {
+            mapped(&world["client"], there)
+                .is_some_and(|here| cues(&world["client"], here) == ["cue.cooling"])
+        })
+        .describe("the client shows the cooldown's cue")
+        .within_ticks(20);
+    world["client"].assert_triggered::<CueAdded>(|added| added.joined);
+}
+
+/// Whether `app` has a granted ability on `actor`.
+fn has_abilities(app: &TestApp, actor: Entity) -> bool {
+    app.entity(actor)
+        .try_get::<Abilities>()
+        .is_some_and(|abilities| {
+            abilities
+                .iter()
+                .any(|ability| app.entity(ability).has::<GrantedAbility>())
+        })
+}
+
+#[test]
+fn replicas_follow_control_as_it_comes_and_goes() {
+    let mut world = net();
+    let link = link(&mut world);
+    let there = world["server"].spawn((
+        Base::<Mana>::default(),
+        Replicate::to_clients(NetworkTarget::All),
+    ));
+    world["server"]
+        .world_mut()
+        .grant_ability(there, "fireball", 1.0)
+        .unwrap();
+    world
+        .until(|world| mapped(&world["client"], there).is_some())
+        .describe("the actor replicates")
+        .within_ticks(50);
+    let here = mapped(&world["client"], there).unwrap();
+    world.ticks(10);
+    assert!(
+        !has_abilities(&world["client"], here),
+        "no one controls it yet"
+    );
+
+    // The client comes to control it: its fireball follows.
+    world["server"].entity_mut(there).insert(ControlledBy {
+        owner: link,
+        lifetime: Lifetime::default(),
+    });
+    world
+        .until(|world| has_abilities(&world["client"], here))
+        .describe("the fireball reaches its new owner")
+        .within_ticks(50);
+
+    // Control goes: so does the fireball.
+    world["server"].entity_mut(there).remove::<ControlledBy>();
+    world
+        .until(|world| !has_abilities(&world["client"], here))
+        .describe("the fireball leaves the client that lost control")
+        .within_ticks(50);
+}
+
+#[test]
+fn owner_only_replicas_go_and_come_back_with_their_actor() {
+    let mut world = net();
+    let (there, here) = mage(&mut world, true);
+    world["server"]
+        .world_mut()
+        .apply_effect(there, EffectSpec::new("fireball.cooldown"));
+    world
+        .until(|world| effects(&world["client"], here).len() == 1)
+        .describe("the cooldown reaches its owner")
+        .within_ticks(30);
+
+    // The actor leaves the client's view: its replicas go with it.
+    world["server"]
+        .entity_mut(there)
+        .insert(Replicate::to_clients(NetworkTarget::None));
+    world
+        .until(|world| {
+            let client = &mut world["client"];
+            client.count::<With<EffectReplica>>() == 0
+                && client.count::<With<AbilityReplica>>() == 0
+        })
+        .describe("no replica outlives its actor leaving view")
+        .within_ticks(30);
+
+    // It comes back: so do they, on it.
+    world["server"]
+        .entity_mut(there)
+        .insert(Replicate::to_clients(NetworkTarget::All));
+    world
+        .until(|world| {
+            mapped(&world["client"], there).is_some_and(|here| {
+                effects(&world["client"], here).len() == 1 && has_abilities(&world["client"], here)
+            })
+        })
+        .describe("its replicas come back on it")
+        .within_ticks(50);
 }

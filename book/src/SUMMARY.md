@@ -34,6 +34,10 @@
 - [Input and targets](input.md)
 - [Grants and triggers](grants-triggers.md)
 
+# Showing it
+
+- [Cues](cues.md)
+
 # Multiplayer
 
 - [Prediction](prediction.md)

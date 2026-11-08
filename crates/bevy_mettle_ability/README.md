@@ -171,7 +171,7 @@ Licensed under either of [Apache License, Version 2.0](https://github.com/declar
 or [MIT license](https://github.com/declaredlost/bevy_mettle/blob/main/LICENSE-MIT) at your option.
 
 [`Ability`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/data/struct.Ability.html
-[`add_behaviour`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/data/trait.BehaviourApp.html#tymethod.add_behaviour
+[`add_behaviour`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/behaviour/trait.BehaviourApp.html#tymethod.add_behaviour
 [`AbilityRegistry`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilityRegistry.html
 [`Grant`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/data/struct.Grant.html
 [`AbilityActivated`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityActivated.html

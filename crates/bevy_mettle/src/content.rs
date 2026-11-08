@@ -1,7 +1,9 @@
 use bevy::ecs::change_detection::Tick;
 use bevy::prelude::*;
 #[cfg(feature = "ability")]
-use bevy_mettle_ability::data::{Ability, Behaviours, Grant};
+use bevy_mettle_ability::behaviour::Behaviours;
+#[cfg(feature = "ability")]
+use bevy_mettle_ability::data::{Ability, Grant};
 #[cfg(feature = "ability")]
 use bevy_mettle_ability::{AbilityChecks, AbilityRegistry};
 #[cfg(feature = "effect")]
@@ -167,8 +169,8 @@ pub struct MettleContentPlugin;
 impl Plugin for MettleContentPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Loaded>()
-            .add_systems(PreStartup, load)
-            .add_systems(PreUpdate, load.before(MettleSystems));
+            .add_systems(PreStartup, load.run_if(changed))
+            .add_systems(PreUpdate, load.run_if(changed).before(MettleSystems));
     }
 }
 
@@ -177,15 +179,15 @@ impl Plugin for MettleContentPlugin {
 #[derive(Resource, Default)]
 struct Loaded(Option<Tick>);
 
-/// Checks the content as it changes, and loads it or rejects it.
+/// Whether the content changed since it was last loaded or rejected: so
+/// [`load`], which needs the whole world, runs only then.
+fn changed(content: Option<Res<MettleContent>>, loaded: Res<Loaded>) -> bool {
+    content.is_some_and(|content| loaded.0 != Some(content.last_changed()))
+}
+
+/// Checks the content as it changed, and loads it or rejects it.
 fn load(world: &mut World) {
-    let Some(content) = world.get_resource_ref::<MettleContent>() else {
-        return;
-    };
-    let changed = content.last_changed();
-    if world.resource::<Loaded>().0 == Some(changed) {
-        return;
-    }
+    let changed = world.resource_ref::<MettleContent>().last_changed();
     world.resource_mut::<Loaded>().0 = Some(changed);
     let checked = world.resource::<MettleContent>().checked(world);
     match checked {

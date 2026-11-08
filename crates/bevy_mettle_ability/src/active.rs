@@ -8,6 +8,7 @@ use bevy::prelude::*;
 use bevy_mettle_core::Id;
 use bevy_mettle_core::tag::{OwnedTags, Tags};
 
+use crate::behaviour::AnyBehaviour;
 use crate::data::Ability;
 use crate::events::GameplayEvent;
 
@@ -26,6 +27,11 @@ pub struct GrantedAbility {
     pub(crate) source: Option<Entity>,
     /// The tags it granted its owner as it activated, to take back.
     pub(crate) granted: Tags,
+    /// The cues it held on its owner as it activated, to let go of.
+    pub(crate) cues: Tags,
+    /// The behaviour whose component it activated with, to take off: its
+    /// definition may have been replaced since.
+    pub(crate) running: Option<Id<AnyBehaviour>>,
     pub(crate) committed: bool,
 }
 
@@ -36,6 +42,8 @@ impl GrantedAbility {
             level,
             source,
             granted: Tags::new(),
+            cues: Tags::new(),
+            running: None,
             committed: false,
         }
     }

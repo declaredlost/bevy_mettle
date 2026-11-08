@@ -46,11 +46,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sent to the server (`AbilityRequestWith`, `AbilityInput`), which checks it
   again and rejects the activation if it doesn't hold. `Failure::Input`.
 - `replicate_input` in `bevy_mettle_lightyear`.
+- Cues (`bevy_mettle_effect::cue`): what's shown of effects and abilities.
+  Lasting cues held while an effect counts or an ability is active (`cues`
+  in their data), or by `add_cue`, each an entity (`ActiveCue`, `CueOf`);
+  one-shots as an effect executes, with what it dealt to the first
+  attribute it changed and every change (`CueChange`), or by `execute_cue`;
+  `CueAdded` (`joined` for an actor come into view), `CueRemoved` and
+  `CueExecuted`; `add_cue_handler`, run for the most specific tag; local
+  cues; replicated as `ServedCues` and `CueBursts` (the last half second,
+  played by a client coming into view), a predicted one-shot played once
+  however often it was predicted.
 
 ### Changed
 
+- `NetRole` is core's, `bevy_mettle_core::net::NetRole`: what every part
+  reads, not the effect crate's alone.
+
+- Active effects tick in two steps: time runs down and what's due is noted
+  alongside the game (`advance`), and only what's due is done with the whole
+  world (`settle`, run only then). Requirements are weighed as the tick's
+  state is, whatever order effects come in. Content loading and showing
+  replicas run only when there's something to do, so a quiet frame has no
+  exclusive mettle systems.
+
+- `MettleNetPlugin` sends an actor's effect and ability replicas to the
+  client controlling it alone (a visibility filter, following control as it
+  changes hands, the replicas still coming and going with their actor), and
+  every client that sees it its cues;
+  `MettleNetPlugin { replicas: Replicas::Everyone }` sends them to all.
+
 - Behaviours are `#[derive(Behaviour)]`, named as data names them, and added
-  with `add_behaviour::<B>()`; their ids are `Id<AnyBehaviour>`.
+  with `add_behaviour::<B>()`; their ids are `Id<AnyBehaviour>`. They're in
+  `bevy_mettle_ability::behaviour`, code apart from `data`, as effects'
+  executions are in `effect::code`.
 - An ability whose behaviour takes input can't have triggers.
 - `bevy_mettle_lightyear` answers a request to the client controlling its
   actor, rather than remembering who asked: later replies reach it too.
@@ -74,6 +102,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tell nothing.
 
 ### Fixed
+
+- Effects and abilities let go of exactly what they started with: an effect
+  taken off however it goes (despawned, replicated away) lets go of its
+  cues, and an ability ended after its definition was replaced takes off
+  the behaviour, tags and cues it activated with.
+- An effect refreshed earlier in a tick doesn't run out in it: what's due is
+  weighed as each effect stands when it's done.
 
 - An actor spawned this frame can pay for an ability: its cost is checked
   against its bases until its attributes are first worked out, rather than

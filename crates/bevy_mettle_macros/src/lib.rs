@@ -63,11 +63,12 @@ fn expand_behaviour(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream
     let name = settings
         .name
         .unwrap_or_else(|| LitStr::new(&snake(&ident.to_string()), Span::call_site()));
-    let input = settings
-        .input
-        .map_or_else(|| quote!(#krate::data::NoInput), |input| quote!(#input));
+    let input = settings.input.map_or_else(
+        || quote!(#krate::behaviour::NoInput),
+        |input| quote!(#input),
+    );
     Ok(quote! {
-        impl #krate::data::Behaviour for #ident {
+        impl #krate::behaviour::Behaviour for #ident {
             const NAME: &'static str = #name;
             type Input = #input;
         }

@@ -58,6 +58,7 @@ assert_eq!(fireball.commit, Commit::OnActivate);
 | `cancels` | Active abilities tagged any of these are cancelled as it activates. |
 | `blocks` | Other abilities tagged any of these can't activate while it's active. |
 | `grants` | Tags its owner owns while it's active. |
+| `cues` | Cues held on its owner while it's active, such as a cast's glow. See [Cues](cues.md). |
 | `triggers` | What activates it besides being asked. See [Grants and triggers](grants-triggers.md). |
 | `commit` | When its cost and cooldown are applied: `OnActivate` or `Manual`. |
 
@@ -73,7 +74,7 @@ fact term never holds.
 
 A behaviour is a component with [`#[derive(Behaviour)]`][`Behaviour`], added
 to the app with
-[`add_behaviour`](https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/data/trait.BehaviourApp.html#tymethod.add_behaviour).
+[`add_behaviour`](https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/behaviour/trait.BehaviourApp.html#tymethod.add_behaviour).
 Data names it by its name: its type's in `snake_case`, unless it says.
 
 ```rust
@@ -239,7 +240,7 @@ content. [Loading data](loading-data.md) shows how.
   otherwise.
 
 [`Ability`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/data/struct.Ability.html
-[`Behaviour`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/data/trait.Behaviour.html
+[`Behaviour`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/behaviour/trait.Behaviour.html
 [`MettleContent`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleContent.html
 [`AbilityRegistry`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilityRegistry.html
 [`ActiveAbility`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.ActiveAbility.html

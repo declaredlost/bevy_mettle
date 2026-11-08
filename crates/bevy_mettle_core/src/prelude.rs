@@ -9,6 +9,8 @@ pub use crate::condition::Condition;
 #[doc(no_inline)]
 pub use crate::curve::{CurveTable, Interpolation, LevelCurve};
 #[doc(no_inline)]
+pub use crate::net::NetRole;
+#[doc(no_inline)]
 pub use crate::tag::{OwnedTags, Tag, TagAdded, TagCounts, TagRemoved, TagTree, Tags, owns};
 #[doc(no_inline)]
 pub use crate::{Id, IdTarget, MettleError, MettleErrors};

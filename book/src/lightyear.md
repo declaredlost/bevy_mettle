@@ -129,9 +129,16 @@ but can't act for it.
 From the server to its clients:
 
 - every active effect's [`EffectReplica`] and every granted ability's
-  [`AbilityReplica`], with their [`EffectOf`] and [`AbilityOf`]. They're
-  replicated as their actor is: `ReplicateLike` it, so they reach exactly
-  the clients that see the actor, and go with it;
+  [`AbilityReplica`], with their [`EffectOf`] and [`AbilityOf`], to the
+  client [`ControlledBy`] the actor alone: it predicts with them. They go
+  and come with the actor (`ReplicateLike` it), and a visibility filter
+  keeps them to its owner, following control as it comes, changes hands or
+  goes. An actor no client controls sends them to none. Set
+  `MettleNetPlugin { replicas: Replicas::Everyone }` to send them to every
+  client that sees the actor, for a party frame showing allies' buffs;
+- each actor's [cues](cues.md), lasting and one-shot, to every client that
+  sees it: what other clients see of its effects and abilities, while its
+  cooldowns and buffs stay its owner's;
 - each actor's `Base<A>` and [`Served<A>`], for the attributes you named with
   [`replicate_attribute`]. `Base<A>` is what the client works predictions out
   on. `Served<A>` is what it shows. On the server, every actor with `Base<A>`
@@ -210,7 +217,7 @@ messages and replication, and before [`AbilitySystems`].
 [`MettleChannel`]: https://docs.rs/bevy_mettle_lightyear/latest/bevy_mettle_lightyear/struct.MettleChannel.html
 [`MettleNetPlugin`]: https://docs.rs/bevy_mettle_lightyear/latest/bevy_mettle_lightyear/struct.MettleNetPlugin.html
 [`MettlePlugins`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettlePlugins.html
-[`NetRole`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/net/enum.NetRole.html
+[`NetRole`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/net/enum.NetRole.html
 [`Remote`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/authority/struct.Remote.html
 [`replicate_input`]: https://docs.rs/bevy_mettle_lightyear/latest/bevy_mettle_lightyear/trait.MettleNetApp.html#tymethod.replicate_input
 [`replicate_attribute`]: https://docs.rs/bevy_mettle_lightyear/latest/bevy_mettle_lightyear/trait.MettleNetApp.html#tymethod.replicate_attribute

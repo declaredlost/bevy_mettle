@@ -7,6 +7,7 @@ use std::sync::Arc;
 use bevy::ecs::system::IntoSystem;
 use bevy::prelude::*;
 use bevy_mettle_core::{Id, IdTarget};
+pub use bevy_mettle_macros::Behaviour;
 
 /// A behaviour: the component in code that runs an ability.
 ///

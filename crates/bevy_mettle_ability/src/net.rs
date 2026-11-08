@@ -10,12 +10,13 @@ use std::collections::HashMap;
 use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::prelude::*;
 use bevy_mettle_core::Id;
+use bevy_mettle_core::net::NetRole;
 use bevy_mettle_effect::EffectWorld;
-use bevy_mettle_effect::net::NetRole;
 use serde::{Deserialize, Serialize};
 
 use crate::active::{ActiveAbility, GrantedAbility};
-use crate::data::{Ability, AnyBehaviour, Behaviour, NoInput};
+use crate::behaviour::{AnyBehaviour, Behaviour, NoInput};
+use crate::data::Ability;
 use crate::events::{AbilityFailed, Failure};
 use crate::{AbilityRegistry, engine};
 

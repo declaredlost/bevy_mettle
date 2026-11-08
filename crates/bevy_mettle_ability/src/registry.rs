@@ -9,7 +9,8 @@ use bevy_mettle_core::{Id, MettleError, MettleErrors};
 use bevy_mettle_effect::EffectRegistry;
 use bevy_mettle_effect::data::{Effect, EffectDuration};
 
-use crate::data::{Ability, AnyBehaviour, Behaviours, Grant, Trigger};
+use crate::behaviour::{AnyBehaviour, Behaviours};
+use crate::data::{Ability, Grant, Trigger};
 
 /// The abilities there are, checked against the tags, effects and behaviours.
 ///
@@ -180,6 +181,7 @@ fn check_def(
         &def.cancels,
         &def.blocks,
         &def.grants,
+        &def.cues,
     ] {
         push(tags.known_all(set.written(), within));
     }

@@ -192,8 +192,8 @@ it applies.
 
 [`activate_ability_with`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/trait.AbilityCommands.html#tymethod.activate_ability_with
 [`set_input`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/trait.AbilityCommands.html#tymethod.set_input
-[`check_input`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/data/trait.BehaviourApp.html#tymethod.check_input
-[`InputCheck`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/data/struct.InputCheck.html
+[`check_input`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/behaviour/trait.BehaviourApp.html#tymethod.check_input
+[`InputCheck`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/behaviour/struct.InputCheck.html
 [`Failure::Input`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/enum.Failure.html#variant.Input
 [`AbilityFailed`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityFailed.html
 [`AbilityRequestWith`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityRequestWith.html

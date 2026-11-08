@@ -62,6 +62,10 @@ pub struct Effect {
     /// Tags its target owns while it lasts.
     #[serde(default, skip_serializing_if = "Tags::is_empty")]
     pub grants: Tags,
+    /// Cues it plays: held on its target while it counts, and played once each
+    /// time it executes.
+    #[serde(default, skip_serializing_if = "Tags::is_empty")]
+    pub cues: Tags,
     /// What has to hold for it to apply at all.
     #[serde(
         default,
@@ -215,6 +219,7 @@ impl Effect {
             modifiers: Vec::new(),
             executions: Vec::new(),
             grants: Tags::new(),
+            cues: Tags::new(),
             require: None,
             ongoing: None,
             remove_if: None,
@@ -273,6 +278,14 @@ impl Effect {
     #[must_use]
     pub fn execution(mut self, execution: impl Into<Id<Execution>>) -> Self {
         self.executions.push(execution.into());
+        self
+    }
+
+    /// Playing the cue `tag`: held on its target while it counts, and played
+    /// once each time it executes.
+    #[must_use]
+    pub fn cue(mut self, tag: impl Into<Id<Tag>>) -> Self {
+        self.cues.insert(tag.into());
         self
     }
 

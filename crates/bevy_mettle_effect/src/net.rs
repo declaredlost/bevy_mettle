@@ -9,30 +9,12 @@ use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::prelude::*;
 use bevy_mettle_attribute::modifier::{Modifier, ModifierOf, Modifiers, Operation, Provisional};
 use bevy_mettle_attribute::read::AttributeWorld;
+use bevy_mettle_core::net::NetRole;
 use bevy_mettle_core::tag::Tags;
 use serde::{Deserialize, Serialize};
 
 use crate::active::{ActiveEffect, EffectOf};
 use crate::{EffectRegistry, EffectSpec, engine};
-
-/// What this world is over a network: standalone, the server, or a client.
-#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub enum NetRole {
-    /// Playing alone: everything decided here, nothing replicated.
-    #[default]
-    Standalone,
-    /// The server: everything decided here; active effects keep an
-    /// [`EffectReplica`] for clients.
-    Server,
-    /// A client: effects the server owns are shown from their replicas, not
-    /// ticked; what's applied under an activation is predicted, kept until the
-    /// server confirms it or undone when it rejects it. A predicted instant
-    /// change is shown as a modifier, never written to a base: the server owns
-    /// bases, and its own replace it either way. Once the server has answered
-    /// an activation, nothing more is predicted under it: what it does from
-    /// then on arrives from the server.
-    Client,
-}
 
 /// On a client's active effect: predicted under an activation, until settled.
 ///
@@ -221,24 +203,30 @@ fn overlaid(world: &World, overlays: &[(u64, Entity)], change: &crate::code::Bas
 /// A predicted change is worked out on the base as it's shown, every change
 /// predicted before it made, and kept within its limits as the server keeps
 /// it; what it comes to is shown as a flat modifier, the difference.
+///
+/// How much it changed the base, as it's shown.
 pub(crate) fn change_base(
     world: &mut World,
     activation: Option<u64>,
     actor: Entity,
     change: &crate::code::BaseChange,
-) {
+) -> f32 {
     let Some(activation) = activation else {
+        let before = world.base_at(actor, &change.attribute);
         world.apply_to_base(actor, &change.attribute, change.op, change.value);
-        return;
+        let after = world.base_at(actor, &change.attribute);
+        return after
+            .zip(before)
+            .map_or(0.0, |(after, before)| after - before);
     };
     let Some(base) = world.base_at(actor, &change.attribute) else {
-        return;
+        return 0.0;
     };
     let overlays = overlays(world, actor);
     let shown = base + overlaid(world, &overlays, change);
     let Some(after) = world.base_after(actor, &change.attribute, shown, change.op, change.value)
     else {
-        return;
+        return 0.0;
     };
     let difference = after - shown;
     let mine = overlays
@@ -265,6 +253,7 @@ pub(crate) fn change_base(
             .id();
         log(world, activation, Undo::Overlay { actor, overlay });
     }
+    difference
 }
 
 /// A flat modifier of `change`'s attribute by `value`.
@@ -303,6 +292,9 @@ fn despawn(world: &mut World, entity: Entity) {
 /// The server rejected `activation`: everything predicted under it undone, last
 /// first.
 pub(crate) fn rollback(world: &mut World, activation: u64) {
+    if let Some(mut predicted) = world.get_resource_mut::<crate::cue::Predicted>() {
+        predicted.forget_activation(activation);
+    }
     let undo = world
         .get_resource_or_init::<Predictions>()
         .answer(activation);
@@ -348,6 +340,14 @@ pub(crate) fn sync_replicas(
             commands.entity(entity).insert(now);
         }
     }
+}
+
+/// Whether a replica arrived or changed, for [`show_replicas`] to show.
+pub(crate) fn replicas_to_show(
+    arrived: Query<(), (With<EffectReplica>, With<EffectOf>, Without<ActiveEffect>)>,
+    changed: Query<(), Restated>,
+) -> bool {
+    !arrived.is_empty() || !changed.is_empty()
 }
 
 /// Effects the server's replica arrived for, not shown yet.

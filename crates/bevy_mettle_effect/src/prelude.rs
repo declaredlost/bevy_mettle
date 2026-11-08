@@ -10,6 +10,11 @@ pub use crate::active::{ActiveEffect, ActiveEffects, EffectOf};
 #[doc(no_inline)]
 pub use crate::code::{BaseChange, EffectCode, EffectCodeApp, EffectContext};
 #[doc(no_inline)]
+pub use crate::cue::{
+    ActiveCue, ActiveCues, Cue, CueAdded, CueApp, CueCommands, CueEvent, CueExecuted, CueOf,
+    CueRemoved, CueSystems, CueWorld,
+};
+#[doc(no_inline)]
 pub use crate::data::{
     Capture, Effect, EffectDuration, EffectModifier, Expire, Magnitude, Reapply, StackBy, Stacking,
 };
@@ -18,7 +23,7 @@ pub use crate::events::{
     Blocked, EffectApplied, EffectBlocked, EffectExecuted, EffectRemoved, EffectStacked,
 };
 #[doc(no_inline)]
-pub use crate::net::{EffectReplica, NetRole, PredictedUnder, Proxy};
+pub use crate::net::{EffectReplica, PredictedUnder, Proxy};
 #[doc(no_inline)]
 pub use crate::{
     EffectChecks, EffectCommands, EffectPlugin, EffectRegistry, EffectSpec, EffectSystems,

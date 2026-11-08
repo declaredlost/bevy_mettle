@@ -35,7 +35,11 @@ often.
   stands still.
 - [`EffectApplied`], [`EffectStacked`], [`EffectBlocked`],
   [`EffectExecuted`] and [`EffectRemoved`] are triggered on the target, for
-  cues and abilities.
+  abilities and the game.
+- Cues are what's shown of effects and abilities: lasting ones as entities
+  on the actor while they hold, one-shots as they execute, run by the
+  handler for their most specific tag, and replicated to every client that
+  sees the actor.
 - Over a network, a server keeps each effect's replica to send, and a
   client shows them, and predicts its own.
 
@@ -121,7 +125,7 @@ Effects tick in [`EffectSystems`], in `FixedUpdate` unless
   [Applying effects](https://declaredlost.github.io/bevy_mettle/applying-effects.html),
   [Stacking](https://declaredlost.github.io/bevy_mettle/stacking.html) and
   [Effects in code](https://declaredlost.github.io/bevy_mettle/effect-code.html)
-  pages, and [Prediction](https://declaredlost.github.io/bevy_mettle/prediction.html)
+  pages, [Cues](https://declaredlost.github.io/bevy_mettle/cues.html),, and [Prediction](https://declaredlost.github.io/bevy_mettle/prediction.html)
   for the network
 - The [API documentation](https://docs.rs/bevy_mettle_effect)
 

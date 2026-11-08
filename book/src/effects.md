@@ -95,6 +95,7 @@ effect says.
 | `modifiers` | What it changes: modifiers while it lasts, or the base as it executes |
 | `executions` | Formulas in code, run as it executes: see [Effects in code](effect-code.md) |
 | `grants` | Tags the target owns while it counts |
+| `cues` | Cues held on the target while it counts, and played each time it executes: see [Cues](cues.md) |
 | `require` | What has to hold for it to apply at all |
 | `ongoing` | What has to hold for it to count; while it doesn't, it's inhibited |
 | `remove_if` | What takes it off as soon as it holds |

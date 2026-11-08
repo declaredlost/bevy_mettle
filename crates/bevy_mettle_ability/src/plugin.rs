@@ -1,10 +1,10 @@
 use bevy::prelude::*;
+use bevy_mettle_core::net::NetRole;
 use bevy_mettle_core::tag::{TagAdded, TagRemoved};
 use bevy_mettle_effect::events::EffectApplied;
-use bevy_mettle_effect::net::NetRole;
 
 use crate::active::GrantedBy;
-use crate::data::Behaviours;
+use crate::behaviour::Behaviours;
 use crate::net::{self, AbilityReply, AbilityRequest};
 use crate::{AbilityRegistry, engine};
 
