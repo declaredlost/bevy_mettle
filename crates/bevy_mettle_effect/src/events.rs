@@ -5,7 +5,7 @@
 use bevy::prelude::*;
 use bevy_mettle_core::Id;
 
-use crate::Effect;
+use crate::data::Effect;
 
 /// An effect applied to an actor, lasting: its active effect spawned.
 #[derive(EntityEvent, Debug, Clone, PartialEq, Eq)]

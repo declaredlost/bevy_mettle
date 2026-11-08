@@ -10,8 +10,25 @@ use bevy_mettle::prelude::*;
 
 use crate::common::{Mana, actor, attributes, close, get, own};
 
-#[derive(Component, Default)]
+#[derive(Component, Default, Behaviour)]
 struct Cast;
+
+/// Where a shot is aimed: how far along.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+struct Aim(f32);
+
+/// A shot being fired: aimed.
+#[derive(Component, Default, Behaviour)]
+#[behaviour(input = Aim)]
+struct Shoot;
+
+/// How far a shot reaches, as this world knows: the server may know better.
+#[derive(Resource)]
+struct Reach(f32);
+
+fn in_reach(In(check): In<InputCheck<Aim>>, reach: Res<Reach>) -> bool {
+    check.input.0.abs() <= reach.0
+}
 
 const TAGS: &[&str] = &[
     "damage",
@@ -39,13 +56,18 @@ fn world(role: NetRole) -> TestApp {
             app.insert_resource(role);
         })
         .plugins((EffectPlugin::default(), AbilityPlugin))
-        .with(|app| {
-            app.add_behaviour::<Cast>("cast");
+        .with(move |app| {
+            // The server knows a shot reaches only 10; the client, 100.
+            let reach = if role == NetRole::Server { 10.0 } else { 100.0 };
+            app.add_behaviour::<Cast>()
+                .add_behaviour::<Shoot>()
+                .check_input::<Aim, _>(in_reach)
+                .insert_resource(Reach(reach));
         })
         .build();
     let world = app.world_mut();
     let attributes = world.resource::<AttributeRegistry>().clone();
-    let effects = EffectRegistry::build(
+    let effects = EffectRegistry::check(
         &[
             Effect::instant("fireball.cost")
                 .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
@@ -70,10 +92,12 @@ fn world(role: NetRole) -> TestApp {
                     .condition(Condition::source_has("state.stunned")),
             ),
         ],
-        &tags(),
-        &CurveTable::default(),
-        &attributes,
-        &EffectCode::new(),
+        EffectChecks {
+            tags: &tags(),
+            curves: &CurveTable::default(),
+            attributes: &attributes,
+            code: &EffectCode::new(),
+        },
     )
     .unwrap();
     let fireball = Ability::new("fireball", "cast")
@@ -84,12 +108,15 @@ fn world(role: NetRole) -> TestApp {
         .cost("fireball.cost")
         .commit(Commit::Manual);
     let focus = Ability::new("focus", "cast").cost("focus.cost");
-    let abilities = AbilityRegistry::build(
-        &[fireball, charge, focus],
+    let shot = Ability::new("shot", "shoot").cost("fireball.cost");
+    let abilities = AbilityRegistry::check(
+        &[fireball, charge, focus, shot],
         &[],
-        &tags(),
-        &effects,
-        world.resource::<Behaviours>(),
+        AbilityChecks {
+            tags: &tags(),
+            effects: &effects,
+            behaviours: world.resource::<Behaviours>(),
+        },
     )
     .unwrap();
     world.insert_resource(effects);
@@ -150,6 +177,30 @@ impl Game {
             self.server.write(AbilityRequest {
                 actor: self.there,
                 ..request
+            });
+        }
+        let aimed: Vec<AbilityRequestWith<Aim>> = self
+            .client
+            .world_mut()
+            .resource_mut::<Messages<AbilityRequestWith<Aim>>>()
+            .drain()
+            .collect();
+        for request in aimed {
+            self.server.write(AbilityRequestWith {
+                actor: self.there,
+                ..request
+            });
+        }
+        let inputs: Vec<AbilityInput<Aim>> = self
+            .client
+            .world_mut()
+            .resource_mut::<Messages<AbilityInput<Aim>>>()
+            .drain()
+            .collect();
+        for input in inputs {
+            self.server.write(AbilityInput {
+                actor: self.there,
+                ..input
             });
         }
         self.server.tick();
@@ -563,5 +614,105 @@ fn an_abilitys_replica_restated_changes_its_level() {
     assert_eq!(
         game.client.entity(ability).get::<GrantedAbility>().level(),
         3.0
+    );
+}
+
+#[test]
+fn a_client_predicts_with_its_input_and_the_server_runs_with_the_same() {
+    let mut game = Game::with(&["shot"], &[]);
+    let here = game
+        .client
+        .world_mut()
+        .activate_ability_with::<Shoot>(game.here, "shot", Aim(4.0))
+        .unwrap();
+    game.client.entity(here).assert_eq(Aim(4.0));
+    game.ask();
+    let there = game.ability_there("shot");
+    game.server
+        .entity(there)
+        .assert_has::<Shoot>()
+        .assert_eq(Aim(4.0));
+    game.answer();
+    game.client.entity(here).assert_has::<Shoot>();
+    assert!(
+        close(get::<Mana>(&game.client, game.here), 10.0),
+        "paid once"
+    );
+}
+
+#[test]
+fn input_the_server_rejects_undoes_the_prediction() {
+    let mut game = Game::with(&["shot"], &[]);
+    game.client.watch_triggered::<AbilityFailed>();
+    let here = game
+        .client
+        .world_mut()
+        .activate_ability_with::<Shoot>(game.here, "shot", Aim(40.0))
+        .unwrap();
+    game.client.tick();
+    assert!(
+        close(get::<Mana>(&game.client, game.here), 10.0),
+        "predicted"
+    );
+    game.ask();
+    game.server
+        .entity(game.ability_there("shot"))
+        .assert_lacks::<Shoot>();
+    assert!(
+        close(get::<Mana>(&game.server, game.there), 30.0),
+        "never paid"
+    );
+    game.answer();
+    game.client
+        .entity(here)
+        .assert_lacks::<Shoot>()
+        .assert_lacks::<Aim>();
+    assert!(
+        close(get::<Mana>(&game.client, game.here), 30.0),
+        "mana back"
+    );
+    game.client
+        .assert_triggered::<AbilityFailed>(|failed| failed.reason == Failure::Input);
+}
+
+#[test]
+fn new_input_is_predicted_and_cancels_both_sides_if_the_server_rejects_it() {
+    let mut game = Game::with(&["shot"], &[]);
+    let here = game
+        .client
+        .world_mut()
+        .activate_ability_with::<Shoot>(game.here, "shot", Aim(4.0))
+        .unwrap();
+    game.ask();
+    game.answer();
+    let there = game.ability_there("shot");
+
+    // Aimed again, within reach: taken.
+    game.client
+        .world_mut()
+        .set_input::<Shoot>(here, Aim(-8.0))
+        .unwrap();
+    game.client.entity(here).assert_eq(Aim(-8.0));
+    game.ask();
+    game.server.entity(there).assert_eq(Aim(-8.0));
+    game.answer();
+
+    // Aimed past what the server knows the shot reaches: predicted, then
+    // cancelled on both sides.
+    game.client
+        .world_mut()
+        .set_input::<Shoot>(here, Aim(50.0))
+        .unwrap();
+    game.client.entity(here).assert_eq(Aim(50.0));
+    game.ask();
+    game.server.entity(there).assert_lacks::<Shoot>();
+    game.answer();
+    game.client
+        .entity(here)
+        .assert_lacks::<Shoot>()
+        .assert_lacks::<Aim>();
+    assert!(
+        close(get::<Mana>(&game.client, game.here), 10.0),
+        "paid all the same: it ran"
     );
 }

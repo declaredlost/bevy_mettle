@@ -21,6 +21,7 @@ publish = false
 
 authors = ["Oleh Martsokha <o.martsokha@gmail.com>"]
 repository = "https://github.com/declaredlost/bevy_mettle"
+documentation = "https://docs.rs/bevy_mettle"
 
 # Shared lints for every crate (opt in with `[lints] workspace = true`).
 # The whole of `clippy::pedantic` is denied.
@@ -51,6 +52,7 @@ bevy_mettle_ability = { path = "./crates/bevy_mettle_ability", version = "0.1.0"
 bevy_mettle_attribute = { path = "./crates/bevy_mettle_attribute", version = "0.1.0" }
 bevy_mettle_core = { path = "./crates/bevy_mettle_core", version = "0.1.0" }
 bevy_mettle_effect = { path = "./crates/bevy_mettle_effect", version = "0.1.0" }
+bevy_mettle_lightyear = { path = "./crates/bevy_mettle_lightyear", version = "0.1.0" }
 bevy_mettle_macros = { path = "./crates/bevy_mettle_macros", version = "0.1.0" }
 
 # Game engine (headless by default)
@@ -64,7 +66,7 @@ lightyear = { version = "0.31", default-features = false, features = ["std"] }
 bevy_replicon = { version = "0.45", default-features = false, features = [] }
 
 # Testing
-bevy_harness = { git = "https://github.com/declaredlost/bevy_harness", branch = "feat/events-and-questions", version = "0.1.0" }
+bevy_harness = { git = "https://github.com/declaredlost/bevy_harness", version = "0.1.0" }
 
 # (De)serialization
 serde = { version = "1.0", features = [] }

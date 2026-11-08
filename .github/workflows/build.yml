@@ -7,6 +7,7 @@ on:
       - "release"
     paths:
       - "crates/**"
+      - "book/src/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rustfmt.toml"
@@ -16,6 +17,7 @@ on:
     branches: [main, release]
     paths:
       - "crates/**"
+      - "book/src/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rustfmt.toml"
@@ -103,6 +105,12 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace --all-features
+
+      # With `lightyear`, `MettlePlugins` carries `MettleNetPlugin`, which
+      # needs lightyear's plugins: the README's and the book's examples, but
+      # the lightyear chapter, are a game without it.
+      - name: Run the README's and the book's examples
+        run: cargo test -p bevy_mettle --doc
 
   machete:
     name: Machete

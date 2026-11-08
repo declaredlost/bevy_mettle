@@ -8,7 +8,9 @@ use bevy::prelude::*;
 use bevy_mettle_core::Id;
 use bevy_mettle_core::tag::{OwnedTags, TagCounts, Tags};
 
-use crate::{Effect, EffectSpec};
+use crate::data::Effect;
+use crate::net::Proxy;
+use crate::{EffectSpec, engine};
 
 /// An effect on its target: an entity of its own, [`EffectOf`] the target.
 ///
@@ -38,6 +40,9 @@ pub struct ActiveEffect {
     pub(crate) predicted: u32,
     /// Its modifiers' attribute magnitudes, as captured as it applied.
     pub(crate) captured: Vec<Option<f32>>,
+    /// Whether mettle is taking it off (removed, or a prediction undone), so
+    /// it's told there, or not at all.
+    pub(crate) removing: bool,
 }
 
 impl ActiveEffect {
@@ -79,20 +84,32 @@ impl ActiveEffect {
 }
 
 /// Takes back the tags `ActiveEffect` granted, as it's taken off its entity
-/// however: despawned with its target, or replicated away.
+/// however: removed, despawned with its target, or replicated away.
+///
+/// Taken off by the game (despawned, or the component removed) rather than by
+/// mettle, it's told and chained as `remove_effect` would: once commands are
+/// applied, if its target's still there. A client's shown effect, the
+/// server's, goes as the server says, with nothing told.
 fn take_back(mut world: DeferredWorld, context: HookContext) {
-    let Some(active) = world.get::<ActiveEffect>(context.entity) else {
-        return;
-    };
-    if active.granted.is_empty() {
-        return;
-    }
-    let granted = active.granted.clone();
     let Some(target) = world.get::<EffectOf>(context.entity).map(|of| of.0) else {
         return;
     };
-    if let Some(mut owned) = world.get_mut::<OwnedTags>(target) {
+    let Some(active) = world.get::<ActiveEffect>(context.entity) else {
+        return;
+    };
+    let granted = active.granted.clone();
+    let unasked = (!active.removing && world.get::<Proxy>(context.entity).is_none())
+        .then(|| (active.def.clone(), active.spec.clone()));
+    if !granted.is_empty()
+        && let Some(mut owned) = world.get_mut::<OwnedTags>(target)
+    {
         owned.remove_all(&granted);
+    }
+    if let Some((def, spec)) = unasked {
+        let effect = context.entity;
+        world.commands().queue(move |world: &mut World| {
+            engine::removed_unasked(world, target, effect, &def, &spec);
+        });
     }
 }
 

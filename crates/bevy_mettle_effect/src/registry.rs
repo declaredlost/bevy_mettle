@@ -9,14 +9,14 @@ use bevy_mettle_core::curve::CurveTable;
 use bevy_mettle_core::tag::TagTree;
 use bevy_mettle_core::{Id, MettleError, MettleErrors};
 
-use crate::Effect;
 use crate::code::{Calculation, CalculationFn, EffectCode, Execution, ExecutionFn};
-use crate::data::{EffectDuration, Magnitude};
+use crate::data::{Effect, EffectDuration, Magnitude};
 
 /// The effects there are, checked against the tags, curves and effect code.
 ///
-/// Built from their definitions: every name they use defined, every number one
-/// that can be. Insert it as a resource; insert another (a hot reload, a mod)
+/// Made only by [`check`](Self::check)ing their definitions: every name they
+/// use defined, every number one that can be. A resource: in an app with
+/// `bevy_mettle`, its content loads it; insert another (a hot reload, a mod)
 /// and active effects take their new definitions.
 #[derive(Resource, Clone, Default)]
 pub struct EffectRegistry {
@@ -43,22 +43,35 @@ impl std::fmt::Debug for EffectRegistry {
     }
 }
 
+/// What effects are checked against: what they can name.
+#[derive(Clone, Copy)]
+pub struct EffectChecks<'a> {
+    /// The gameplay tags there are.
+    pub tags: &'a TagTree,
+    /// The curves magnitudes scale by.
+    pub curves: &'a CurveTable,
+    /// The attributes the app added.
+    pub attributes: &'a AttributeRegistry,
+    /// The executions and calculations the app added.
+    pub code: &'a EffectCode,
+}
+
 impl EffectRegistry {
-    /// Checks `definitions` against `tags`, `curves`, the attributes there are
-    /// and `code`.
+    /// The registry of `definitions`, checked against what they can name: the
+    /// only way there is one.
     ///
     /// # Errors
     ///
     /// Everything wrong with them, at once: effects defined twice; tags,
     /// curves, attributes, effects, executions and calculations named that
     /// aren't; numbers that can't be; and what an instant effect can't have.
-    pub fn build<'a>(
-        definitions: impl IntoIterator<Item = &'a Effect>,
-        tags: &TagTree,
-        curves: &CurveTable,
-        attributes: &AttributeRegistry,
-        code: &EffectCode,
-    ) -> Result<Self, MettleErrors> {
+    pub fn check(definitions: &[Effect], against: EffectChecks<'_>) -> Result<Self, MettleErrors> {
+        let EffectChecks {
+            tags,
+            curves,
+            attributes,
+            code,
+        } = against;
         let mut errors = Vec::new();
         let mut effects = HashMap::new();
         for def in definitions {
@@ -78,7 +91,7 @@ impl EffectRegistry {
             code: Arc::new(code.clone()),
         };
         for def in registry.effects.values() {
-            registry.check(def, tags, attributes, &mut errors);
+            registry.check_def(def, tags, attributes, &mut errors);
         }
         errors.sort_by_key(ToString::to_string);
         if errors.is_empty() {
@@ -112,7 +125,7 @@ impl EffectRegistry {
     }
 
     /// Checks `def`, noting what's wrong in `errors`.
-    fn check(
+    fn check_def(
         &self,
         def: &Effect,
         tags: &TagTree,
@@ -204,6 +217,11 @@ impl EffectRegistry {
                     ))));
                 }
             }
+        } else if def.period.is_none() && !def.executions.is_empty() {
+            // A lasting effect executes only as its period comes round.
+            push(Err(invalid(
+                "executions on a lasting effect with no period: it never executes".to_owned(),
+            )));
         }
     }
 

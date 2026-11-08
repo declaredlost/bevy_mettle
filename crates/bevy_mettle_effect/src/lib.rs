@@ -15,7 +15,6 @@ mod spec;
 mod systems;
 
 pub use self::commands::{EffectCommands, EffectWorld};
-pub use self::data::Effect;
 pub use self::plugin::{EffectPlugin, EffectSystems};
-pub use self::registry::EffectRegistry;
+pub use self::registry::{EffectChecks, EffectRegistry};
 pub use self::spec::EffectSpec;

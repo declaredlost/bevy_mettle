@@ -1,5 +1,6 @@
 //! What the tests share: a game's attributes, and an app keeping them.
 
+use bevy::app::PluginGroupBuilder;
 use bevy::prelude::*;
 use bevy_harness::TestApp;
 use bevy_mettle::prelude::*;
@@ -136,4 +137,13 @@ pub fn own(app: &mut TestApp, actor: Entity, tag: &'static str, on: bool) {
 /// Whether `a` and `b` are the same, but for rounding.
 pub fn close(a: f32, b: f32) -> bool {
     (a - b).abs() < 1e-4
+}
+
+/// `MettlePlugins`, but for `MettleNetPlugin` with `lightyear` on: these
+/// apps have no lightyear to carry it.
+pub fn mettle() -> PluginGroupBuilder {
+    let plugins = MettlePlugins.build();
+    #[cfg(feature = "lightyear")]
+    let plugins = plugins.disable::<MettleNetPlugin>();
+    plugins
 }

@@ -1,5 +1,4 @@
-use bevy::ecs::intern::Interned;
-use bevy::ecs::schedule::ScheduleLabel;
+use bevy::ecs::schedule::{InternedScheduleLabel, ScheduleLabel};
 use bevy::prelude::*;
 use bevy_mettle_core::tag::{OwnedTags, publish_tags};
 
@@ -26,15 +25,15 @@ pub(crate) enum Phase {
 
 /// The schedule attributes are kept in.
 #[derive(Resource)]
-pub(crate) struct AttributeSchedule(pub(crate) Interned<dyn ScheduleLabel>);
+pub(crate) struct AttributeSchedule(pub(crate) InternedScheduleLabel);
 
 /// Keeps actors' attributes: bases synced, modifiers folded, values computed.
 ///
 /// What changed is told, and its components registered for reflection. Added by
-/// [`add_attribute`](crate::AttributeApp::add_attribute) if it isn't yet; add
-/// it first to choose the schedule.
+/// [`add_attribute`](crate::registry::AttributeApp::add_attribute) if it isn't
+/// yet; add it first to choose the schedule.
 pub struct AttributePlugin {
-    schedule: Interned<dyn ScheduleLabel>,
+    schedule: InternedScheduleLabel,
 }
 
 impl AttributePlugin {
@@ -43,6 +42,12 @@ impl AttributePlugin {
         Self {
             schedule: schedule.intern(),
         }
+    }
+
+    /// The schedule it keeps attributes in.
+    #[must_use]
+    pub fn schedule(&self) -> InternedScheduleLabel {
+        self.schedule
     }
 }
 

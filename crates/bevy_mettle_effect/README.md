@@ -1,139 +1,149 @@
 # bevy_mettle_effect
 
-`bevy_mettle`'s effects, as in Unreal's Gameplay Ability System: what
-changes attributes and grants tags, instantly, for a while, for good, or
-every so often.
+[![Build Status][action-badge]][action-url]
+[![Crate Docs][docs-badge]][docs-url]
+[![Crate Version][crates-badge]][crates-url]
 
-```rust,ignore
-let registry = EffectRegistry::build(&effects, &tags, &curves, &attributes, &code)?;
-app.add_plugins(EffectPlugin::default())
-    .insert_resource(registry);
+**Part of [bevy_mettle](https://github.com/declaredlost/bevy_mettle), a gameplay framework for Bevy.**
 
-commands.entity(target).apply_effect(
-    EffectSpec::new("burning").level(3.0).param("param.damage", 12.0).source(caster),
-);
+[action-badge]: https://img.shields.io/github/actions/workflow/status/declaredlost/bevy_mettle/build.yml?branch=main&label=build&logo=github&style=flat-square
+[action-url]: https://github.com/declaredlost/bevy_mettle/actions/workflows/build.yml
+[crates-badge]: https://img.shields.io/crates/v/bevy_mettle_effect.svg?logo=rust&style=flat-square
+[crates-url]: https://crates.io/crates/bevy_mettle_effect
+[docs-badge]: https://img.shields.io/docsrs/bevy_mettle_effect?logo=Docs.rs&style=flat-square
+[docs-url]: https://docs.rs/bevy_mettle_effect
+
+Effects for Bevy, as in Unreal's Gameplay Ability System: what changes
+attributes and grants tags, at once, for a while, for good, or every so
+often.
+
+## Overview
+
+- An [`Effect`] is data, named by an id: its duration, period, modifiers,
+  executions in code, the tags it grants, what it needs to apply or to
+  count, what it removes or keeps off, how it stacks, and the effects it
+  chains into.
+- An [`EffectRegistry`] is built from them, checked against the tag tree,
+  the curves, the attributes the app added and your [`EffectCode`]: every
+  error at once. Insert a new one and active effects take their new
+  definitions.
+- An [`EffectSpec`] is what's applied: the effect, its level, its params
+  and its source. `apply_effect` checks it, then executes it, stacks it, or
+  spawns it as an entity [`EffectOf`] its target.
+- While it counts, a lasting effect's modifiers count for its target and
+  the target owns what it grants; while inhibited, neither, and its time
+  stands still.
+- [`EffectApplied`], [`EffectStacked`], [`EffectBlocked`],
+  [`EffectExecuted`] and [`EffectRemoved`] are triggered on the target, for
+  cues and abilities.
+- Over a network, a server keeps each effect's replica to send, and a
+  client shows them, and predicts its own.
+
+## Installation
+
+Most games depend on `bevy_mettle`, where effects are a default feature and
+this crate is `bevy_mettle::effect`:
+
+```toml
+[dependencies]
+bevy_mettle = "0.1"
 ```
 
-At the root: [`EffectPlugin`], [`EffectSystems`], [`Effect`], [`EffectSpec`],
-[`EffectRegistry`], [`EffectCommands`] and [`EffectWorld`]. The rest is in
-five modules, and [`prelude`] brings in what using effects takes:
+Or depend on this crate directly, for attributes and effects without
+abilities:
 
-| Module | What's in it |
-|---|---|
-| [`data`] | An effect's parts: `EffectDuration`, `EffectModifier`, `Magnitude`, `Stacking`, … |
-| [`active`] | Effects on their targets: `ActiveEffect`, `ActiveEffects`, `EffectOf` |
-| [`code`] | What effects run in code: `EffectCode`, `EffectContext`, `Execution`, `Calculation`, `BaseChange` |
-| [`events`] | What's told: `EffectApplied`, `EffectStacked`, `EffectBlocked`, `EffectExecuted`, `EffectRemoved` |
-| [`net`] | Over a network: `NetRole`, `PredictedUnder`, `EffectReplica`, `Proxy` |
-
-## Definitions
-
-An effect is data, named by an `Id<Effect>`: [`Effect`].
-
-```ron
-(
-    id: "burning",
-    tags: ["effect.affliction.burning"],
-    duration: For(Value(4)),
-    period: (every: Value(0.5), on_apply: true),
-    modifiers: [(attribute: "life", op: Flat, value: Param("param.damage"))],
-    grants: ["state.burning"],
-    require: Not(OwnerHas("immune.fire")),
-    ongoing: Not(OwnerHas("state.wet")),
-    stacking: (limit: 3, expire: RemoveOne),
-)
+```toml
+[dependencies]
+bevy_mettle_effect = "0.1"
 ```
 
-| Field | What it does |
-|---|---|
-| `duration` | `Instant` (executes once, changing bases), `Infinite`, or `For(..)` seconds |
-| `period` | Executes every so often while it lasts, instead of its modifiers counting all along |
-| `modifiers` | What it changes: as modifiers while it lasts, or on the base as it executes |
-| `executions` | Formulas in code, run as it executes: damage |
-| `grants` | Tags its target owns while it lasts |
-| `require`, `ongoing`, `remove_if` | To apply at all; to count (inhibited while not); to come off |
-| `removes`, `immunity` | Effects tagged so taken off as it applies; kept off while it lasts |
-| `stacking` | By target or source, a limit, refresh or keep the time, what running out does, overflow |
-| `on_apply`, `on_remove`, `on_expire` | Effects applied as it does |
+## Usage
 
-A [`Magnitude`](data::Magnitude) is a `Value`, a curve `Scaled` by the
-spec's level, a `Param` the applying code set (by a tag: `param.damage`,
-as Unreal's `SetByCaller`), an `Attribute` of the source's or target's, or
-a `Custom` calculation in code.
+```rust,no_run
+use bevy::prelude::*;
+use bevy_mettle_attribute::prelude::*;
+use bevy_mettle_core::prelude::*;
+use bevy_mettle_effect::prelude::*;
 
-[`EffectRegistry::build`] checks every definition against the tag tree,
-the curve table, the attributes the app added, and the code ([`EffectCode`](code::EffectCode): executions and calculations
-by name), every error at once. Mettle doesn't load anything: the game
-reads its files and hands over the definitions. Insert a new registry (a
-hot reload) and active effects take their new definitions.
+#[derive(Attribute)]
+#[attribute(base = 100.0, min = 0.0)]
+struct Life;
 
-## Applying
+/// Burning: 5 fire damage every half second, for 4 seconds.
+fn load(mut commands: Commands, attributes: Res<AttributeRegistry>, code: Res<EffectCode>) {
+    let tags: Vec<Tag> = ["state", "state.burning"]
+        .into_iter()
+        .map(|id| Tag { id: Id::new(id) })
+        .collect();
+    let burning = Effect::lasting("burning", 4.0)
+        .period(0.5, true)
+        .modifier(EffectModifier::new::<Life>(Operation::Flat, -5.0))
+        .grant("state.burning");
+    let checks = EffectChecks {
+        tags: &TagTree::build(&tags).unwrap(),
+        curves: &CurveTable::default(),
+        attributes: &attributes,
+        code: &code,
+    };
+    commands.insert_resource(EffectRegistry::check(&[burning], checks).unwrap());
+}
 
-An [`EffectSpec`] is what's applied, and what's replicated: the effect,
-its level, its params, its source, and the activation it's applied under.
-`commands.entity(target).apply_effect(spec)` checks its requirement and
-immunity, takes off what it removes, then executes it, stacks it onto one
-already there, or spawns it.
+#[derive(Component)]
+struct Mage;
 
-## Active effects
+fn spawn(mut commands: Commands) {
+    commands.spawn((Mage, Base::<Life>::default()));
+}
 
-A lasting effect is an entity [`EffectOf`] its target, which despawns with
-it. While it counts, it carries its modifiers as `Modifiers` `ModifierOf`
-the target, which the attribute crate folds, and the target owns what it
-grants; while it's inhibited, neither, and its time stands still.
-[`EffectPlugin`] ticks them in [`EffectSystems`] (`FixedUpdate`): removal
-and ongoing requirements weighed, periods come round, time run out.
+/// Sets every mage alight.
+fn ignite(mages: Query<Entity, Added<Mage>>, mut commands: Commands) {
+    for mage in &mages {
+        commands.entity(mage).apply_effect(EffectSpec::new("burning"));
+    }
+}
 
-Stacked, an effect's amounts count once per stack; a base or an override
-once. Applied again at its limit, it still refreshes its time if it says
-to. An `Attribute` magnitude is captured as the effect applies, and kept:
-new stacks and periods use it. A duration that comes to no time, or not
-a number, isn't applied.
+fn main() {
+    App::new()
+        .add_plugins((MinimalPlugins, EffectPlugin::default()))
+        .add_attribute::<Life>()
+        .add_systems(Startup, (load, spawn))
+        .add_systems(Update, ignite)
+        .run();
+}
+```
 
-## Told
+Effects tick in [`EffectSystems`], in `FixedUpdate` unless
+[`EffectPlugin::new`] says otherwise.
 
-[`EffectApplied`], [`EffectStacked`], [`EffectBlocked`],
-[`EffectExecuted`] and [`EffectRemoved`] are entity events on the target:
-for cues and abilities to observe.
+## Learn more
 
-## Over a network
+- The book's [Defining effects](https://declaredlost.github.io/bevy_mettle/effects.html),
+  [Applying effects](https://declaredlost.github.io/bevy_mettle/applying-effects.html),
+  [Stacking](https://declaredlost.github.io/bevy_mettle/stacking.html) and
+  [Effects in code](https://declaredlost.github.io/bevy_mettle/effect-code.html)
+  pages, and [Prediction](https://declaredlost.github.io/bevy_mettle/prediction.html)
+  for the network
+- The [API documentation](https://docs.rs/bevy_mettle_effect)
 
-[`NetRole`] says what a world is: `Standalone` (the default), `Server` or
-`Client`. Mettle doesn't send anything; the game, or an adapter, ships
-what it says to.
+## Contributing
 
-- **On a server**, each active effect keeps an [`EffectReplica`] (its
-  spec, stacks, duration and time left, whether it's inhibited, what its
-  source owned and what it captured) for the game to replicate with its
-  [`EffectOf`], mapping the spec's source. Its definition is data both
-  sides have, so it's named, not sent. It's sent again as it changes, not
-  as its time runs down.
-- **On a client**, an effect whose replica arrives is shown as a
-  [`Proxy`](net::Proxy): counting, granting its tags, its time running
-  down, but not ticked otherwise; the server's replica says how it stands,
-  and its despawn takes it off.
-- **Predicting**: what a client applies under an activation is
-  [`PredictedUnder`]. A lasting effect stays until the server's own (the
-  same effect, from the same source, under the same activation) replaces
-  it; a stack predicted onto the server's effect is kept apart from the
-  server's stacks. An instant change is never written to a base (the
-  server owns bases, and replicates them): it's worked out on the base as
-  shown, kept within its limits, and the difference shown as a modifier
-  until the server answers. `confirm_prediction` keeps the predicted
-  effects, and lets the rest give way to the server's state, so it's
-  called once that state has arrived; `reject_prediction` undoes all of
-  it. Once an activation is answered, nothing more is predicted under it.
-  Abilities do both as the server answers. What's predicted (an effect,
-  an instant change's modifier, a stack on the server's effect) is
-  `Provisional`: while it counts, a `Remote` actor shows its own values,
-  the prediction, rather than those the server serves.
+See [CONTRIBUTING.md](https://github.com/declaredlost/bevy_mettle/blob/main/CONTRIBUTING.md)
+for development setup and guidelines.
 
-[`EffectApplied`]: events::EffectApplied
-[`EffectBlocked`]: events::EffectBlocked
-[`EffectExecuted`]: events::EffectExecuted
-[`EffectOf`]: active::EffectOf
-[`EffectRemoved`]: events::EffectRemoved
-[`EffectReplica`]: net::EffectReplica
-[`EffectStacked`]: events::EffectStacked
-[`NetRole`]: net::NetRole
-[`PredictedUnder`]: net::PredictedUnder
+## License
+
+Licensed under either of [Apache License, Version 2.0](https://github.com/declaredlost/bevy_mettle/blob/main/LICENSE-APACHE)
+or [MIT license](https://github.com/declaredlost/bevy_mettle/blob/main/LICENSE-MIT) at your option.
+
+[`Effect`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/struct.Effect.html
+[`EffectRegistry`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectRegistry.html
+[`EffectCode`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/code/struct.EffectCode.html
+[`EffectSpec`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectSpec.html
+[`EffectOf`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/active/struct.EffectOf.html
+[`EffectApplied`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/events/struct.EffectApplied.html
+[`EffectStacked`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/events/struct.EffectStacked.html
+[`EffectBlocked`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/events/struct.EffectBlocked.html
+[`EffectExecuted`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/events/struct.EffectExecuted.html
+[`EffectRemoved`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/events/struct.EffectRemoved.html
+[`EffectSystems`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectSystems.html
+[`EffectPlugin::new`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectPlugin.html#method.new

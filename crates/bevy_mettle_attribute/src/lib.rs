@@ -14,5 +14,4 @@ pub use bevy_mettle_macros::Attribute;
 
 pub use self::attribute::Attribute;
 pub use self::plugin::{AttributePlugin, AttributeSystems};
-pub use self::registry::AttributeApp;
 pub use self::values::{Base, Current};

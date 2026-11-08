@@ -1,146 +1,181 @@
 # bevy_mettle_ability
 
-`bevy_mettle`'s abilities, as in Unreal's Gameplay Ability System: what
-an actor can do, granted to it, activated, paid for, cooled down, and
-ended. What one is, what it costs and what blocks it is data; what it
-does is a behaviour in code.
+[![Build Status][action-badge]][action-url]
+[![Crate Docs][docs-badge]][docs-url]
+[![Crate Version][crates-badge]][crates-url]
 
-```rust,ignore
-#[derive(Component, Default)]
-struct ProjectileCast { timer: f32 }
+**Part of [bevy_mettle](https://github.com/declaredlost/bevy_mettle), a gameplay framework for Bevy.**
 
-app.add_plugins(AbilityPlugin)
-    .add_behaviour::<ProjectileCast>("projectile_cast")
-    .insert_resource(AbilityRegistry::build(&abilities, &grants, &tags, &effects, &behaviours)?);
+[action-badge]: https://img.shields.io/github/actions/workflow/status/declaredlost/bevy_mettle/build.yml?branch=main&label=build&logo=github&style=flat-square
+[action-url]: https://github.com/declaredlost/bevy_mettle/actions/workflows/build.yml
+[crates-badge]: https://img.shields.io/crates/v/bevy_mettle_ability.svg?logo=rust&style=flat-square
+[crates-url]: https://crates.io/crates/bevy_mettle_ability
+[docs-badge]: https://img.shields.io/docsrs/bevy_mettle_ability?logo=Docs.rs&style=flat-square
+[docs-url]: https://docs.rs/bevy_mettle_ability
 
-commands.entity(mage).grant_ability("fireball", 1.0);
-commands.entity(mage).activate_ability("fireball");
+Abilities for Bevy, as in Unreal's Gameplay Ability System: what an actor
+can do, granted to it, activated, paid for, cooled down and ended.
 
-// The game's systems run it, across frames, until it ends:
-fn cast(mut casting: Query<(Entity, &ActiveAbility, &mut ProjectileCast)>, time: Res<Time>, mut commands: Commands) {
-    for (ability, active, mut cast) in &mut casting {
+## Overview
+
+- An [`Ability`] is data, named by an id: the behaviour that runs it, its
+  cost and cooldown (effects), what it needs and what blocks it, what it
+  cancels and blocks while active, the tags it grants, and what triggers
+  it.
+- A behaviour is a component of yours, `#[derive(Behaviour)]`, added with
+  [`add_behaviour`]: put on the ability's entity as it activates, for your
+  systems to run, and taken off as it ends.
+- Its input is what the player chose, an aim or a target: given with
+  `activate_ability_with`, or while it runs with `set_input`, checked by a
+  system of yours before it's taken, and sent to the server with a
+  prediction.
+- An [`AbilityRegistry`] is built from them, checked against the tag tree,
+  the effects and the behaviours: every error at once. A [`Grant`] says
+  which abilities an effect grants while it lasts: gear's skills.
+- `grant_ability` and `activate_ability` grant and activate it on an actor,
+  checking it's granted, not cooling down, affordable, not blocked and its
+  requirement holds. [`AbilityActivated`], [`AbilityFailed`] (why) and
+  [`AbilityEnded`] are triggered on the actor.
+- A [`GameplayEvent`] sent to an actor activates what it triggers.
+- Over a network, a client predicts its own abilities and asks the server,
+  which decides and replies.
+
+## Installation
+
+Most games depend on `bevy_mettle`, where abilities are a default feature
+and this crate is `bevy_mettle::ability`:
+
+```toml
+[dependencies]
+bevy_mettle = "0.1"
+```
+
+Or depend on this crate directly:
+
+```toml
+[dependencies]
+bevy_mettle_ability = "0.1"
+```
+
+## Usage
+
+```rust,no_run
+use bevy::prelude::*;
+use bevy_mettle_ability::prelude::*;
+use bevy_mettle_attribute::prelude::*;
+use bevy_mettle_core::prelude::*;
+use bevy_mettle_effect::prelude::*;
+
+#[derive(Attribute)]
+#[attribute(base = 100.0, min = 0.0)]
+struct Mana;
+
+/// The fireball being cast: half a second, then it ends.
+#[derive(Component, Default, Behaviour)]
+struct CastFireball {
+    timer: f32,
+}
+
+fn load(
+    mut commands: Commands,
+    attributes: Res<AttributeRegistry>,
+    code: Res<EffectCode>,
+    behaviours: Res<Behaviours>,
+) {
+    let tags: Vec<Tag> = ["cooldown", "cooldown.fireball"]
+        .into_iter()
+        .map(|id| Tag { id: Id::new(id) })
+        .collect();
+    let tags = TagTree::build(&tags).unwrap();
+    let effects = [
+        Effect::instant("fireball.cost")
+            .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
+        Effect::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
+    ];
+    let effects = EffectRegistry::check(
+        &effects,
+        EffectChecks {
+            tags: &tags,
+            curves: &CurveTable::default(),
+            attributes: &attributes,
+            code: &code,
+        },
+    )
+    .unwrap();
+    let fireball = Ability::new("fireball", "cast_fireball")
+        .cost("fireball.cost")
+        .cooldown("fireball.cooldown");
+    let abilities = AbilityRegistry::check(
+        &[fireball],
+        &[],
+        AbilityChecks {
+            tags: &tags,
+            effects: &effects,
+            behaviours: &behaviours,
+        },
+    )
+    .unwrap();
+    commands.insert_resource(effects);
+    commands.insert_resource(abilities);
+}
+
+fn spawn(mut commands: Commands) {
+    commands
+        .spawn(Base::<Mana>::default())
+        .grant_ability("fireball", 1.0)
+        .activate_ability("fireball");
+}
+
+/// Runs each cast until it ends.
+fn cast(mut casts: Query<(Entity, &mut CastFireball)>, time: Res<Time>, mut commands: Commands) {
+    for (ability, mut cast) in &mut casts {
         cast.timer += time.delta_secs();
         if cast.timer > 0.5 {
             commands.entity(ability).end_ability();
         }
     }
 }
+
+fn main() {
+    App::new()
+        .add_plugins((MinimalPlugins, EffectPlugin::default(), AbilityPlugin))
+        .add_attribute::<Mana>()
+        .add_behaviour::<CastFireball>()
+        .add_systems(Startup, (load, spawn).chain())
+        .add_systems(Update, cast)
+        .run();
+}
 ```
 
-At the root: [`AbilityPlugin`], [`Ability`], [`AbilityRegistry`],
-[`AbilityCommands`] and [`AbilityWorld`]. The rest is in four modules, and
-[`prelude`] brings in what using abilities takes:
+Abilities are kept in [`AbilitySystems`], in `PreUpdate`: over a network, a
+transport hands its messages over before it.
 
-| Module | What's in it |
-|---|---|
-| [`data`] | An ability's parts, and what runs it: `Grant`, `Commit`, `Trigger`, `Behaviour`, `Behaviours` |
-| [`active`] | Granted and active abilities: `Abilities`, `AbilityOf`, `GrantedAbility`, `ActiveAbility` |
-| [`events`] | What's told: `AbilityActivated`, `AbilityEnded`, `AbilityFailed`, `GameplayEvent` |
-| [`net`] | Over a network: `AbilityRequest`, `AbilityReply`, `AbilityReplica` |
+## Learn more
 
-## Definitions
+- The book's [Defining abilities](https://declaredlost.github.io/bevy_mettle/abilities.html),
+  [Granting and activating](https://declaredlost.github.io/bevy_mettle/activating.html),
+  [Input and targets](https://declaredlost.github.io/bevy_mettle/input.html)
+  and [Grants and triggers](https://declaredlost.github.io/bevy_mettle/grants-triggers.html)
+  pages, and [Prediction](https://declaredlost.github.io/bevy_mettle/prediction.html)
+  for the network
+- The [API documentation](https://docs.rs/bevy_mettle_ability)
 
-An ability is data, named by an `Id<Ability>`: [`Ability`].
+## Contributing
 
-```ron
-(
-    id: "fireball",
-    tags: ["ability.spell.fire"],
-    behaviour: "projectile_cast",
-    cost: "fireball.cost",
-    cooldown: "fireball.cooldown",
-    require: Not(OwnerHas("state.silenced")),
-    blocked_by: ["state.stunned"],
-    cancels: ["ability.channel"],
-    blocks: ["ability.spell"],
-    grants: ["state.casting"],
-    triggers: [Event("event.parried")],
-    commit: OnActivate,
-)
-```
+See [CONTRIBUTING.md](https://github.com/declaredlost/bevy_mettle/blob/main/CONTRIBUTING.md)
+for development setup and guidelines.
 
-| Field | What it does |
-|---|---|
-| `behaviour` | The component in code that runs it, added with `add_behaviour` |
-| `cost` | An instant effect it pays as it commits; it can't activate if paying would take an attribute below 0 |
-| `cooldown` | A lasting effect applied as it commits; it can't activate while its owner owns what that grants |
-| `require`, `blocked_by` | What has to hold; what its owner can't own |
-| `cancels`, `blocks` | Active abilities tagged so cancelled as it activates; others tagged so kept from activating while it's active |
-| `grants` | Tags its owner owns while it's active |
-| `triggers` | `Event(tag)`, `TagAdded(tag)`, `TagPresent(tag)` (cancelled as the tag goes) |
-| `commit` | `OnActivate`, or `Manual`: the behaviour commits (after a cast time), cancelled if it can't pay then |
+## License
 
-[`AbilityRegistry::build`] checks every ability against the tag tree, the
-effects and the behaviours there are, and every grant: every error at
-once.
+Licensed under either of [Apache License, Version 2.0](https://github.com/declaredlost/bevy_mettle/blob/main/LICENSE-APACHE)
+or [MIT license](https://github.com/declaredlost/bevy_mettle/blob/main/LICENSE-MIT) at your option.
 
-## Grants
-
-What an effect grants is the ability crate's part of it, as Unreal's
-abilities component is: an effect knows nothing of abilities.
-
-```ron
-[(effect: "staff", abilities: ["channel"])]
-```
-
-Equipping the staff applies its effect, which grants channel; taking it
-off takes it away. [`AbilityRegistry::build`] checks each grant: its
-effect is one there is, and lasts; its abilities are ones there are. The
-game can keep an item's effect and its grant in one file of its own, and
-hand mettle the two lists.
-
-## Granted and active
-
-A granted ability is an entity [`AbilityOf`] its actor, which despawns
-with it: granted by `grant_ability`, or by an effect for as long as it
-lasts, through a [`Grant`](data::Grant): gear's skills. One an effect
-grants is [`GrantedBy`](active::GrantedBy) it, and goes however the effect
-goes; one despawned while active takes back the tags it granted. A new
-[`AbilityRegistry`] gives granted abilities their new definitions.
-Activating it checks it, in order: granted and not active, not cooling
-down, affordable (its cost's changes worked out one after another), not
-blocked, its requirement holding. Then abilities it cancels are
-cancelled, its tags granted, its behaviour's component put on it with
-[`ActiveAbility`] (its actor, activation, level, and the event that
-triggered it), and, unless it commits by hand, its cost and cooldown
-applied. Ending it takes them off.
-
-[`AbilityActivated`], [`AbilityFailed`] (why) and [`AbilityEnded`] are
-entity events on the actor. [`GameplayEvent`] (a tag, an instigator, a
-target, a magnitude) is sent to an actor to activate what it triggers, and
-told to observers too.
-
-## Over a network
-
-With the effect crate's `NetRole` set:
-
-- **A client predicts its own abilities**: `activate_ability` activates at
-  once under a new activation (its behaviour running, its cost and
-  cooldown predicted), and writes an [`AbilityRequest`] for the game to
-  send to the server.
-- **The server decides**: it activates what [`AbilityRequest`]s ask for,
-  under the client's activation, and answers each with an
-  [`AbilityReply`]. One under an activation with the top bit set, the
-  server's own, is rejected.
-- **The client resolves**: a confirmed activation's predictions stay
-  until the server's own replace them; a rejected one is ended and all of
-  it undone, and [`AbilityFailed`] says why.
-- **Granted abilities replicate** as [`AbilityReplica`]s with their
-  [`AbilityOf`], kept as their replicas change (a level gained). A client
-  leaves triggers, and abilities effects grant, to the server.
-
-A server's own activations have the top bit set, apart from its clients'.
-Two clients' activations are told apart by the actor they're for, the
-source of what they apply. The network systems run in
-[`AbilitySystems`](AbilitySystems), in `PreUpdate`: a transport hands its
-messages over before it.
-
-[`AbilityActivated`]: events::AbilityActivated
-[`AbilityEnded`]: events::AbilityEnded
-[`AbilityFailed`]: events::AbilityFailed
-[`AbilityOf`]: active::AbilityOf
-[`AbilityReplica`]: net::AbilityReplica
-[`AbilityReply`]: net::AbilityReply
-[`AbilityRequest`]: net::AbilityRequest
-[`ActiveAbility`]: active::ActiveAbility
-[`GameplayEvent`]: events::GameplayEvent
+[`Ability`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/data/struct.Ability.html
+[`add_behaviour`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/data/trait.BehaviourApp.html#tymethod.add_behaviour
+[`AbilityRegistry`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilityRegistry.html
+[`Grant`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/data/struct.Grant.html
+[`AbilityActivated`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityActivated.html
+[`AbilityFailed`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityFailed.html
+[`AbilityEnded`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityEnded.html
+[`GameplayEvent`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.GameplayEvent.html
+[`AbilitySystems`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilitySystems.html

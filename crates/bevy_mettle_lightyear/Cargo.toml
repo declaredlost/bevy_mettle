@@ -3,7 +3,9 @@
 [package]
 name = "bevy_mettle_lightyear"
 description = "bevy_mettle over lightyear: its replicas and bases replicated, ability requests and replies sent, and who may ask checked"
+readme = "./README.md"
 keywords = ["bevy", "lightyear", "multiplayer", "gameplay"]
+categories = ["game-development"]
 
 version = { workspace = true }
 rust-version = { workspace = true }
@@ -13,6 +15,11 @@ publish = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # What's replicated and sent

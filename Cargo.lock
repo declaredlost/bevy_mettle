@@ -1078,7 +1078,7 @@ dependencies = [
 [[package]]
 name = "bevy_harness"
 version = "0.1.0"
-source = "git+https://github.com/declaredlost/bevy_harness?branch=feat%2Fevents-and-questions#d17febe6148fc4e94072b21fa22307b58a8cda5a"
+source = "git+https://github.com/declaredlost/bevy_harness#500e0eb33b0c21aea3657e6187ddb28a84883252"
 dependencies = [
  "bevy",
  "bevy_harness_macros",
@@ -1087,7 +1087,7 @@ dependencies = [
 [[package]]
 name = "bevy_harness_macros"
 version = "0.1.0"
-source = "git+https://github.com/declaredlost/bevy_harness?branch=feat%2Fevents-and-questions#d17febe6148fc4e94072b21fa22307b58a8cda5a"
+source = "git+https://github.com/declaredlost/bevy_harness#500e0eb33b0c21aea3657e6187ddb28a84883252"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1353,6 +1353,8 @@ dependencies = [
  "bevy_mettle_attribute",
  "bevy_mettle_core",
  "bevy_mettle_effect",
+ "bevy_mettle_lightyear",
+ "lightyear",
  "ron",
  "serde",
 ]
@@ -1365,6 +1367,7 @@ dependencies = [
  "bevy_mettle_attribute",
  "bevy_mettle_core",
  "bevy_mettle_effect",
+ "bevy_mettle_macros",
  "serde",
 ]
 

@@ -6,15 +6,15 @@ use core::net::{Ipv4Addr, SocketAddr};
 use core::time::Duration;
 
 use bevy::app::Plugins;
+use bevy::ecs::entity::MapEntities;
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 use bevy_harness::{TestApp, TestWorld};
 use bevy_mettle_ability::prelude::*;
 use bevy_mettle_attribute::prelude::*;
-use bevy_mettle_core::curve::CurveTable;
-use bevy_mettle_core::tag::{OwnedTags, Tag};
+use bevy_mettle_core::prelude::*;
 use bevy_mettle_effect::prelude::*;
-use bevy_mettle_lightyear::{MettleNetApp, MettleNetPlugin};
+use bevy_mettle_lightyear::prelude::*;
 use bevy_replicon::shared::server_entity_map::ServerEntityMap;
 use lightyear::crossbeam::CrossbeamIo;
 use lightyear::netcode::Key;
@@ -22,6 +22,7 @@ use lightyear::netcode::auth::Authentication;
 use lightyear::prelude::client::{ClientPlugins, NetcodeClient};
 use lightyear::prelude::server::{NetcodeServer, ServerPlugins, Start};
 use lightyear::prelude::*;
+use serde::{Deserialize, Serialize};
 
 const TICK: Duration = Duration::from_millis(10);
 
@@ -32,17 +33,47 @@ const SERVER: SocketAddr = SocketAddr::new(core::net::IpAddr::V4(Ipv4Addr::LOCAL
 #[attribute(base = 30.0, min = 0.0)]
 struct Mana;
 
-#[derive(Component, Default)]
+#[derive(Component, Default, Behaviour)]
 struct Cast;
+
+/// Where a shot is aimed: how far along. Sent from clients.
+#[derive(
+    Component,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    MapEntities
+)]
+struct Aim(f32);
+
+/// A shot being fired: aimed.
+#[derive(Component, Default, Behaviour)]
+#[behaviour(input = Aim)]
+struct Shoot;
+
+/// How far a shot reaches, as this side knows: the server, better.
+#[derive(Resource)]
+struct Reach(f32);
+
+fn in_reach(In(check): In<InputCheck<Aim>>, reach: Res<Reach>) -> bool {
+    check.input.0.abs() <= reach.0
+}
 
 /// What both sides have: mettle, fireball, and what's carried.
 fn protocol(app: &mut App, role: NetRole) {
     app.insert_resource(role)
         .add_attribute::<Mana>()
         .add_plugins((EffectPlugin::default(), AbilityPlugin))
-        .add_behaviour::<Cast>("cast")
+        .add_behaviour::<Cast>()
+        .add_behaviour::<Shoot>()
+        .check_input::<Aim, _>(in_reach)
+        .insert_resource(Reach(if role == NetRole::Server { 10.0 } else { 100.0 }))
         .add_plugins(MettleNetPlugin)
-        .replicate_attribute::<Mana>();
+        .replicate_attribute::<Mana>()
+        .replicate_input::<Aim>();
     // A game replicating its items' modifiers, as they're rolled.
     app.component::<Modifiers>().replicate();
     app.component::<ModifierOf>().replicate();
@@ -54,28 +85,33 @@ fn protocol(app: &mut App, role: NetRole) {
         .collect();
     let tags = TagTree::build(&tags).unwrap();
     let world = app.world_mut();
-    let effects = EffectRegistry::build(
+    let effects = EffectRegistry::check(
         &[
             Effect::instant("fireball.cost")
                 .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
             Effect::lasting("fireball.cooldown", 1.0).grant("cooldown.fireball"),
         ],
-        &tags,
-        &CurveTable::default(),
-        world.resource::<AttributeRegistry>(),
-        &EffectCode::new(),
+        EffectChecks {
+            tags: &tags,
+            curves: &CurveTable::default(),
+            attributes: world.resource::<AttributeRegistry>(),
+            code: &EffectCode::new(),
+        },
     )
     .unwrap();
     let fireball = Ability::new("fireball", "cast")
         .cost("fireball.cost")
         .cooldown("fireball.cooldown")
         .blocked_by("state.stunned");
-    let abilities = AbilityRegistry::build(
-        &[fireball],
+    let shot = Ability::new("shot", "shoot").cost("fireball.cost");
+    let abilities = AbilityRegistry::check(
+        &[fireball, shot],
         &[],
-        &tags,
-        &effects,
-        world.resource::<Behaviours>(),
+        AbilityChecks {
+            tags: &tags,
+            effects: &effects,
+            behaviours: world.resource::<Behaviours>(),
+        },
     )
     .unwrap();
     world.insert_resource(effects);
@@ -452,4 +488,112 @@ fn a_prediction_shows_until_answered_then_the_served_value() {
         }
     }
     assert!(answered, "served after the answer");
+}
+
+/// A mage on the server, controlled by the client, granted the shot: it, and
+/// its mage on the client, with the shot replicated.
+fn marksman(world: &mut TestWorld) -> (Entity, Entity) {
+    let link = link(world);
+    let there = world["server"].spawn((
+        Base::<Mana>::default(),
+        Replicate::to_clients(NetworkTarget::All),
+        ControlledBy {
+            owner: link,
+            lifetime: Lifetime::default(),
+        },
+    ));
+    world["server"]
+        .world_mut()
+        .grant_ability(there, "shot", 1.0);
+    world
+        .until(|world| {
+            let client = &world["client"];
+            mapped(client, there).is_some_and(|here| {
+                client
+                    .entity(here)
+                    .try_get::<Abilities>()
+                    .is_some_and(|abilities| {
+                        abilities
+                            .iter()
+                            .any(|ability| client.entity(ability).has::<GrantedAbility>())
+                    })
+            })
+        })
+        .describe("the marksman and its shot replicate")
+        .within_ticks(50);
+    (there, mapped(&world["client"], there).unwrap())
+}
+
+/// `actor`'s shot, as `app` has it.
+fn shot_of(app: &TestApp, actor: Entity) -> Entity {
+    app.entity(actor).get::<Abilities>().iter().next().unwrap()
+}
+
+#[test]
+fn a_shot_is_sent_with_its_aim_and_the_server_fires_the_same() {
+    let mut world = net();
+    let (there, here) = marksman(&mut world);
+    world["client"]
+        .world_mut()
+        .activate_ability_with::<Shoot>(here, "shot", Aim(4.0))
+        .unwrap();
+    world
+        .until(|world| world["server"].count::<With<Shoot>>() == 1)
+        .describe("the server fires")
+        .within_ticks(20);
+    let server = &world["server"];
+    server.entity(shot_of(server, there)).assert_eq(Aim(4.0));
+    world.ticks(20);
+    assert!(same(mana(&world["server"], there), 10.0));
+    assert!(same(mana(&world["client"], here), 10.0), "paid once");
+}
+
+#[test]
+fn a_shot_aimed_past_what_the_server_knows_is_undone() {
+    let mut world = net();
+    let (there, here) = marksman(&mut world);
+    world["client"]
+        .world_mut()
+        .activate_ability_with::<Shoot>(here, "shot", Aim(40.0))
+        .unwrap();
+    world.ticks(20);
+    assert!(same(mana(&world["server"], there), 30.0), "never fired");
+    assert!(same(mana(&world["client"], here), 30.0), "mana back");
+    world["client"].query::<(), With<Shoot>>().assert_len(0);
+}
+
+#[test]
+fn a_shot_aimed_again_past_reach_is_cancelled_on_both_sides() {
+    let mut world = net();
+    let (there, here) = marksman(&mut world);
+    let shooting = world["client"]
+        .world_mut()
+        .activate_ability_with::<Shoot>(here, "shot", Aim(4.0))
+        .unwrap();
+    world.ticks(20);
+    world["client"]
+        .world_mut()
+        .set_input::<Shoot>(shooting, Aim(6.0))
+        .unwrap();
+    world
+        .until(|world| {
+            let server = &world["server"];
+            server
+                .entity(shot_of(server, there))
+                .try_get::<Aim>()
+                .is_some_and(|aim| *aim == Aim(6.0))
+        })
+        .describe("the server takes the new aim")
+        .within_ticks(20);
+    world["client"]
+        .world_mut()
+        .set_input::<Shoot>(shooting, Aim(60.0))
+        .unwrap();
+    world
+        .until(|world| {
+            world["server"].count::<With<Shoot>>() == 0
+                && world["client"].count::<With<Shoot>>() == 0
+        })
+        .describe("both sides cancel the shot")
+        .within_ticks(20);
 }

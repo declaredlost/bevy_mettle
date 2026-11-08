@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use bevy_mettle_core::Id;
 use bevy_mettle_core::tag::{OwnedTags, Tags};
 
-use crate::Ability;
+use crate::data::Ability;
 use crate::events::GameplayEvent;
 
 /// An ability granted to an actor: an entity of its own, [`AbilityOf`] it.

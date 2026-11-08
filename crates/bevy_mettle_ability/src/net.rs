@@ -4,6 +4,7 @@
 //! the server, [`AbilityReply`]s back, and [`AbilityReplica`]s with their
 //! [`AbilityOf`](crate::active::AbilityOf).
 
+use std::any::TypeId;
 use std::collections::HashMap;
 
 use bevy::ecs::entity::{EntityMapper, MapEntities};
@@ -14,8 +15,9 @@ use bevy_mettle_effect::net::NetRole;
 use serde::{Deserialize, Serialize};
 
 use crate::active::{ActiveAbility, GrantedAbility};
+use crate::data::{Ability, AnyBehaviour, Behaviour, NoInput};
 use crate::events::{AbilityFailed, Failure};
-use crate::{Ability, AbilityRegistry, engine};
+use crate::{AbilityRegistry, engine};
 
 /// A client's ask that the server activate an ability it already predicts.
 ///
@@ -35,6 +37,47 @@ pub struct AbilityRequest {
 impl MapEntities for AbilityRequest {
     fn map_entities<M: EntityMapper>(&mut self, mapper: &mut M) {
         self.actor = mapper.get_mapped(self.actor);
+    }
+}
+
+/// A client's ask that the server activate an ability with its input, which
+/// it already predicts: an [`AbilityRequest`], and the input it activated it
+/// with.
+#[derive(Message, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AbilityRequestWith<I> {
+    /// The actor.
+    pub actor: Entity,
+    /// The ability.
+    pub ability: Id<Ability>,
+    /// The activation the client predicted it under.
+    pub activation: u64,
+    /// The input it activated it with.
+    pub input: I,
+}
+
+impl<I: MapEntities> MapEntities for AbilityRequestWith<I> {
+    fn map_entities<M: EntityMapper>(&mut self, mapper: &mut M) {
+        self.actor = mapper.get_mapped(self.actor);
+        self.input.map_entities(mapper);
+    }
+}
+
+/// A client's new input to an ability it's running, which it already
+/// predicts: for the server to check and take.
+#[derive(Message, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AbilityInput<I> {
+    /// The actor.
+    pub actor: Entity,
+    /// The activation it's running under.
+    pub activation: u64,
+    /// The input.
+    pub input: I,
+}
+
+impl<I: MapEntities> MapEntities for AbilityInput<I> {
+    fn map_entities<M: EntityMapper>(&mut self, mapper: &mut M) {
+        self.actor = mapper.get_mapped(self.actor);
+        self.input.map_entities(mapper);
     }
 }
 
@@ -105,6 +148,188 @@ pub(crate) fn predict(
     Ok(ability)
 }
 
+/// Activates `id` for `actor` with `input`: on a client, predicted, and asked
+/// of the server with the input.
+pub(crate) fn predict_with<B: Behaviour>(
+    world: &mut World,
+    actor: Entity,
+    id: &Id<Ability>,
+    input: B::Input,
+) -> Result<Entity, Failure> {
+    if TypeId::of::<B::Input>() == TypeId::of::<NoInput>() {
+        // Nothing to give: as any activation, but still of `B`.
+        return predict_runs(world, actor, id, &B::ID);
+    }
+    if role(world) != NetRole::Client {
+        return engine::activate_id_with(world, actor, id, None, Some(&B::ID), Some(input));
+    }
+    let activation = engine::next_activation(world);
+    let ability = engine::activate_id_with(
+        world,
+        actor,
+        id,
+        Some(activation),
+        Some(&B::ID),
+        Some(input.clone()),
+    )?;
+    world
+        .get_resource_or_init::<Pending>()
+        .0
+        .insert(activation, ability);
+    world.write_message(AbilityRequestWith {
+        actor,
+        ability: id.clone(),
+        activation,
+        input,
+    });
+    Ok(ability)
+}
+
+/// Activates `id`, run by `behaviour`, for `actor`, with no input: as
+/// [`predict`] does.
+fn predict_runs(
+    world: &mut World,
+    actor: Entity,
+    id: &Id<Ability>,
+    behaviour: &Id<AnyBehaviour>,
+) -> Result<Entity, Failure> {
+    if role(world) != NetRole::Client {
+        return engine::activate_id_with::<NoInput>(world, actor, id, None, Some(behaviour), None);
+    }
+    let activation = engine::next_activation(world);
+    let ability = engine::activate_id_with::<NoInput>(
+        world,
+        actor,
+        id,
+        Some(activation),
+        Some(behaviour),
+        None,
+    )?;
+    world
+        .get_resource_or_init::<Pending>()
+        .0
+        .insert(activation, ability);
+    world.write_message(AbilityRequest {
+        actor,
+        ability: id.clone(),
+        activation,
+    });
+    Ok(ability)
+}
+
+/// On a client: sends the server new input to the activation it's running.
+pub(crate) fn send_input<I: Component + Clone>(
+    world: &mut World,
+    actor: Entity,
+    activation: u64,
+    input: I,
+) {
+    world.write_message(AbilityInput {
+        actor,
+        activation,
+        input,
+    });
+}
+
+/// On a server: rejects a client's `activation` back to it, as it's no longer
+/// to be (its input didn't hold). A server's own isn't answered.
+pub(crate) fn reject(
+    world: &mut World,
+    actor: Entity,
+    ability: Id<Ability>,
+    activation: u64,
+    reason: Failure,
+) {
+    if role(world) == NetRole::Server && activation & SERVERS == 0 {
+        world.write_message(AbilityReply {
+            actor,
+            ability,
+            activation,
+            rejected: Some(reason),
+        });
+    }
+}
+
+/// Adds what carries `I`, a behaviour's input, between a client and its
+/// server: once, however many behaviours take it.
+pub(crate) fn add_input<I: Component + Clone>(app: &mut App) {
+    if app.world().contains_resource::<Messages<AbilityInput<I>>>() {
+        return;
+    }
+    app.init_resource::<NetRole>()
+        .add_message::<AbilityRequestWith<I>>()
+        .add_message::<AbilityInput<I>>()
+        .add_systems(
+            PreUpdate,
+            (serve_with::<I>, hear_input::<I>)
+                .chain()
+                .after(serve)
+                .in_set(crate::AbilitySystems)
+                .run_if(resource_equals(NetRole::Server)),
+        );
+}
+
+/// On a server: activates what clients ask for with their input, under
+/// their activations, and answers.
+fn serve_with<I: Component + Clone>(
+    mut requests: MessageReader<AbilityRequestWith<I>>,
+    mut commands: Commands,
+) {
+    for request in requests.read().cloned() {
+        commands.queue(move |world: &mut World| {
+            let rejected = if request.activation & SERVERS == 0 {
+                engine::activate_id_with(
+                    world,
+                    request.actor,
+                    &request.ability,
+                    Some(request.activation),
+                    None,
+                    Some(request.input),
+                )
+                .err()
+            } else {
+                warn!(
+                    "a client asked to activate `{}` under the server's activation {}: rejected",
+                    request.ability, request.activation
+                );
+                Some(Failure::NotGranted)
+            };
+            world.write_message(AbilityReply {
+                actor: request.actor,
+                ability: request.ability,
+                activation: request.activation,
+                rejected,
+            });
+        });
+    }
+}
+
+/// On a server: gives clients' new input to the activations they're running,
+/// checked; one no longer running is past, and dropped.
+fn hear_input<I: Component + Clone>(
+    mut inputs: MessageReader<AbilityInput<I>>,
+    mut commands: Commands,
+) {
+    for given in inputs.read().cloned() {
+        commands.queue(move |world: &mut World| {
+            if let Some(ability) = running(world, given.actor, given.activation) {
+                let _ = engine::set_input(world, ability, None, given.input);
+            }
+        });
+    }
+}
+
+/// `actor`'s ability running under `activation`, if there is one.
+fn running(world: &World, actor: Entity, activation: u64) -> Option<Entity> {
+    engine::abilities_of(world, actor)
+        .into_iter()
+        .find(|ability| {
+            world
+                .get::<ActiveAbility>(*ability)
+                .is_some_and(|active| active.activation == activation)
+        })
+}
+
 /// The bit a server's own activations have set, and a client's can't.
 pub(crate) const SERVERS: u64 = 1 << 63;
 
@@ -143,9 +368,12 @@ pub(crate) fn serve(mut requests: MessageReader<AbilityRequest>, mut commands: C
 pub(crate) fn resolve(mut replies: MessageReader<AbilityReply>, mut commands: Commands) {
     for reply in replies.read().cloned() {
         commands.queue(move |world: &mut World| {
+            // Not pending, it was answered before: a running activation whose
+            // new input was rejected.
             let ability = world
                 .get_resource_mut::<Pending>()
-                .and_then(|mut predicted| predicted.0.remove(&reply.activation));
+                .and_then(|mut predicted| predicted.0.remove(&reply.activation))
+                .or_else(|| running(world, reply.actor, reply.activation));
             let Some(reason) = reply.rejected else {
                 world.confirm_prediction(reply.activation);
                 return;

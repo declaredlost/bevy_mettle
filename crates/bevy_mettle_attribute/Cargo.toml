@@ -3,7 +3,9 @@
 [package]
 name = "bevy_mettle_attribute"
 description = "bevy_mettle's attributes: marker types with their rules derived, a base and a current value each on the actor, modifiers folded over them"
+readme = "./README.md"
 keywords = ["bevy", "attributes", "modifiers", "game"]
+categories = ["game-development"]
 
 version = { workspace = true }
 rust-version = { workspace = true }
@@ -13,6 +15,11 @@ publish = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # Tags, curves and the condition language

@@ -3,7 +3,9 @@
 [package]
 name = "bevy_mettle_effect"
 description = "bevy_mettle's effects, as in Unreal's Gameplay Ability System: instant, timed, infinite and periodic effects, stacking, granted tags, immunity"
+readme = "./README.md"
 keywords = ["bevy", "effects", "buffs", "gameplay"]
+categories = ["game-development"]
 
 version = { workspace = true }
 rust-version = { workspace = true }
@@ -13,6 +15,11 @@ publish = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # The schema, tags, curves and the condition language

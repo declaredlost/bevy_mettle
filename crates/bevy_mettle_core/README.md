@@ -1,113 +1,114 @@
 # bevy_mettle_core
 
-What `bevy_mettle`'s crates share: gameplay tags and the tags an actor
-owns, curve tables, and the condition language. Its only ECS is the
-owned tags (`bevy_ecs`, no app). Mettle is a gameplay framework
-in the spirit of Unreal's Gameplay Ability System: attributes are the
-game's own types, and everything else (tags, curves, effects, abilities)
-is data, named by tags and ids.
+[![Build Status][action-badge]][action-url]
+[![Crate Docs][docs-badge]][docs-url]
+[![Crate Version][crates-badge]][crates-url]
 
-At the root: [`Id<T>`](Id), what everything defined in data is named by;
-[`IdTarget`](trait@IdTarget), what it can name (`#[derive(IdTarget)]`); and [`MettleError`] and
-[`MettleErrors`], what can be wrong with data.
+**Part of [bevy_mettle](https://github.com/declaredlost/bevy_mettle), a gameplay framework for Bevy.**
 
-| Module | What's in it |
-|---|---|
-| [`tag`] | Gameplay tags: `Tags`, `TagCounts`, the `TagTree`; an actor's `OwnedTags` and the events of them changing |
-| [`curve`] | Curve tables: `LevelCurve`, the `CurveTable` |
-| [`condition`] | The condition language: `Condition`, and the `Context` it's weighed in |
+[action-badge]: https://img.shields.io/github/actions/workflow/status/declaredlost/bevy_mettle/build.yml?branch=main&label=build&logo=github&style=flat-square
+[action-url]: https://github.com/declaredlost/bevy_mettle/actions/workflows/build.yml
+[crates-badge]: https://img.shields.io/crates/v/bevy_mettle_core.svg?logo=rust&style=flat-square
+[crates-url]: https://crates.io/crates/bevy_mettle_core
+[docs-badge]: https://img.shields.io/docsrs/bevy_mettle_core?logo=Docs.rs&style=flat-square
+[docs-url]: https://docs.rs/bevy_mettle_core
 
-[`prelude`] brings the lot in at once.
+What bevy_mettle's parts share: gameplay tags and the tags an actor owns,
+curve tables, and the condition language.
 
-## Tags
+## Overview
 
-A tag is a label in a tree, defined in data, its id its path
-(`damage.elemental.fire`), so a mod can add its own. What has a tag has
-every tag above it: a rule on `damage.elemental` holds for fire.
+- An [`Id<T>`] names what's defined in data: a tag, a curve, an effect. What
+  it can name derives [`IdTarget`].
+- A [`TagTree`] is the gameplay tags there are, from [`Tag`]s in data, each a
+  path such as `damage.elemental.fire`. What has a tag has every tag above
+  it: a rule on `damage.elemental` holds for fire.
+- [`Tags`] is a set of them, what an effect or an ability is labelled with;
+  [`OwnedTags`] is what an actor owns by count, as its states come and go,
+  told by [`TagAdded`] and [`TagRemoved`].
+- A [`CurveTable`] is values by level, from [`LevelCurve`]s in data, built as
+  Bevy's curves: what effects scale by.
+- A [`Condition`] is an expression over a read's tags, what its owner,
+  target and source own, and the facts it supplies, weighed from 0 to 1.
+- Building any of them checks it, and returns every [`MettleError`] at once.
 
-- [`TagTree`]: the tags there are, from [`Tag`]s in however many files,
-  checked: each a path whose parent is a tag of its own.
-- [`Tags`]: a set, what an effect, an ability or a hit is labelled with;
-  holds every tag above the ones it's given, written to data as given.
-- [`TagCounts`]: tags held by count, what an actor owns while its states
-  hold: each source (an effect, the game marking it moving) adds one and
-  takes its one away.
-- [`OwnedTags`]: on an actor, its states, by count: what the game marks
-  it with (`state.moving`) and what effects grant it (`immune.stun`).
-  [`TagAdded`] and [`TagRemoved`] tell them coming and going, as
-  [`publish_tags`] runs (`bevy_mettle_attribute` schedules it), and
-  [`owns`] is a guard on them, for `bevy_arbor`. Mettle's other crates
-  share it: modifiers count while their owner owns a tag, effects grant
-  them, abilities are blocked by them.
+Its only ECS is the owned tags, with `bevy_ecs` and no app.
 
-```ron
-[(id: "damage"), (id: "damage.elemental"), (id: "damage.elemental.fire")]
+## Installation
+
+Most games depend on `bevy_mettle`, where this crate is always there, as
+`bevy_mettle::core`:
+
+```toml
+[dependencies]
+bevy_mettle = "0.1"
 ```
 
-## Curves
+Or depend on this crate directly, for tags, curves and conditions alone:
 
-[`CurveTable`]: values by level, from [`LevelCurve`]s in data, checked (keys
-finite, levels rising) and built as Bevy's curves (`bevy_curve`). Between
-keys, `Constant`, `Linear`, or `Ease(..)` with any of Bevy's easing
-functions; past the ends, as at the nearer one. What effects scale by, as
-Unreal's curve tables are. [`CurveTable::curve`] hands back the curve
-itself, for graphs and Bevy's curve adaptors.
-
-```ron
-[(id: "fireball.damage", interpolation: Ease(QuadraticIn), keys: [(1, 10), (10, 85), (20, 240)])]
+```toml
+[dependencies]
+bevy_mettle_core = "0.1"
 ```
 
-Mettle doesn't load anything: the game reads its files however it likes,
-and hands the definitions to [`TagTree::build`], [`CurveTable::build`] and
-the like.
+## Usage
 
-## Condition
+```rust
+use bevy_mettle_core::prelude::*;
 
-[`Condition`] is the condition language: an expression over the read's tags,
-the tags its owner, target and source own, and the facts the read
-supplies (numbers named by tags: `fact.flown`), weighed from 0 to 1 in a
-[`Context`].
+// The tags there are, read from data.
+let tags: Vec<Tag> = ron::from_str(
+    r#"[(id: "damage"), (id: "damage.elemental"), (id: "damage.elemental.fire")]"#,
+)
+.unwrap();
+let tree = TagTree::build(&tags).unwrap();
+assert!(tree.contains(&Id::new("damage.elemental.fire")));
 
-| Term | Weight |
-|---|---|
-| `ReadTagged(tag)` | 1 if the read (the hit, the ability) has it, or one under it |
-| `OwnerHas(tag)` | 1 if the owner owns it, or one under it |
-| `TargetHas(tag)` | 1 if the target owns it, or one under it |
-| `SourceHas(tag)` | 1 if the source (the caster, the attacker) owns it, or one under it |
-| `FactSet(fact)` | 1 if the fact is above 0 |
-| `FactAbove(fact: .., value: ..)`, `FactBelow(fact: .., value: ..)` | 1 if the fact compares so |
-| `FactRamp(fact: .., full: .., none: ..)` | 1 at `full`, 0 at `none`, in proportion between |
-| `FactEvery(fact: .., n: ..)` | 1 if the fact, a count, is a whole multiple of `n` |
-| `All([..])`, `Any([..])`, `Not(..)` | the product, the greatest, one less it |
+// A fire hit is elemental too.
+let mut hit = Tags::new();
+hit.insert(Id::new("damage.elemental.fire"));
+assert!(hit.contains(&Id::new("damage.elemental")));
 
-```ron
-All([
-    ReadTagged("delivery.attack"),
-    FactRamp(fact: "fact.flown", full: 2, none: 8),
-    Not(TargetHas("creature.undead")),
-])
+// Damage by level: 10 at level 1, 110 at level 11, linearly between.
+let curves = CurveTable::build(&[LevelCurve {
+    id: Id::new("fireball.damage"),
+    interpolation: Interpolation::Linear,
+    keys: vec![(1.0, 10.0), (11.0, 110.0)],
+}])
+.unwrap();
+assert_eq!(curves.at(&Id::new("fireball.damage"), 6.0), Some(60.0));
+
+// A condition, checked against the tree.
+let elemental = Condition::read_tagged("damage.elemental");
+elemental.check(&tree, None).unwrap();
 ```
 
-A fact the read didn't supply isn't there: a read with no hit gets no hit
-bonuses. What a weight in part means is up to what reads it; a
-requirement asks for it to hold in full ([`Condition::holds`]).
-[`Condition::check`] checks its tags against a [`TagTree`] and its numbers.
+## Learn more
 
-[`TagTree`]: tag::TagTree
-[`TagTree::build`]: tag::TagTree::build
-[`Tag`]: tag::Tag
-[`Tags`]: tag::Tags
-[`TagCounts`]: tag::TagCounts
-[`OwnedTags`]: tag::OwnedTags
-[`TagAdded`]: tag::TagAdded
-[`TagRemoved`]: tag::TagRemoved
-[`publish_tags`]: tag::publish_tags
-[`owns`]: tag::owns
-[`CurveTable`]: curve::CurveTable
-[`CurveTable::build`]: curve::CurveTable::build
-[`CurveTable::curve`]: curve::CurveTable::curve
-[`LevelCurve`]: curve::LevelCurve
-[`Condition`]: condition::Condition
-[`Condition::check`]: condition::Condition::check
-[`Condition::holds`]: condition::Condition::holds
-[`Context`]: condition::Context
+- The book's [Gameplay tags](https://declaredlost.github.io/bevy_mettle/tags.html),
+  [Curves](https://declaredlost.github.io/bevy_mettle/curves.html) and
+  [Conditions](https://declaredlost.github.io/bevy_mettle/conditions.html) pages
+- The [API documentation](https://docs.rs/bevy_mettle_core)
+
+## Contributing
+
+See [CONTRIBUTING.md](https://github.com/declaredlost/bevy_mettle/blob/main/CONTRIBUTING.md)
+for development setup and guidelines.
+
+## License
+
+Licensed under either of [Apache License, Version 2.0](https://github.com/declaredlost/bevy_mettle/blob/main/LICENSE-APACHE)
+or [MIT license](https://github.com/declaredlost/bevy_mettle/blob/main/LICENSE-MIT) at your option.
+
+[`Id<T>`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.Id.html
+[`IdTarget`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/trait.IdTarget.html
+[`TagTree`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagTree.html
+[`Tag`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.Tag.html
+[`Tags`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.Tags.html
+[`OwnedTags`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.OwnedTags.html
+[`TagAdded`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagAdded.html
+[`TagRemoved`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagRemoved.html
+[`CurveTable`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveTable.html
+[`LevelCurve`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.LevelCurve.html
+[`Condition`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/condition/enum.Condition.html
+[`MettleError`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/enum.MettleError.html

@@ -3,7 +3,9 @@
 [package]
 name = "bevy_mettle_ability"
 description = "bevy_mettle's abilities, as in Unreal's Gameplay Ability System: granted, activated, committed and ended, their behaviours in code"
+readme = "./README.md"
 keywords = ["bevy", "abilities", "skills", "gameplay"]
+categories = ["game-development"]
 
 version = { workspace = true }
 rust-version = { workspace = true }
@@ -13,8 +15,16 @@ publish = { workspace = true }
 
 authors = { workspace = true }
 repository = { workspace = true }
+documentation = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
+# The Behaviour derive
+bevy_mettle_macros = { workspace = true, features = [] }
+
 # Tags and the condition language
 bevy_mettle_core = { workspace = true, features = [] }
 

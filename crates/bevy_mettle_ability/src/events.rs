@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use bevy_mettle_core::Id;
 use bevy_mettle_core::tag::Tag;
 
-use crate::Ability;
+use crate::data::Ability;
 
 /// A gameplay event sent to an actor: a tag, and who and how much.
 ///
@@ -87,6 +87,9 @@ pub enum Failure {
     Blocked,
     /// Its requirement doesn't hold.
     Requirement,
+    /// Its input wasn't given, or isn't what its behaviour takes, or doesn't
+    /// pass its check: at activation, or given while it was active.
+    Input,
 }
 
 /// Triggered on an actor as one of its abilities ends, or is cancelled.

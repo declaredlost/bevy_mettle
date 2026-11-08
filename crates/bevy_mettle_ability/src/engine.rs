@@ -1,5 +1,6 @@
 //! Granting, activating, committing and ending abilities, on the world.
 
+use std::any::TypeId;
 use std::collections::HashMap;
 
 use bevy::prelude::*;
@@ -9,10 +10,10 @@ use bevy_mettle_core::condition::Context;
 use bevy_mettle_core::tag::{OwnedTags, Tag, TagCounts, Tags};
 use bevy_mettle_effect::{EffectRegistry, EffectSpec, EffectWorld};
 
+use crate::AbilityRegistry;
 use crate::active::{Abilities, AbilityOf, ActiveAbility, GrantedAbility, GrantedBy};
-use crate::data::{Behaviours, Commit, Trigger};
+use crate::data::{Ability, AnyBehaviour, Behaviours, Commit, InputChecks, NoInput, Trigger};
 use crate::events::{AbilityActivated, AbilityEnded, AbilityFailed, Failure, GameplayEvent};
-use crate::{Ability, AbilityRegistry};
 
 /// The next activation's number.
 #[derive(Resource, Default)]
@@ -48,7 +49,7 @@ impl Context for Check<'_> {
 }
 
 /// The abilities granted to `actor`.
-fn abilities_of(world: &World, actor: Entity) -> Vec<Entity> {
+pub(crate) fn abilities_of(world: &World, actor: Entity) -> Vec<Entity> {
     world
         .get::<Abilities>(actor)
         .map(|abilities| abilities.iter().collect())
@@ -107,6 +108,20 @@ pub(crate) fn activate_id(
     id: &Id<Ability>,
     activation: Option<u64>,
 ) -> Result<Entity, Failure> {
+    activate_id_with::<NoInput>(world, actor, id, activation, None, None)
+}
+
+/// Activates `id` for `actor` with `input`, under `activation` if it's
+/// given: its first granted ability of that id. If `behaviour` is given, the
+/// ability has to be run by it: the behaviour the caller gave the input for.
+pub(crate) fn activate_id_with<I: Component + Clone>(
+    world: &mut World,
+    actor: Entity,
+    id: &Id<Ability>,
+    activation: Option<u64>,
+    behaviour: Option<&Id<AnyBehaviour>>,
+    input: Option<I>,
+) -> Result<Entity, Failure> {
     let granted = abilities_of(world, actor).into_iter().find(|ability| {
         world
             .get::<GrantedAbility>(*ability)
@@ -120,7 +135,26 @@ pub(crate) fn activate_id(
         });
         return Err(Failure::NotGranted);
     };
-    activate(world, ability, None, activation).map(|()| ability)
+    if !runs(world, ability, behaviour) {
+        failed(world, ability, Failure::Input);
+        return Err(Failure::Input);
+    }
+    activate_with(world, ability, None, activation, input).map(|()| ability)
+}
+
+/// Whether `ability` is run by `behaviour`, if one is given; warns if not.
+fn runs(world: &World, ability: Entity, behaviour: Option<&Id<AnyBehaviour>>) -> bool {
+    let (Some(behaviour), Some(granted)) = (behaviour, world.get::<GrantedAbility>(ability)) else {
+        return true;
+    };
+    let runs = granted.def.behaviour == *behaviour;
+    if !runs {
+        warn!(
+            "input for `{behaviour}` given to `{}`, which `{}` runs",
+            granted.def.id, granted.def.behaviour
+        );
+    }
+    runs
 }
 
 /// Activates every ability granted to `actor` tagged any of `tags`: those that
@@ -206,9 +240,12 @@ fn affords(world: &World, actor: Entity, granted: &GrantedAbility) -> bool {
     };
     let mut after = HashMap::new();
     for change in &changes {
+        // Not worked out yet (spawned this frame), it's its base, as its
+        // `Current` is.
         let now = after.get(&change.attribute).copied().unwrap_or_else(|| {
             world
                 .value_at(actor, &change.attribute, &AttributeContext::new())
+                .or_else(|| world.base_at(actor, &change.attribute))
                 .unwrap_or_default()
         });
         after.insert(change.attribute.clone(), change.op.apply(now, change.value));
@@ -224,19 +261,22 @@ pub(crate) fn activate(
     event: Option<GameplayEvent>,
     activation: Option<u64>,
 ) -> Result<(), Failure> {
-    if let Err(reason) = can_activate(world, ability) {
-        if let (Some(granted), Some(of)) = (
-            world.get::<GrantedAbility>(ability),
-            world.get::<AbilityOf>(ability),
-        ) {
-            let id = granted.def.id.clone();
-            let actor = of.0;
-            world.trigger(AbilityFailed {
-                entity: actor,
-                id,
-                reason,
-            });
-        }
+    activate_with::<NoInput>(world, ability, event, activation, None)
+}
+
+/// Activates `ability` with `input`, its behaviour's: as [`activate`] does,
+/// the input checked first, and put on it next to its behaviour.
+pub(crate) fn activate_with<I: Component + Clone>(
+    world: &mut World,
+    ability: Entity,
+    event: Option<GameplayEvent>,
+    activation: Option<u64>,
+    input: Option<I>,
+) -> Result<(), Failure> {
+    let checked =
+        can_activate(world, ability).and_then(|()| input_holds(world, ability, input.as_ref()));
+    if let Err(reason) = checked {
+        failed(world, ability, reason);
         return Err(reason);
     }
     let Some(actor) = world.get::<AbilityOf>(ability).map(|of| of.0) else {
@@ -284,6 +324,9 @@ pub(crate) fn activate(
     if let Some(behaviour) = behaviour {
         (behaviour.insert)(&mut entity);
     }
+    if let Some(input) = input {
+        entity.insert(input);
+    }
     if def.commit == Commit::OnActivate {
         commit(world, ability);
     }
@@ -293,6 +336,110 @@ pub(crate) fn activate(
         id: def.id.clone(),
         activation,
     });
+    Ok(())
+}
+
+/// Tells that `ability` didn't activate, and why.
+fn failed(world: &mut World, ability: Entity, reason: Failure) {
+    if let (Some(granted), Some(of)) = (
+        world.get::<GrantedAbility>(ability),
+        world.get::<AbilityOf>(ability),
+    ) {
+        let id = granted.def.id.clone();
+        let actor = of.0;
+        world.trigger(AbilityFailed {
+            entity: actor,
+            id,
+            reason,
+        });
+    }
+}
+
+/// Whether an `I` is what `ability`'s behaviour takes: none, if it takes
+/// none.
+fn input_fits<I: 'static>(world: &World, ability: Entity, given: bool) -> bool {
+    let takes = world.get::<GrantedAbility>(ability).and_then(|granted| {
+        world
+            .get_resource::<Behaviours>()?
+            .0
+            .get(&granted.def.behaviour)?
+            .input
+    });
+    takes.map(|input| input.type_id) == given.then(TypeId::of::<I>)
+}
+
+/// Whether `input` passes its check, if it has one, for `ability`.
+fn passes<I: 'static>(world: &mut World, ability: Entity, input: &I) -> bool {
+    let Some(actor) = world.get::<AbilityOf>(ability).map(|of| of.0) else {
+        return false;
+    };
+    let Some(check) = world
+        .get_resource::<InputChecks>()
+        .and_then(|checks| checks.0.get(&TypeId::of::<I>()).cloned())
+    else {
+        return true;
+    };
+    check(world, actor, ability, input)
+}
+
+/// Whether `input` is what `ability`'s behaviour takes, and passes its check.
+fn input_holds<I: Component + Clone>(
+    world: &mut World,
+    ability: Entity,
+    input: Option<&I>,
+) -> Result<(), Failure> {
+    if !input_fits::<I>(world, ability, input.is_some()) {
+        return Err(Failure::Input);
+    }
+    match input {
+        Some(input) if !passes(world, ability, input) => Err(Failure::Input),
+        _ => Ok(()),
+    }
+}
+
+/// Gives the active `ability` `input`, in place of what it had.
+///
+/// On a client, predicted and sent to the server, which decides. Where it's
+/// decided, checked first: input that isn't its behaviour's, or doesn't
+/// pass, cancels the ability, and on a server is rejected back to the client.
+pub(crate) fn set_input<I: Component + Clone>(
+    world: &mut World,
+    ability: Entity,
+    behaviour: Option<&Id<AnyBehaviour>>,
+    input: I,
+) -> Result<(), Failure> {
+    let (Some(active), Some(granted)) = (
+        world.get::<ActiveAbility>(ability),
+        world.get::<GrantedAbility>(ability),
+    ) else {
+        warn!("input given to {ability}, which isn't an active ability");
+        return Err(Failure::Input);
+    };
+    let (actor, activation, id) = (active.actor, active.activation, granted.def.id.clone());
+    let fits = runs(world, ability, behaviour) && input_fits::<I>(world, ability, true);
+    if crate::net::defers(world) {
+        if !fits {
+            warn!(
+                "{} given to `{id}`, whose behaviour doesn't take it",
+                std::any::type_name::<I>()
+            );
+            return Err(Failure::Input);
+        }
+        world.entity_mut(ability).insert(input.clone());
+        crate::net::send_input(world, actor, activation, input);
+        return Ok(());
+    }
+    if !(fits && passes(world, ability, &input)) {
+        end(world, ability, true);
+        world.trigger(AbilityFailed {
+            entity: actor,
+            id: id.clone(),
+            reason: Failure::Input,
+        });
+        crate::net::reject(world, actor, id, activation, Failure::Input);
+        return Err(Failure::Input);
+    }
+    world.entity_mut(ability).insert(input);
     Ok(())
 }
 

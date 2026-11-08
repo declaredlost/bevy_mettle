@@ -6,16 +6,16 @@ use std::sync::Arc;
 use bevy::prelude::*;
 use bevy_mettle_core::tag::TagTree;
 use bevy_mettle_core::{Id, MettleError, MettleErrors};
-use bevy_mettle_effect::data::EffectDuration;
-use bevy_mettle_effect::{Effect, EffectRegistry};
+use bevy_mettle_effect::EffectRegistry;
+use bevy_mettle_effect::data::{Effect, EffectDuration};
 
-use crate::Ability;
-use crate::data::{Behaviour, Behaviours, Grant, Trigger};
+use crate::data::{Ability, AnyBehaviour, Behaviours, Grant, Trigger};
 
 /// The abilities there are, checked against the tags, effects and behaviours.
 ///
-/// Built from their definitions, and what the effects grant checked against
-/// them. Insert it as a resource.
+/// Made only by [`check`](Self::check)ing their definitions, and what the
+/// effects grant. A resource: in an app with `bevy_mettle`, its content loads
+/// it; insert another and granted abilities take their new definitions.
 #[derive(Resource, Clone, Default)]
 pub struct AbilityRegistry {
     abilities: Arc<HashMap<Id<Ability>, Arc<Ability>>>,
@@ -36,9 +36,21 @@ impl std::fmt::Debug for AbilityRegistry {
     }
 }
 
+/// What abilities, and what effects grant, are checked against: what they
+/// can name.
+#[derive(Clone, Copy)]
+pub struct AbilityChecks<'a> {
+    /// The gameplay tags there are.
+    pub tags: &'a TagTree,
+    /// The effects there are: costs, cooldowns, and what grants.
+    pub effects: &'a EffectRegistry,
+    /// The behaviours the app added.
+    pub behaviours: &'a Behaviours,
+}
+
 impl AbilityRegistry {
-    /// Checks `definitions`, and what effects `grants`, against `tags`,
-    /// `effects` and `behaviours`.
+    /// The registry of `definitions`, and of what effects `grants`, checked
+    /// against what they can name: the only way there is one.
     ///
     /// # Errors
     ///
@@ -46,13 +58,16 @@ impl AbilityRegistry {
     /// behaviours named that aren't; a cost that isn't instant, a cooldown that
     /// doesn't last or grants nothing; and grants of effects that aren't, or
     /// don't last, or of abilities that aren't.
-    pub fn build<'a, 'g>(
-        definitions: impl IntoIterator<Item = &'a Ability>,
-        grants: impl IntoIterator<Item = &'g Grant>,
-        tags: &TagTree,
-        effects: &EffectRegistry,
-        behaviours: &Behaviours,
+    pub fn check(
+        definitions: &[Ability],
+        grants: &[Grant],
+        against: AbilityChecks<'_>,
     ) -> Result<Self, MettleErrors> {
+        let AbilityChecks {
+            tags,
+            effects,
+            behaviours,
+        } = against;
         let mut errors = Vec::new();
         let mut abilities = HashMap::new();
         for def in definitions {
@@ -67,7 +82,7 @@ impl AbilityRegistry {
             }
         }
         for def in abilities.values() {
-            check(def, tags, effects, behaviours, &mut errors);
+            check_def(def, tags, effects, behaviours, &mut errors);
         }
         let mut granted: HashMap<Id<Effect>, Vec<Id<Ability>>> = HashMap::new();
         for grant in grants {
@@ -142,7 +157,7 @@ fn check_grant(
 }
 
 /// Checks `def`, noting what's wrong in `errors`.
-fn check(
+fn check_def(
     def: &Ability,
     tags: &TagTree,
     effects: &EffectRegistry,
@@ -176,10 +191,17 @@ fn check(
         push(tags.known(tag, within));
     }
     if !behaviours.contains(&def.behaviour) {
-        push(Err(MettleError::unknown::<Behaviour>(
+        push(Err(MettleError::unknown::<AnyBehaviour>(
             def.behaviour.as_str(),
             within,
         )));
+    }
+    if let Some(input) = behaviours.input(&def.behaviour)
+        && !def.triggers.is_empty()
+    {
+        push(Err(invalid(format!(
+            "triggers on an ability whose behaviour takes {input}: nothing triggering it gives it"
+        ))));
     }
     if let Some(cost) = &def.cost {
         match effects.get(cost) {

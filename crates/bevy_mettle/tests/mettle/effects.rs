@@ -54,7 +54,16 @@ fn attribute_registry() -> AttributeRegistry {
 }
 
 fn registry(effects: &[Effect], code: &EffectCode) -> EffectRegistry {
-    EffectRegistry::build(effects, &tags(), &curves(), &attribute_registry(), code).unwrap()
+    EffectRegistry::check(
+        effects,
+        EffectChecks {
+            tags: &tags(),
+            curves: &curves(),
+            attributes: &attribute_registry(),
+            code,
+        },
+    )
+    .unwrap()
 }
 
 /// An app with attributes and effects, `effects` in its registry.
@@ -128,6 +137,55 @@ fn told(app: &mut TestApp) -> Vec<String> {
         .chain(stacked)
         .chain(removed)
         .collect()
+}
+
+#[test]
+fn an_effect_despawned_by_the_game_is_told_and_chained_as_removed() {
+    let burning = Effect::infinite("burning")
+        .grant("state.burning")
+        .modifier(flat::<Damage>(5.0))
+        .on_remove("singed");
+    let singed = Effect::instant("singed").modifier(flat::<Life>(-10.0));
+    let mut app = app(&[burning, singed]);
+    watch(&mut app);
+    let npc = actor(&mut app, []);
+    apply(&mut app, npc, EffectSpec::new("burning"));
+    assert_eq!(told(&mut app), ["applied burning"]);
+
+    let effect = effects_on(&app, npc)[0];
+    app.entity_mut(effect).despawn();
+    app.tick();
+    assert_eq!(told(&mut app), ["removed burning false"], "told once");
+    assert!(!owns(&app, npc, "state.burning"), "its tag taken back");
+    assert!(close(get::<Damage>(&app, npc), 10.0), "its modifier gone");
+    assert!(close(get::<Life>(&app, npc), 40.0), "chained: singed");
+}
+
+#[test]
+fn an_effect_removed_by_mettle_is_told_once() {
+    let burning = Effect::infinite("burning").grant("state.burning");
+    let mut app = app(&[burning]);
+    watch(&mut app);
+    let npc = actor(&mut app, []);
+    apply(&mut app, npc, EffectSpec::new("burning"));
+    told(&mut app);
+    let effect = effects_on(&app, npc)[0];
+    app.world_mut().remove_effect(effect);
+    app.tick();
+    assert_eq!(told(&mut app), ["removed burning false"]);
+}
+
+#[test]
+fn an_actors_effects_despawned_with_it_tell_nothing() {
+    let burning = Effect::infinite("burning").on_remove("burning");
+    let mut app = app(&[burning]);
+    watch(&mut app);
+    let npc = actor(&mut app, []);
+    apply(&mut app, npc, EffectSpec::new("burning"));
+    told(&mut app);
+    app.entity_mut(npc).despawn();
+    app.tick();
+    assert!(told(&mut app).is_empty(), "nothing left to tell");
 }
 
 #[test]
@@ -459,12 +517,14 @@ fn a_registry_reports_everything_wrong_at_once() {
             Operation::Flat,
             Magnitude::scaled(1.0, "nope"),
         ));
-    let errors = EffectRegistry::build(
+    let errors = EffectRegistry::check(
         &[bad],
-        &tags(),
-        &curves(),
-        &attribute_registry(),
-        &EffectCode::new(),
+        EffectChecks {
+            tags: &tags(),
+            curves: &curves(),
+            attributes: &attribute_registry(),
+            code: &EffectCode::new(),
+        },
     )
     .unwrap_err()
     .to_string();
@@ -481,6 +541,36 @@ fn a_registry_reports_everything_wrong_at_once() {
 }
 
 #[test]
+fn executions_need_an_instant_effect_or_a_period() {
+    let code = EffectCode::new().execution("burn", |_: &EffectContext| Vec::new());
+    let build = |effect: Effect| {
+        EffectRegistry::check(
+            &[effect],
+            EffectChecks {
+                tags: &tags(),
+                curves: &curves(),
+                attributes: &attribute_registry(),
+                code: &code,
+            },
+        )
+    };
+    let errors = build(Effect::lasting("smoulder", 4.0).execution("burn"))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        errors.contains("executions on a lasting effect with no period: it never executes"),
+        "{errors}"
+    );
+    build(Effect::instant("singe").execution("burn")).unwrap();
+    build(
+        Effect::lasting("burn", 4.0)
+            .period(1.0, false)
+            .execution("burn"),
+    )
+    .unwrap();
+}
+
+#[test]
 fn an_effect_whose_duration_cant_be_isnt_applied() {
     let numb =
         Effect::lasting("numb", Magnitude::Custom(Id::from_static("nan")))
@@ -493,6 +583,40 @@ fn an_effect_whose_duration_cant_be_isnt_applied() {
     assert_eq!(effects_on(&app, npc), [], "it'd never run out");
     assert!(close(get::<Damage>(&app, npc), 10.0));
     assert!(told(&mut app).is_empty(), "nothing told");
+}
+
+#[test]
+fn a_stack_keeps_the_spec_it_was_first_applied_with() {
+    let rage = Effect::lasting("rage", 5.0)
+        .modifier(EffectModifier::new::<Damage>(
+            Operation::Flat,
+            Magnitude::param("param.damage"),
+        ))
+        .stacking(Stacking {
+            by: StackBy::Target,
+            limit: 3,
+            reapply: Reapply::Refresh,
+            reset_period: false,
+            expire: Expire::ClearAll,
+            overflow: Vec::new(),
+        });
+    let mut app = app(&[rage]);
+    let npc = actor(&mut app, []);
+    apply(
+        &mut app,
+        npc,
+        EffectSpec::new("rage").param("param.damage", 5.0),
+    );
+    apply(
+        &mut app,
+        npc,
+        EffectSpec::new("rage").param("param.damage", 9.0),
+    );
+    assert_eq!(effects_on(&app, npc).len(), 1, "one effect, two stacks");
+    assert!(
+        close(get::<Damage>(&app, npc), 20.0),
+        "10 and 5 twice, not 5 and 9"
+    );
 }
 
 #[test]
