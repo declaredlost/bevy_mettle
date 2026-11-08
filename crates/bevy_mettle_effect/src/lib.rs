@@ -4,6 +4,7 @@
 pub mod active;
 pub mod code;
 mod commands;
+pub mod cue;
 pub mod data;
 mod engine;
 pub mod events;

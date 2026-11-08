@@ -220,6 +220,14 @@ assert!(client.world().get::<ActiveEffects>(mage).is_none_or(|effects| effects.i
 client does with a reply. Abilities call them for you as replies arrive. Call
 them yourself only for effects you predict under an activation of your own.
 
+## Cues
+
+A client predicts cues with what plays them: a predicted cooldown's cue is
+held at once, a predicted cost's one-shot played at once. When the server's
+arrive, the lasting ones are one with the client's, with no flicker, and a
+one-shot played under the client's own activation isn't played again.
+[Cues](cues.md) has the rest.
+
 ## Granted abilities
 
 On the server, each granted ability keeps an [`AbilityReplica`], its id and
@@ -259,7 +267,7 @@ Ability requests, replies and replicas are handled in [`AbilitySystems`], in
 [`EffectOf`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/active/struct.EffectOf.html
 [`EffectReplica`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/net/struct.EffectReplica.html
 [`Failure`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/enum.Failure.html
-[`NetRole`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/net/enum.NetRole.html
+[`NetRole`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/net/enum.NetRole.html
 [`PredictedUnder`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/net/struct.PredictedUnder.html
 [`Provisional`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.Provisional.html
 [`Proxy`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/net/struct.Proxy.html

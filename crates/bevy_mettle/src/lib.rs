@@ -144,6 +144,8 @@ mod book {
         #[cfg(all(feature = "ability", not(feature = "lightyear")))]
         GrantsTriggers: "grants-triggers.md",
         #[cfg(all(feature = "ability", not(feature = "lightyear")))]
+        Cues: "cues.md",
+        #[cfg(all(feature = "ability", not(feature = "lightyear")))]
         Prediction: "prediction.md",
         #[cfg(feature = "lightyear")]
         Lightyear: "lightyear.md",

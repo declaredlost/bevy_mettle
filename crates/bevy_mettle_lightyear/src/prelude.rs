@@ -2,4 +2,4 @@
 //! `use bevy_mettle_lightyear::prelude::*`.
 
 #[doc(no_inline)]
-pub use crate::{MettleChannel, MettleNetApp, MettleNetPlugin};
+pub use crate::{MettleChannel, MettleNetApp, MettleNetPlugin, Replicas};

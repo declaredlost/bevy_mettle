@@ -142,7 +142,13 @@ impl EffectRegistry {
                 errors.push(error);
             }
         };
-        for set in [&def.tags, &def.grants, &def.removes, &def.immunity] {
+        for set in [
+            &def.tags,
+            &def.grants,
+            &def.cues,
+            &def.removes,
+            &def.immunity,
+        ] {
             push(tags.known_all(set.written(), within));
         }
         for condition in [&def.require, &def.ongoing, &def.remove_if]

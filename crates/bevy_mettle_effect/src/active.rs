@@ -8,6 +8,7 @@ use bevy::prelude::*;
 use bevy_mettle_core::Id;
 use bevy_mettle_core::tag::{OwnedTags, TagCounts, Tags};
 
+use crate::cue::CueSources;
 use crate::data::Effect;
 use crate::net::Proxy;
 use crate::{EffectSpec, engine};
@@ -34,6 +35,8 @@ pub struct ActiveEffect {
     pub(crate) inhibited: bool,
     /// The tags it granted, to take back.
     pub(crate) granted: Tags,
+    /// The cues it holds on its target, to let go of.
+    pub(crate) cues: Tags,
     /// What its source owned as it applied.
     pub(crate) source_tags: TagCounts,
     /// Of its stacks, those a client predicted onto the server's effect.
@@ -83,8 +86,9 @@ impl ActiveEffect {
     }
 }
 
-/// Takes back the tags `ActiveEffect` granted, as it's taken off its entity
-/// however: removed, despawned with its target, or replicated away.
+/// Takes back the tags `ActiveEffect` granted, and lets go of the cues it
+/// held, as it's taken off its entity however: removed, despawned with its
+/// target, or replicated away.
 ///
 /// Taken off by the game (despawned, or the component removed) rather than by
 /// mettle, it's told and chained as `remove_effect` would: once commands are
@@ -98,12 +102,20 @@ fn take_back(mut world: DeferredWorld, context: HookContext) {
         return;
     };
     let granted = active.granted.clone();
+    let cues = active.cues.clone();
     let unasked = (!active.removing && world.get::<Proxy>(context.entity).is_none())
         .then(|| (active.def.clone(), active.spec.clone()));
     if !granted.is_empty()
         && let Some(mut owned) = world.get_mut::<OwnedTags>(target)
     {
         owned.remove_all(&granted);
+    }
+    if !cues.is_empty()
+        && let Some(mut sources) = world.get_mut::<CueSources>(target)
+    {
+        for cue in cues.written() {
+            sources.remove(cue, false);
+        }
     }
     if let Some((def, spec)) = unasked {
         let effect = context.entity;

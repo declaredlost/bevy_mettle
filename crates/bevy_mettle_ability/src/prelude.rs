@@ -8,9 +8,9 @@ pub use crate::active::{
     Abilities, AbilityOf, ActiveAbility, GrantedAbilities, GrantedAbility, GrantedBy,
 };
 #[doc(no_inline)]
-pub use crate::data::{
-    Ability, Behaviour, BehaviourApp, Behaviours, Commit, Grant, InputCheck, NoInput, Trigger,
-};
+pub use crate::behaviour::{Behaviour, BehaviourApp, Behaviours, InputCheck, NoInput};
+#[doc(no_inline)]
+pub use crate::data::{Ability, Commit, Grant, Trigger};
 #[doc(no_inline)]
 pub use crate::events::{AbilityActivated, AbilityEnded, AbilityFailed, Failure, GameplayEvent};
 #[doc(no_inline)]

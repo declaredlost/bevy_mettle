@@ -52,10 +52,14 @@ and the server decides, with an adapter for
   client and checked again on the server.
 - **Gameplay tags**: a tree of labels, owned by actors by count, told as they
   come and go.
+- **Cues**: what's shown of effects and abilities, lasting ones as entities
+  to hang your effects on, one-shots with what they dealt, each run by the
+  handler for its most specific tag.
 - **Content as data**: one resource of definitions, checked as a whole and
   reloaded as it changes; your game reads the files, mettle checks them.
 - **Prediction**: a client activates at once and the server confirms or
-  rejects, with effects and attributes shown as the server serves them.
+  rejects, with effects and attributes shown as the server serves them;
+  effects go to their owner alone, and everyone else sees the cues.
 
 ## Requirements
 

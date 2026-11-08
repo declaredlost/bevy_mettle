@@ -8,7 +8,7 @@ use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use bevy::reflect::TypePath;
 use bevy_mettle_ability::AbilitySystems;
-use bevy_mettle_ability::active::AbilityOf;
+use bevy_mettle_ability::active::{Abilities, AbilityOf};
 use bevy_mettle_ability::events::Failure;
 use bevy_mettle_ability::net::{
     AbilityInput, AbilityReplica, AbilityReply, AbilityRequest, AbilityRequestWith,
@@ -16,11 +16,14 @@ use bevy_mettle_ability::net::{
 use bevy_mettle_attribute::authority::{self, Served};
 use bevy_mettle_attribute::registry::AttributeState;
 use bevy_mettle_attribute::{Attribute, Base, Current};
-use bevy_mettle_effect::active::EffectOf;
-use bevy_mettle_effect::net::{EffectReplica, NetRole};
+use bevy_mettle_core::net::NetRole;
+use bevy_mettle_effect::active::{ActiveEffects, EffectOf};
+use bevy_mettle_effect::cue::{CueBursts, CueSystems, ServedCues};
+use bevy_mettle_effect::net::EffectReplica;
 use bevy_replicon::client::ClientSystems;
-use bevy_replicon::prelude::RepliconTick;
+use bevy_replicon::prelude::{AppVisibilityExt, RepliconTick, VisibilityFilter};
 use bevy_replicon::server::server_tick::ServerTick;
+use bevy_replicon::server::visibility::registry::FilterRegistry;
 use lightyear::prelude::server::ClientOf;
 use lightyear::prelude::*;
 use serde::de::DeserializeOwned;
@@ -55,8 +58,28 @@ const HOLD: u32 = 30;
 /// - A client holds a reply confirming its prediction until the server's
 ///   replicated state of the actor as of the reply has arrived, so what it
 ///   predicted gives way to the server's in the same frame.
+/// - Each actor's cues, lasting ([`ServedCues`]) and one-shot ([`CueBursts`]),
+///   are replicated with it, to whoever sees it: what other clients see of its
+///   effects and abilities, even where their replicas aren't sent.
 #[derive(Default)]
-pub struct MettleNetPlugin;
+pub struct MettleNetPlugin {
+    /// Who an actor's effect and ability replicas are sent to: its owner
+    /// alone, unless it says.
+    pub replicas: Replicas,
+}
+
+/// Who an actor's effect and ability replicas are sent to.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Resource)]
+pub enum Replicas {
+    /// The client [`ControlledBy`] the actor, alone: it predicts with them.
+    /// Others see its cues, owned tags and served values; its cooldowns and
+    /// buffs stay its own. An actor no client controls sends them to none.
+    #[default]
+    Owner,
+    /// Every client that sees the actor: a party frame showing allies'
+    /// buffs.
+    Everyone,
+}
 
 impl Plugin for MettleNetPlugin {
     fn build(&self, app: &mut App) {
@@ -71,6 +94,15 @@ impl Plugin for MettleNetPlugin {
         app.register_message::<Answer>()
             .add_map_entities()
             .add_direction(NetworkDirection::ServerToClient);
+        app.insert_resource(self.replicas);
+        // Only a server filters what it sends: a client has no filters.
+        if app.world().contains_resource::<FilterRegistry>() {
+            app.add_visibility_filter::<ReplicaOwner>();
+        }
+        // Cues worked out before they're sent: served the frame they start.
+        app.configure_sets(PostUpdate, CueSystems.before(ReplicationSystems::Send));
+        app.component::<ServedCues>().replicate();
+        app.component::<CueBursts>().replicate();
         app.component::<EffectReplica>().replicate();
         app.component::<EffectOf>().replicate();
         app.component::<AbilityReplica>().replicate();
@@ -91,7 +123,9 @@ impl Plugin for MettleNetPlugin {
                 Update,
                 (
                     (ask, remote).run_if(resource_equals(NetRole::Client)),
-                    (reply, replicate).run_if(resource_equals(NetRole::Server)),
+                    (reply, replicate, retarget)
+                        .chain()
+                        .run_if(resource_equals(NetRole::Server)),
                 ),
             );
     }
@@ -392,17 +426,80 @@ type Unreplicated = (
     Or<(With<EffectReplica>, With<AbilityReplica>)>,
 );
 
-/// On a server: replicates each new effect and granted ability as its actor is.
+/// On a server: replicates each new effect and granted ability as its actor
+/// is, to its owner alone if [`Replicas`] says.
 fn replicate(
     mut commands: Commands,
     new: Query<(Entity, Option<&EffectOf>, Option<&AbilityOf>), Unreplicated>,
+    controlled: Query<&ControlledBy>,
+    replicas: Res<Replicas>,
 ) {
     for (entity, effect, ability) in &new {
         let Some(actor) = effect.map(|of| of.0).or(ability.map(|of| of.0)) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .insert(ReplicateLike { root: actor });
+        let mut entity = commands.entity(entity);
+        entity.insert(ReplicateLike { root: actor });
+        if *replicas == Replicas::Owner {
+            entity.insert(ReplicaOwner(
+                controlled
+                    .get(actor)
+                    .ok()
+                    .map(|controlled| controlled.owner),
+            ));
+        }
+    }
+}
+
+/// On an effect or ability replica, owner-only: the link of the client that
+/// may see it, if one controls its actor.
+///
+/// A visibility filter, so it's only ever narrower than its actor's: the
+/// replica still comes and goes with its actor ([`ReplicateLike`]), and the
+/// owner alone of those who see the actor sees it.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+#[component(immutable)]
+struct ReplicaOwner(Option<Entity>);
+
+impl VisibilityFilter for ReplicaOwner {
+    type ClientComponent = Self;
+    type Scope = Entity;
+
+    fn is_visible(&self, client: Entity, _: Option<&Self>) -> bool {
+        self.0 == Some(client)
+    }
+}
+
+/// An actor whose control came, changed or went, and its replicas.
+type Handed = (
+    Option<&'static ControlledBy>,
+    Option<&'static ActiveEffects>,
+    Option<&'static Abilities>,
+);
+
+/// On a server, owner-only: points each actor's replicas at its owner again
+/// as control of it comes, changes hands, or goes.
+fn retarget(
+    mut commands: Commands,
+    handed: Query<Handed>,
+    changed: Query<Entity, Changed<ControlledBy>>,
+    mut released: RemovedComponents<ControlledBy>,
+    replicas: Res<Replicas>,
+) {
+    if *replicas != Replicas::Owner {
+        return;
+    }
+    for actor in changed.iter().chain(released.read()) {
+        let Ok((controlled, effects, abilities)) = handed.get(actor) else {
+            continue;
+        };
+        let owner = ReplicaOwner(controlled.map(|controlled| controlled.owner));
+        let replicas = effects
+            .into_iter()
+            .flat_map(ActiveEffects::iter)
+            .chain(abilities.into_iter().flat_map(Abilities::iter));
+        for replica in replicas {
+            commands.entity(replica).insert(owner);
+        }
     }
 }

@@ -1,16 +1,12 @@
-//! Abilities as data, what effects grant, and the behaviours that run them.
-
-mod behaviour;
+//! Abilities as data, and what effects grant.
 
 use bevy_mettle_core::condition::Condition;
 use bevy_mettle_core::tag::{Tag, Tags};
 use bevy_mettle_core::{Id, IdTarget};
 use bevy_mettle_effect::data::Effect;
-pub use bevy_mettle_macros::Behaviour;
 use serde::{Deserialize, Serialize};
 
-pub(crate) use self::behaviour::InputChecks;
-pub use self::behaviour::{AnyBehaviour, Behaviour, BehaviourApp, Behaviours, InputCheck, NoInput};
+use crate::behaviour::AnyBehaviour;
 
 /// An ability, as data: what runs it, what it costs, and what activates it.
 ///
@@ -78,6 +74,9 @@ pub struct Ability {
     /// Tags its owner owns while it's active.
     #[serde(default, skip_serializing_if = "Tags::is_empty")]
     pub grants: Tags,
+    /// Lasting cues held on its owner while it's active: a cast's glow.
+    #[serde(default, skip_serializing_if = "Tags::is_empty")]
+    pub cues: Tags,
     /// What activates it besides being asked to.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub triggers: Vec<Trigger>,
@@ -136,6 +135,7 @@ impl Ability {
             cancels: Tags::new(),
             blocks: Tags::new(),
             grants: Tags::new(),
+            cues: Tags::new(),
             triggers: Vec::new(),
             commit: Commit::OnActivate,
         }
@@ -187,6 +187,13 @@ impl Ability {
     #[must_use]
     pub fn blocks(mut self, tag: impl Into<Id<Tag>>) -> Self {
         self.blocks.insert(tag.into());
+        self
+    }
+
+    /// Holding the cue `tag` on its owner while it's active.
+    #[must_use]
+    pub fn cue(mut self, tag: impl Into<Id<Tag>>) -> Self {
+        self.cues.insert(tag.into());
         self
     }
 

@@ -1,9 +1,10 @@
 use bevy::ecs::schedule::{InternedScheduleLabel, ScheduleLabel};
 use bevy::prelude::*;
+use bevy_mettle_core::net::NetRole;
 
 use crate::code::EffectCode;
-use crate::net::{self, NetRole};
-use crate::{EffectRegistry, systems};
+use crate::cue::{self, CueSystems};
+use crate::{EffectRegistry, net, systems};
 
 /// The system set active effects tick in, in the plugin's schedule.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -46,16 +47,32 @@ impl Plugin for EffectPlugin {
             .init_resource::<EffectCode>()
             .init_resource::<NetRole>()
             .init_resource::<net::Predictions>()
+            .init_resource::<systems::DueEffects>()
             .add_systems(
                 self.schedule,
                 (
-                    net::show_replicas.run_if(resource_equals(NetRole::Client)),
+                    net::show_replicas
+                        .run_if(resource_equals(NetRole::Client))
+                        .run_if(net::replicas_to_show),
                     systems::relink.run_if(resource_changed::<EffectRegistry>),
-                    systems::tick,
+                    systems::advance,
+                    systems::settle.run_if(systems::due),
                     net::sync_replicas.run_if(resource_equals(NetRole::Server)),
                 )
                     .chain()
                     .in_set(EffectSystems),
+            )
+            .init_resource::<cue::CueHandlers>()
+            .init_resource::<cue::Predicted>()
+            .add_systems(
+                PostUpdate,
+                (
+                    cue::play.run_if(resource_equals(NetRole::Client)),
+                    cue::prune.run_if(resource_equals(NetRole::Server)),
+                    cue::show,
+                )
+                    .chain()
+                    .in_set(CueSystems),
             );
     }
 }

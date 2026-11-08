@@ -32,6 +32,9 @@ Gameplay Ability System: attributes, effects and abilities.
   an aim or a target, checked on the server.
 - **Gameplay tags**: a tree of labels for what effects and abilities are,
   and what an actor is going through.
+- **Cues**: what's shown of effects and abilities, as entities while they
+  last and one-shots as they execute, routed to the most specific handler,
+  and replicated to every client that sees the actor.
 - **Data first**: tags, curves, effects and abilities are data, handed over
   as one `MettleContent` resource and checked as a whole; change it and it's
   reloaded, or rejected with every error while the content before stays.
@@ -134,7 +137,8 @@ stand go after it.
   [effects in code](https://declaredlost.github.io/bevy_mettle/effect-code.html)
 - **Abilities**: [defining abilities](https://declaredlost.github.io/bevy_mettle/abilities.html),
   [granting and activating](https://declaredlost.github.io/bevy_mettle/activating.html),
-  [input and targets](https://declaredlost.github.io/bevy_mettle/input.html), and
+  [input and targets](https://declaredlost.github.io/bevy_mettle/input.html),
+  [cues](https://declaredlost.github.io/bevy_mettle/cues.html), and
   [grants and triggers](https://declaredlost.github.io/bevy_mettle/grants-triggers.html)
 - **Multiplayer**: [prediction](https://declaredlost.github.io/bevy_mettle/prediction.html), and
   [over lightyear](https://declaredlost.github.io/bevy_mettle/lightyear.html)

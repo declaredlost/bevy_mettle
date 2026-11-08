@@ -8,11 +8,13 @@ use bevy_mettle_attribute::read::{AttributeContext, AttributeWorld};
 use bevy_mettle_core::Id;
 use bevy_mettle_core::condition::Context;
 use bevy_mettle_core::tag::{OwnedTags, Tag, TagCounts, Tags};
+use bevy_mettle_effect::cue::{Cue, CueWorld};
 use bevy_mettle_effect::{EffectRegistry, EffectSpec, EffectWorld};
 
 use crate::AbilityRegistry;
 use crate::active::{Abilities, AbilityOf, ActiveAbility, GrantedAbility, GrantedBy};
-use crate::data::{Ability, AnyBehaviour, Behaviours, Commit, InputChecks, NoInput, Trigger};
+use crate::behaviour::{AnyBehaviour, Behaviours, InputChecks, NoInput};
+use crate::data::{Ability, Commit, Trigger};
 use crate::events::{AbilityActivated, AbilityEnded, AbilityFailed, Failure, GameplayEvent};
 
 /// The next activation's number.
@@ -90,7 +92,7 @@ pub(crate) fn revoke(world: &mut World, ability: Entity) {
 /// The next activation's number: a server's own with the top bit set, so
 /// they're apart from those its clients predict under.
 pub(crate) fn next_activation(world: &mut World) -> u64 {
-    let server = crate::net::role(world) == bevy_mettle_effect::net::NetRole::Server;
+    let server = crate::net::role(world) == bevy_mettle_core::net::NetRole::Server;
     let mut activations = world.get_resource_or_init::<Activations>();
     activations.0 += 1;
     if server {
@@ -307,8 +309,13 @@ pub(crate) fn activate_with<I: Component + Clone>(
     if let Some(mut owned) = world.get_mut::<OwnedTags>(actor) {
         owned.add_all(&def.grants);
     }
+    for cue in def.cues.written() {
+        world.add_cue(actor, &Cue::new(cue.clone()));
+    }
     if let Some(mut granted) = world.get_mut::<GrantedAbility>(ability) {
         granted.granted = def.grants.clone();
+        granted.cues = def.cues.clone();
+        granted.running = Some(def.behaviour.clone());
         granted.committed = false;
     }
     let behaviour = world
@@ -495,15 +502,28 @@ pub(crate) fn end(world: &mut World, ability: Entity, cancelled: bool) {
     };
     let actor = active.actor;
     let id = granted.def.id.clone();
-    let behaviour = world
-        .get_resource::<Behaviours>()
-        .and_then(|behaviours| behaviours.0.get(&granted.def.behaviour).copied());
-    let granted_tags = world
+    // What it activated with, not what its definition says now: it may have
+    // been replaced since.
+    let (granted_tags, cues, running) = world
         .get_mut::<GrantedAbility>(ability)
-        .map(|mut granted| std::mem::take(&mut granted.granted))
+        .map(|mut granted| {
+            (
+                std::mem::take(&mut granted.granted),
+                std::mem::take(&mut granted.cues),
+                granted.running.take(),
+            )
+        })
         .unwrap_or_default();
+    let behaviour = running.and_then(|running| {
+        world
+            .get_resource::<Behaviours>()
+            .and_then(|behaviours| behaviours.0.get(&running).copied())
+    });
     if let Some(mut owned) = world.get_mut::<OwnedTags>(actor) {
         owned.remove_all(&granted_tags);
+    }
+    for cue in cues.written() {
+        world.remove_cue(actor, &Cue::new(cue.clone()));
     }
     let mut entity = world.entity_mut(ability);
     entity.remove::<ActiveAbility>();

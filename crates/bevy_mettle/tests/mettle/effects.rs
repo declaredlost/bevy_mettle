@@ -672,3 +672,32 @@ fn an_attribute_magnitude_is_captured_as_the_effect_applies() {
         "two stacks of the 10 captured"
     );
 }
+
+#[test]
+fn an_effect_refreshed_earlier_in_a_tick_doesnt_run_out_in_it() {
+    // The relay runs out as the buff does, and applies the buff again as it
+    // does: whichever settles first, the buff is there after.
+    let relay = Effect::lasting("relay", 0.5).on_expire("buff");
+    let buff = Effect::lasting("buff", 0.5)
+        .modifier(flat::<Damage>(4.0))
+        .stacking(Stacking {
+            by: StackBy::Target,
+            limit: 1,
+            reapply: Reapply::Refresh,
+            reset_period: false,
+            expire: Expire::ClearAll,
+            overflow: Vec::new(),
+        });
+    let mut app = app(&[relay, buff]);
+    let npc = actor(&mut app, []);
+    app.world_mut().apply_effect(npc, EffectSpec::new("relay"));
+    app.world_mut().apply_effect(npc, EffectSpec::new("buff"));
+    app.secs(0.5);
+    app.tick();
+    let buffs: Vec<Entity> = effects_on(&app, npc)
+        .into_iter()
+        .filter(|effect| app.entity(*effect).get::<ActiveEffect>().id().as_str() == "buff")
+        .collect();
+    assert_eq!(buffs.len(), 1, "applied again as it ran out");
+    assert!(close(get::<Damage>(&app, npc), 14.0));
+}

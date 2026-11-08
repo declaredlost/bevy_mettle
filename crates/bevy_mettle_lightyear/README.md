@@ -30,6 +30,10 @@ mettle's prediction, carried.
   to the server's in the same frame: never paid twice, or not at all.
 - **Checked**: the server takes a request only for an actor `ControlledBy`
   the client asking, and rejects any other back to it.
+- **Owner-only**: an actor's effect and ability replicas go to the client
+  controlling it alone; every client that sees it gets its cues, so its
+  cooldowns and buffs stay its owner's (`Replicas::Everyone` to send them to
+  all).
 
 ## Installation
 
@@ -61,7 +65,7 @@ use bevy::state::app::StatesPlugin;
 use bevy_mettle_ability::AbilityPlugin;
 use bevy_mettle_attribute::prelude::*;
 use bevy_mettle_effect::EffectPlugin;
-use bevy_mettle_effect::net::NetRole;
+use bevy_mettle_core::net::NetRole;
 use bevy_mettle_lightyear::prelude::*;
 use lightyear::prelude::server::ServerPlugins;
 use lightyear::prelude::*;
@@ -93,7 +97,7 @@ fn main() {
         ))
         .add_plugins((EffectPlugin::default(), AbilityPlugin))
         .insert_resource(NetRole::Server)
-        .add_plugins(MettleNetPlugin)
+        .add_plugins(MettleNetPlugin::default())
         .add_attribute::<Mana>()
         .replicate_attribute::<Mana>()
         .run();

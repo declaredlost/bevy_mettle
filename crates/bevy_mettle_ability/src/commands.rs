@@ -4,7 +4,8 @@ use bevy::prelude::*;
 use bevy_mettle_core::Id;
 use bevy_mettle_core::tag::Tags;
 
-use crate::data::{Ability, Behaviour};
+use crate::behaviour::Behaviour;
+use crate::data::Ability;
 use crate::engine;
 use crate::events::{Failure, GameplayEvent};
 

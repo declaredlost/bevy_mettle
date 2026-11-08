@@ -22,7 +22,8 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-# What's replicated and sent
+# What's replicated and sent, and the world's role
+bevy_mettle_core = { workspace = true, features = [] }
 bevy_mettle_attribute = { workspace = true, features = [] }
 bevy_mettle_effect = { workspace = true, features = [] }
 bevy_mettle_ability = { workspace = true, features = [] }
@@ -45,7 +46,6 @@ bevy = { workspace = true, features = ["bevy_state"] }
 
 # An in-process client and server for the tests
 lightyear = { workspace = true, features = ["client", "server", "replication", "crossbeam", "netcode"] }
-bevy_mettle_core = { workspace = true, features = [] }
 
 # Driving the client and server as apps under test
 bevy_harness = { workspace = true, features = [] }
