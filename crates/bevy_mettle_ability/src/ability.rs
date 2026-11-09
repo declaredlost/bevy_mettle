@@ -169,7 +169,7 @@ impl IntoAbilityId for AbilityId {
     }
 }
 
-/// Adding the abilities code names to an app.
+/// Adding the abilities code names to an app, which content has to define.
 pub trait AbilityApp {
     /// Adds the ability `A` code names: content has to define it, or it's
     /// rejected.

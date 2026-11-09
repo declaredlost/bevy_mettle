@@ -8,8 +8,9 @@ use bevy::prelude::*;
 use bevy_mettle_attribute::modifier::{Operation, Per};
 use bevy_mettle_attribute::registry::AttributeRegistry;
 use bevy_mettle_core::curve::CurveRegistry;
+use bevy_mettle_core::registry::{Key, Name, Registry};
 use bevy_mettle_core::tag::TagRegistry;
-use bevy_mettle_core::{Id, MettleError, MettleErrors, Registry};
+use bevy_mettle_core::{Error, Errors};
 
 use crate::Effect;
 use crate::code::{
@@ -21,19 +22,20 @@ use crate::data::{
     ModifierDef, Period, Stacking,
 };
 
-bevy_mettle_core::number! {
-    /// An effect's number in the [`EffectRegistry`]: what an active effect,
-    /// a replica, a chain or an event knows it by, as Bevy knows a component
-    /// by its `ComponentId`.
-    ///
-    /// Numbered in order of name as content is checked, so the same content is
-    /// numbered the same on a server and its clients; a reload keeps the
-    /// numbers effects had.
-    pub struct EffectId;
-}
+/// An effect's number in the [`EffectRegistry`], as the app knows it.
+///
+/// What an active effect, a replica, a chain or an event knows it by, as Bevy
+/// knows a component by its `ComponentId`.
+///
+/// Numbered in order of name as content is checked, so the same content is
+/// numbered the same on a server and its clients; a reload keeps the
+/// numbers effects had.
+pub type EffectId = Key<AnyEffect>;
 
-/// The effects there are, checked against the tags, curves, attributes and
-/// effect code, compiled to [`EffectDef`]s, and numbered.
+/// The effects there are, checked against what they name, and compiled.
+///
+/// Checked against the tags, curves, attributes and effect code, compiled to
+/// [`EffectDef`]s, and numbered.
 ///
 /// Made by checking their definitions: every name they use defined, every
 /// number one that can be. Each effect is numbered, an [`EffectId`], in order
@@ -53,7 +55,7 @@ bevy_mettle_core::number! {
 #[derive(Resource, Deref, Clone, Default)]
 pub struct EffectRegistry {
     #[deref]
-    registry: Registry<EffectId, Arc<EffectDef>>,
+    registry: Registry<AnyEffect, Arc<EffectDef>>,
     curves: CurveRegistry,
     executions: ExecutionRegistry,
     calculations: CalculationRegistry,
@@ -71,7 +73,7 @@ impl std::fmt::Debug for EffectRegistry {
     }
 }
 
-/// What effects are checked against: what they can name.
+/// What effects are checked against: the tags, curves and code they can name.
 #[derive(Clone, Copy)]
 pub struct EffectChecks<'a> {
     /// The gameplay tags there are.
@@ -90,9 +92,9 @@ pub struct EffectChecks<'a> {
 
 /// What compiling one effect reads: what it can name, and where errors go.
 struct Compile<'a> {
-    registry: &'a Registry<EffectId, Arc<EffectDef>>,
+    registry: &'a Registry<AnyEffect, Arc<EffectDef>>,
     checks: EffectChecks<'a>,
-    errors: &'a mut Vec<MettleError>,
+    errors: &'a mut Vec<Error>,
 }
 
 impl EffectRegistry {
@@ -106,10 +108,7 @@ impl EffectRegistry {
     /// curves, attributes, routes, effects, executions and calculations named
     /// that aren't; numbers that can't be; what an instant effect can't have;
     /// and routes dealt other than flat, or by a lasting effect.
-    pub fn check(
-        definitions: &[EffectData],
-        against: EffectChecks<'_>,
-    ) -> Result<Self, MettleErrors> {
+    pub fn check(definitions: &[EffectData], against: EffectChecks<'_>) -> Result<Self, Errors> {
         Self::default().recheck(definitions, against)
     }
 
@@ -125,23 +124,23 @@ impl EffectRegistry {
         &self,
         definitions: &[EffectData],
         against: EffectChecks<'_>,
-    ) -> Result<Self, MettleErrors> {
+    ) -> Result<Self, Errors> {
         let mut errors = Vec::new();
         let mut names: HashSet<&str> = HashSet::default();
         for def in definitions {
-            if !names.insert(def.id.as_str()) {
-                errors.push(MettleError::Duplicate {
+            if !names.insert(def.name.as_str()) {
+                errors.push(Error::Duplicate {
                     kind: "effect",
-                    id: def.id.to_string(),
+                    name: def.name.to_string(),
                 });
             }
         }
         let mut names: Vec<&str> = names.into_iter().collect();
         names.sort_unstable();
         let mut registry = self.registry.renumbered(names);
-        errors.extend(registry.unnumbered().map(|name| MettleError::NotInContent {
+        errors.extend(registry.unnumbered().map(|name| Error::NotInContent {
             kind: "effect",
-            id: name.to_owned(),
+            name: name.to_owned(),
         }));
         let mut compiled = Vec::new();
         for def in definitions {
@@ -167,7 +166,7 @@ impl EffectRegistry {
                 routes: against.routes.clone(),
             })
         } else {
-            Err(MettleErrors(errors))
+            Err(Errors(errors))
         }
     }
 
@@ -196,7 +195,7 @@ impl EffectRegistry {
 impl Compile<'_> {
     /// `def` compiled, or what's wrong with it noted.
     fn effect(&mut self, def: &EffectData) -> Option<EffectDef> {
-        let within = def.id.as_str().to_owned();
+        let within = def.name.as_str().to_owned();
         let errors_before = self.errors.len();
         for set in [
             &def.tags,
@@ -244,8 +243,8 @@ impl Compile<'_> {
         }
         let (duration, period) = timing?;
         Some(EffectDef {
-            id: self.registry.id(def.id.as_str())?,
-            name: def.id.clone(),
+            id: self.registry.id(def.name.as_str())?,
+            name: def.name.clone(),
             tags: def.tags.clone(),
             duration,
             period,
@@ -267,13 +266,13 @@ impl Compile<'_> {
 
     /// The numbers of the effects `names` names, those there are; what's
     /// wrong noted.
-    fn effects(&mut self, names: &[Id<AnyEffect>], within: &str) -> Vec<EffectId> {
+    fn effects(&mut self, names: &[Name<AnyEffect>], within: &str) -> Vec<EffectId> {
         names
             .iter()
             .filter_map(|name| {
                 let id = self.registry.id(name.as_str());
                 if id.is_none() {
-                    self.push(Err(MettleError::unknown::<AnyEffect>(
+                    self.push(Err(Error::unknown::<AnyEffect>(
                         name.as_str(),
                         Some(within),
                     )));
@@ -498,7 +497,7 @@ impl Compile<'_> {
     /// The attribute named `name`'s number, or that there's none noted.
     fn attribute(
         &mut self,
-        name: &Id<bevy_mettle_attribute::registry::AnyAttribute>,
+        name: &Name<bevy_mettle_attribute::registry::AnyAttribute>,
         within: &str,
     ) -> Option<bevy_mettle_attribute::registry::AttributeId> {
         let resolved = self.checks.attributes.resolve(name, Some(within));
@@ -512,24 +511,24 @@ impl Compile<'_> {
     }
 
     /// The route named `name`'s number, or that there's none noted.
-    fn route(&mut self, name: &Id<AnyRoute>, within: &str) -> Option<RouteId> {
+    fn route(&mut self, name: &Name<AnyRoute>, within: &str) -> Option<RouteId> {
         let id = self.checks.routes.resolve(name, Some(within));
         self.held(id)
     }
 
     /// What `result` holds, or its error noted.
-    fn held<T>(&mut self, result: Result<T, MettleError>) -> Option<T> {
+    fn held<T>(&mut self, result: Result<T, Error>) -> Option<T> {
         result.map_err(|error| self.errors.push(error)).ok()
     }
 
-    fn push(&mut self, result: Result<(), MettleError>) {
+    fn push(&mut self, result: Result<(), Error>) {
         if let Err(error) = result {
             self.errors.push(error);
         }
     }
 
     fn invalid(&mut self, what: String, within: &str) {
-        self.errors.push(MettleError::Invalid {
+        self.errors.push(Error::Invalid {
             what,
             within: Some(within.to_owned()),
         });

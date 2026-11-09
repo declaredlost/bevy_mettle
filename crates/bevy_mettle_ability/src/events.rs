@@ -51,7 +51,7 @@ pub struct AbilityActivated {
     pub activation: u64,
 }
 
-/// An ability that didn't activate for an actor.
+/// Triggered on an actor as an ability it was asked for didn't activate.
 #[derive(EntityEvent, Debug, Clone, PartialEq, Eq)]
 pub struct AbilityFailed {
     /// The actor.
@@ -62,7 +62,7 @@ pub struct AbilityFailed {
     pub reason: Failure,
 }
 
-/// Why an ability didn't activate, or couldn't commit.
+/// Why an ability didn't activate, or couldn't commit: its cost, a cooldown.
 #[derive(
     Debug,
     Clone,

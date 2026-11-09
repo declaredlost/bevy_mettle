@@ -1,8 +1,8 @@
 //! Abilities as an app has them: checked, what their data names resolved to
 //! numbers.
 
-use bevy_mettle_core::Id;
 use bevy_mettle_core::condition::Condition;
+use bevy_mettle_core::registry::Name;
 use bevy_mettle_core::tag::Tags;
 use bevy_mettle_effect::EffectId;
 
@@ -10,8 +10,10 @@ use super::{AnyAbility, Commit, Trigger};
 use crate::behaviour::BehaviourId;
 use crate::registry::AbilityId;
 
-/// An ability as an app has it: its [`AbilityData`](super::AbilityData)
-/// checked, the behaviour and effects it names resolved to their numbers.
+/// An ability as an app has it: its data checked, and what it names numbered.
+///
+/// Its [`AbilityData`](super::AbilityData) checked, the behaviour and effects
+/// it names resolved to their numbers.
 ///
 /// What [`AbilityRegistry`](crate::AbilityRegistry) holds, and a granted
 /// ability runs by.
@@ -20,7 +22,7 @@ pub struct AbilityDef {
     /// Its number.
     pub id: AbilityId,
     /// Its name.
-    pub name: Id<AnyAbility>,
+    pub name: Name<AnyAbility>,
     /// What it's labelled.
     pub tags: Tags,
     /// The behaviour that runs it.

@@ -32,7 +32,7 @@ use serde::{Deserialize, Serialize};
 use crate::EffectId;
 use crate::events::Delta;
 
-/// A cue to play: its tag, and what it's played with.
+/// A cue to play: its tag, and what it's played with, such as its magnitude.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Cue {
     /// Its tag: `cue.hit.fire`.
@@ -147,9 +147,10 @@ impl CueSources {
     }
 }
 
-/// On an actor: the lasting cues its server holds on it, replicated to the
-/// clients that see it. By their numbers in the [`TagRegistry`]: a cue the tree
-/// hasn't isn't served.
+/// On an actor: the lasting cues its server holds on it, replicated.
+///
+/// Replicated to the clients that see it. By their numbers in the
+/// [`TagRegistry`]: a cue the tree hasn't isn't served.
 #[derive(
     Component,
     Debug,
@@ -162,7 +163,7 @@ impl CueSources {
 )]
 pub struct ServedCues(pub BTreeSet<TagId>);
 
-/// On a lasting cue's entity: which cue it is.
+/// On a lasting cue's entity: which cue it is, its tag, while it plays.
 #[derive(Component, Debug, Clone, PartialEq, Eq)]
 pub struct ActiveCue {
     /// Its tag.
@@ -187,8 +188,9 @@ impl ActiveCues {
     }
 }
 
-/// A one-shot cue a server played, as it's replicated: its tag by its number
-/// in the [`TagRegistry`].
+/// A one-shot cue a server played, as it's replicated in [`CueBursts`].
+///
+/// Its tag by its number in the [`TagRegistry`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Burst {
     /// Its number, counting up on its actor.
@@ -211,8 +213,9 @@ pub struct Burst {
     pub effect: Option<EffectId>,
 }
 
-/// On an actor: the one-shot cues its server played lately, replicated to the
-/// clients that see it, which play those they haven't.
+/// On an actor: the one-shot cues its server played lately, replicated.
+///
+/// Replicated to the clients that see it, which play those they haven't.
 #[derive(Component, Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CueBursts {
     /// The next one's number.
@@ -284,7 +287,7 @@ impl Predicted {
     }
 }
 
-/// Told on an actor as a lasting cue starts on it.
+/// Told on an actor as a lasting cue starts on it, or comes into view.
 #[derive(EntityEvent, Debug, Clone, PartialEq, Eq)]
 pub struct CueAdded {
     /// The actor.
@@ -309,7 +312,7 @@ pub struct CueRemoved {
     pub tag: TagKey,
 }
 
-/// Told on an actor as a one-shot cue plays on it.
+/// Told on an actor as a one-shot cue plays on it, with what it dealt.
 #[derive(EntityEvent, Debug, Clone, PartialEq)]
 pub struct CueExecuted {
     /// The actor.
@@ -332,7 +335,7 @@ pub struct CueExecuted {
     pub effect: Option<EffectId>,
 }
 
-/// What a cue handler is run with.
+/// What a cue handler is run with: a cue started, ended, or played.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CueEvent {
     /// A lasting cue started.
@@ -359,12 +362,13 @@ impl CueEvent {
 #[derive(Resource, Debug, Default)]
 pub(crate) struct CueHandlers(HashMap<TagKey, SystemId<In<CueEvent>>>);
 
-/// The system set lasting cues are shown in, and one-shots from the server
-/// played, in `PostUpdate`.
+/// The system set cues are shown and played in, in `PostUpdate`.
+///
+/// Lasting cues are shown in it, and one-shots from the server played.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CueSystems;
 
-/// Adding cue handlers to an app.
+/// Adding cue handlers to an app: systems run for the cues under a tag.
 pub trait CueApp {
     /// Runs `handler`, a system, for each cue tagged `tag`, or under it, that
     /// no handler for a more specific tag takes: as it starts, ends, or plays.
@@ -390,7 +394,7 @@ impl CueApp for App {
     }
 }
 
-/// Playing cues on actors, as commands.
+/// Playing cues on actors, as commands: one-shots, and lasting cues held.
 pub trait CueCommands {
     /// Plays the one-shot `cue` on this actor.
     fn execute_cue(&mut self, cue: Cue) -> &mut Self;
@@ -430,7 +434,7 @@ impl CueCommands for EntityCommands<'_> {
     }
 }
 
-/// Playing cues on actors on the world, at once.
+/// Playing cues on actors on the world at once, not as commands.
 pub trait CueWorld {
     /// Plays the one-shot `cue` on `actor`.
     fn execute_cue(&mut self, actor: Entity, cue: &Cue);

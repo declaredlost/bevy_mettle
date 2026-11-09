@@ -26,7 +26,7 @@ let fireball = AbilityData::new("fireball", "cast_fireball")
 assert_eq!(fireball.commit, Commit::OnActivate);
 ```
 
-Only `id` and `behaviour` are needed. Everything else has a default: no
+Only `name` and `behaviour` are needed. Everything else has a default: no
 tags, no cost, no cooldown, nothing blocking it, and `Commit::OnActivate`.
 `AbilityData` is a serde type, so the same abilities can come from files in
 any serde format: a struct with the fields below, its tags, effects and
@@ -35,7 +35,7 @@ defaults.
 
 ## Naming abilities in code
 
-Content names abilities by string, an `Id<AnyAbility>`. Code names an ability by its type, as it
+Content names abilities by string, an `Name<AnyAbility>`. Code names an ability by its type, as it
 does an [effect](effects.md#naming-effects-in-code) or a
 [tag](tags.md#tags-in-code). Derive [`Ability`] on a unit struct, and add it
 to the app:
@@ -98,7 +98,7 @@ fact term never holds.
 A behaviour is a component with [`#[derive(Behaviour)]`][`Behaviour`], added
 to the app with
 [`add_behaviour`](https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/behaviour/trait.BehaviourApp.html#tymethod.add_behaviour).
-Data names it by its name, an `Id<AnyBehaviour>`: its type's in
+Data names it by its name, an `Name<AnyBehaviour>`: its type's in
 `snake_case`, unless it says. Adding it gives it its number in the
 [`BehaviourRegistry`], as attributes get theirs.
 

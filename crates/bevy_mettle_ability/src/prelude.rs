@@ -1,4 +1,6 @@
-//! What using abilities takes: `use bevy_mettle_ability::prelude::*`.
+//! What using abilities takes: their components, events, commands and data.
+//!
+//! `use bevy_mettle_ability::prelude::*`.
 //!
 //! Effects, attributes, and tags, curves and conditions are their own
 //! crates', each in its own prelude.

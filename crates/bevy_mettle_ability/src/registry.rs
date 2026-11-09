@@ -5,8 +5,9 @@ use std::sync::Arc;
 
 use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
+use bevy_mettle_core::registry::{Key, Registry};
 use bevy_mettle_core::tag::TagRegistry;
-use bevy_mettle_core::{MettleError, MettleErrors, Registry};
+use bevy_mettle_core::{Error, Errors};
 use bevy_mettle_effect::data::{AnyEffect, EffectDuration};
 use bevy_mettle_effect::{EffectId, EffectRegistry};
 
@@ -14,18 +15,18 @@ use crate::ability::Ability;
 use crate::behaviour::{AnyBehaviour, BehaviourRegistry};
 use crate::data::{AbilityData, AbilityDef, AnyAbility, Grant, Trigger};
 
-bevy_mettle_core::number! {
-    /// An ability's number in the [`AbilityRegistry`]: what a granted ability,
-    /// a request, a replica or an event knows it by.
-    ///
-    /// Numbered in order of name as content is checked, so the same content is
-    /// numbered the same on a server and its clients; a reload keeps the
-    /// numbers abilities had.
-    pub struct AbilityId;
-}
+/// An ability's number in the [`AbilityRegistry`], as the app knows it.
+///
+/// What a granted ability, a request, a replica or an event knows it by.
+///
+/// Numbered in order of name as content is checked, so the same content is
+/// numbered the same on a server and its clients; a reload keeps the
+/// numbers abilities had.
+pub type AbilityId = Key<AnyAbility>;
 
-/// The abilities there are, checked against the tags, effects and behaviours,
-/// and numbered.
+/// The abilities there are, checked against what they name, and numbered.
+///
+/// Checked against the tags, effects and behaviours there are.
 ///
 /// Made by checking their definitions, and what the effects grant. Each
 /// ability is numbered, an [`AbilityId`], in order of name. A resource: in an
@@ -45,7 +46,7 @@ bevy_mettle_core::number! {
 #[derive(Resource, Deref, Clone, Default)]
 pub struct AbilityRegistry {
     #[deref]
-    registry: Registry<AbilityId, Arc<AbilityDef>>,
+    registry: Registry<AnyAbility, Arc<AbilityDef>>,
     /// The abilities each effect grants.
     grants: Arc<HashMap<EffectId, Vec<AbilityId>>>,
 }
@@ -61,8 +62,9 @@ impl std::fmt::Debug for AbilityRegistry {
     }
 }
 
-/// What abilities, and what effects grant, are checked against: what they
-/// can name.
+/// What abilities, and the abilities effects grant, are checked against.
+///
+/// What they can name.
 #[derive(Clone, Copy)]
 pub struct AbilityChecks<'a> {
     /// The gameplay tags there are.
@@ -89,7 +91,7 @@ impl AbilityRegistry {
         definitions: &[AbilityData],
         grants: &[Grant],
         against: AbilityChecks<'_>,
-    ) -> Result<Self, MettleErrors> {
+    ) -> Result<Self, Errors> {
         Self::default().recheck(definitions, grants, against)
     }
 
@@ -106,7 +108,7 @@ impl AbilityRegistry {
         definitions: &[AbilityData],
         grants: &[Grant],
         against: AbilityChecks<'_>,
-    ) -> Result<Self, MettleErrors> {
+    ) -> Result<Self, Errors> {
         let AbilityChecks {
             tags,
             effects,
@@ -115,23 +117,23 @@ impl AbilityRegistry {
         let mut errors = Vec::new();
         let mut names: HashSet<&str> = HashSet::default();
         for def in definitions {
-            if !names.insert(def.id.as_str()) {
-                errors.push(MettleError::Duplicate {
+            if !names.insert(def.name.as_str()) {
+                errors.push(Error::Duplicate {
                     kind: "ability",
-                    id: def.id.to_string(),
+                    name: def.name.to_string(),
                 });
             }
         }
         let mut names: Vec<&str> = names.into_iter().collect();
         names.sort_unstable();
         let mut registry = self.registry.renumbered(names);
-        errors.extend(registry.unnumbered().map(|name| MettleError::NotInContent {
+        errors.extend(registry.unnumbered().map(|name| Error::NotInContent {
             kind: "ability",
-            id: name.to_owned(),
+            name: name.to_owned(),
         }));
         let mut compiled = Vec::new();
         for def in definitions {
-            let Some(id) = registry.id(def.id.as_str()) else {
+            let Some(id) = registry.id(def.name.as_str()) else {
                 continue;
             };
             if compiled.iter().any(|done: &AbilityDef| done.id == id) {
@@ -149,10 +151,9 @@ impl AbilityRegistry {
             for ability in &grant.abilities {
                 match registry.id(ability.as_str()) {
                     Some(id) => numbers.push(id),
-                    None => errors.push(MettleError::unknown::<AnyAbility>(
-                        ability.as_str(),
-                        Some(within),
-                    )),
+                    None => {
+                        errors.push(Error::unknown::<AnyAbility>(ability.as_str(), Some(within)));
+                    }
                 }
             }
             if let Some(effect) = effect {
@@ -169,7 +170,7 @@ impl AbilityRegistry {
                 grants: Arc::new(granted),
             })
         } else {
-            Err(MettleErrors(errors))
+            Err(Errors(errors))
         }
     }
 
@@ -189,18 +190,18 @@ impl AbilityRegistry {
 fn check_grant(
     grant: &Grant,
     effects: &EffectRegistry,
-    errors: &mut Vec<MettleError>,
+    errors: &mut Vec<Error>,
 ) -> Option<EffectId> {
     let within = grant.effect.as_str();
     let Some(id) = effects.id(within) else {
-        errors.push(MettleError::unknown::<AnyEffect>(within, Some(within)));
+        errors.push(Error::unknown::<AnyEffect>(within, Some(within)));
         return None;
     };
     let lasts = effects
         .get(id)
         .is_some_and(|effect| !matches!(effect.duration, EffectDuration::Instant));
     if !lasts {
-        errors.push(MettleError::Invalid {
+        errors.push(Error::Invalid {
             what: format!(
                 "a grant of `{}`: it's instant, so it grants nothing for any while",
                 grant.effect
@@ -219,15 +220,15 @@ fn compile(
     tags: &TagRegistry,
     effects: &EffectRegistry,
     behaviours: &BehaviourRegistry,
-    errors: &mut Vec<MettleError>,
+    errors: &mut Vec<Error>,
 ) -> Option<AbilityDef> {
     let before = errors.len();
-    let within = Some(def.id.as_str());
-    let invalid = |what: String| MettleError::Invalid {
+    let within = Some(def.name.as_str());
+    let invalid = |what: String| Error::Invalid {
         what,
         within: within.map(ToOwned::to_owned),
     };
-    let mut push = |result: Result<(), MettleError>| {
+    let mut push = |result: Result<(), Error>| {
         if let Err(error) = result {
             errors.push(error);
         }
@@ -251,7 +252,7 @@ fn compile(
     }
     let behaviour = behaviours.id(def.behaviour.as_str());
     match behaviour {
-        None => push(Err(MettleError::unknown::<AnyBehaviour>(
+        None => push(Err(Error::unknown::<AnyBehaviour>(
             def.behaviour.as_str(),
             within,
         ))),
@@ -268,10 +269,7 @@ fn compile(
     }
     let cost = def.cost.as_ref().and_then(|cost| {
         let Some(id) = effects.id(cost.as_str()) else {
-            push(Err(MettleError::unknown::<AnyEffect>(
-                cost.as_str(),
-                within,
-            )));
+            push(Err(Error::unknown::<AnyEffect>(cost.as_str(), within)));
             return None;
         };
         if effects
@@ -286,10 +284,7 @@ fn compile(
     });
     let cooldown = def.cooldown.as_ref().and_then(|cooldown| {
         let Some(id) = effects.id(cooldown.as_str()) else {
-            push(Err(MettleError::unknown::<AnyEffect>(
-                cooldown.as_str(),
-                within,
-            )));
+            push(Err(Error::unknown::<AnyEffect>(cooldown.as_str(), within)));
             return None;
         };
         if effects.get(id).is_some_and(|effect| {
@@ -306,7 +301,7 @@ fn compile(
     }
     Some(AbilityDef {
         id,
-        name: def.id.clone(),
+        name: def.name.clone(),
         tags: def.tags.clone(),
         behaviour: behaviour?,
         cost,

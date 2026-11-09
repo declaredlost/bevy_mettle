@@ -1,8 +1,10 @@
-//! What using effects takes: `use bevy_mettle_effect::prelude::*`.
+//! What using effects takes: their components, events, commands, cues and data.
+//!
+//! `use bevy_mettle_effect::prelude::*`.
 //!
 //! Attributes are `bevy_mettle_attribute`'s, and tags, curves and conditions
 //! `bevy_mettle_core`'s, each in its own prelude. Naming executions and
-//! calculations by id takes [`AnyExecution`](crate::code::AnyExecution) and
+//! calculations by name takes [`AnyExecution`](crate::code::AnyExecution) and
 //! [`AnyCalculation`](crate::code::AnyCalculation) too.
 
 #[doc(no_inline)]

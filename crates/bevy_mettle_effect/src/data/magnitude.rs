@@ -1,8 +1,8 @@
 //! How much: a number in an effect's definition.
 
 use bevy_mettle_attribute::registry::AnyAttribute;
-use bevy_mettle_core::Id;
 use bevy_mettle_core::curve::AnyCurve;
+use bevy_mettle_core::registry::Name;
 use bevy_mettle_core::tag::TagKey;
 use serde::{Deserialize, Serialize};
 
@@ -27,7 +27,7 @@ pub enum Magnitude {
         /// What the curve's value is multiplied by.
         base: f32,
         /// The curve.
-        curve: Id<AnyCurve>,
+        curve: Name<AnyCurve>,
     },
     /// What the code applying it set, by a tag (`param.damage`: Unreal's
     /// `SetByCaller`); 0, with a warning, if it didn't.
@@ -40,7 +40,7 @@ pub enum Magnitude {
     /// captures it again.
     Attribute {
         /// The attribute.
-        attribute: Id<AnyAttribute>,
+        attribute: Name<AnyAttribute>,
         /// Whose: the source's, unless it says.
         #[serde(default)]
         from: Capture,
@@ -49,10 +49,10 @@ pub enum Magnitude {
         coefficient: f32,
     },
     /// Worked out by a calculation registered in code.
-    Custom(Id<AnyCalculation>),
+    Custom(Name<AnyCalculation>),
 }
 
-/// Whose attribute an `Attribute` magnitude reads.
+/// Whose attribute an `Attribute` magnitude reads: source's or target's.
 #[derive(
     Debug,
     Clone,
@@ -81,7 +81,7 @@ impl Magnitude {
     #[must_use]
     pub fn source<A: bevy_mettle_attribute::Attribute>(coefficient: f32) -> Self {
         Self::Attribute {
-            attribute: Id::from_static(A::NAME),
+            attribute: Name::from_static(A::NAME),
             from: Capture::Source,
             coefficient,
         }
@@ -91,7 +91,7 @@ impl Magnitude {
     #[must_use]
     pub fn target<A: bevy_mettle_attribute::Attribute>(coefficient: f32) -> Self {
         Self::Attribute {
-            attribute: Id::from_static(A::NAME),
+            attribute: Name::from_static(A::NAME),
             from: Capture::Target,
             coefficient,
         }
@@ -105,7 +105,7 @@ impl Magnitude {
 
     /// `base` times `curve` at the spec's level.
     #[must_use]
-    pub fn scaled(base: f32, curve: impl Into<Id<AnyCurve>>) -> Self {
+    pub fn scaled(base: f32, curve: impl Into<Name<AnyCurve>>) -> Self {
         Self::Scaled {
             base,
             curve: curve.into(),

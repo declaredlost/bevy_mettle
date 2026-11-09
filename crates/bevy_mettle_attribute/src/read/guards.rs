@@ -6,7 +6,7 @@
 //! behaviour_tree! {
 //!     Select => {
 //!         when(attribute_below::<Life>, 20.0) => task("Flee", Flee),
-//!         when(owns, Id::from_static("state.enraged")) => task("Charge", Charge),
+//!         when(owns, Name::from_static("state.enraged")) => task("Charge", Charge),
 //!     }
 //! }
 //! ```

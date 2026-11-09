@@ -1,5 +1,4 @@
-//! What a client sees of the server's abilities: replicas of them, shown as
-//! granted.
+//! What a client sees of the server's abilities: replicas, shown as granted.
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};

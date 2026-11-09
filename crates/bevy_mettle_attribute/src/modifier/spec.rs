@@ -6,7 +6,7 @@ use std::any::TypeId;
 
 use bevy::ecs::system::EntityCommands;
 use bevy::prelude::*;
-use bevy_mettle_core::MettleError;
+use bevy_mettle_core::Error;
 use bevy_mettle_core::condition::Condition;
 use bevy_mettle_core::tag::TagKey;
 
@@ -30,9 +30,10 @@ impl Named {
     }
 }
 
-/// A modifier as code writes it: its attributes named by type, made a
-/// [`Modifier`] by [`modifiers`](ModifierCommands::modifiers) as it's put on an
-/// entity.
+/// A modifier as code writes it: its attributes named by type.
+///
+/// Made a [`Modifier`] by [`modifiers`](ModifierCommands::modifiers) as it's
+/// put on an entity.
 ///
 /// ```
 /// # use bevy::prelude::*;
@@ -161,11 +162,11 @@ impl ModifierSpec {
     /// # Errors
     ///
     /// If an attribute it names isn't added.
-    pub fn resolve(&self, attributes: &AttributeRegistry) -> Result<Modifier, MettleError> {
+    pub fn resolve(&self, attributes: &AttributeRegistry) -> Result<Modifier, Error> {
         let id = |named: Named| {
             attributes
                 .id_of_type(named.type_id)
-                .ok_or_else(|| MettleError::Invalid {
+                .ok_or_else(|| Error::Invalid {
                     what: format!("a modifier of `{}`, which isn't added", named.name),
                     within: None,
                 })

@@ -56,7 +56,7 @@ it. Whatever format your game reads, the shape is the same:
   too.
 - **Names are strings.** A tag is written as its name,
   `"cooldown.fireball"`, and a set of tags as a list of names. So is what a
-  definition names: an effect's `id`, the attributes, curves, effects,
+  definition names: an effect's `name`, the attributes, curves, effects,
   executions, calculations and routes it names, an ability's behaviour.
   Attributes are named as their types are, in `snake_case` unless they say
   otherwise, so `Mana` is `"mana"`.

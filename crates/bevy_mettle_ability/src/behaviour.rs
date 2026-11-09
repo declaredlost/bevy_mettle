@@ -6,7 +6,7 @@ use std::sync::Arc;
 use bevy::ecs::system::IntoSystem;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
-use bevy_mettle_core::{IdTarget, Registry};
+use bevy_mettle_core::registry::{Key, Kind, Registry};
 pub use bevy_mettle_macros::Behaviour;
 
 /// A behaviour: the component in code that runs an ability.
@@ -41,22 +41,22 @@ pub trait Behaviour: Component + Default {
     type Input: Component + Clone;
 }
 
-/// The input of a behaviour that takes none.
+/// The [`Behaviour::Input`] of a behaviour that takes none: nothing to send.
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NoInput;
 
-/// A behaviour's name in data: what an `Id<AnyBehaviour>` is, before it's
-/// resolved to a [`BehaviourId`].
-#[derive(IdTarget)]
-#[id_target(name = "behaviour")]
+/// The behaviour kind: what data names, and a [`BehaviourId`] numbers.
+///
+/// A behaviour's name in data is a `Name<AnyBehaviour>`, until it's resolved
+/// to a [`BehaviourId`].
+#[derive(Kind)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnyBehaviour {}
 
-bevy_mettle_core::number! {
-    /// A behaviour's number in an app, given as it's added: what abilities and
-    /// their requests know it by.
-    pub struct BehaviourId;
-}
+/// A behaviour's number in an app: what abilities and their requests use.
+///
+/// Given as it's added.
+pub type BehaviourId = Key<AnyBehaviour>;
 
 /// What an input check is given: the input, and whose it is.
 ///
@@ -79,8 +79,10 @@ pub(crate) struct InputInfo {
     pub(crate) name: &'static str,
 }
 
-/// How a behaviour's component, and its input, are put on an ability entity
-/// and taken off: what [`BehaviourRegistry`] holds for each.
+/// How a behaviour's component and input are put on an ability, and taken off.
+///
+/// Put on an ability entity, and taken off: what [`BehaviourRegistry`] holds
+/// for each.
 #[derive(Clone, Copy)]
 pub struct BehaviourFns {
     pub(crate) insert: fn(&mut EntityWorldMut),
@@ -89,14 +91,15 @@ pub struct BehaviourFns {
     pub(crate) input: Option<InputInfo>,
 }
 
-/// The behaviours there are: each one by its number, and its number by its
-/// type and its name. What abilities' data is checked against.
+/// The behaviours there are: each by number, and numbers by type and name.
+///
+/// What abilities' data is checked against.
 ///
 /// Added to with [`add_behaviour`](BehaviourApp::add_behaviour), which gives
 /// each the next number, as Bevy numbers components. Read as a [`Registry`]:
 /// `id(name)`, `id_of::<B>()`, `name(id)`.
 #[derive(Resource, Deref, Clone, Default, Debug)]
-pub struct BehaviourRegistry(Registry<BehaviourId, BehaviourFns>);
+pub struct BehaviourRegistry(Registry<AnyBehaviour, BehaviourFns>);
 
 impl BehaviourRegistry {
     /// The name of the input `behaviour` takes, if it takes one.

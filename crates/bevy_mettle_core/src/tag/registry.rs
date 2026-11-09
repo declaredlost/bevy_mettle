@@ -6,20 +6,21 @@ use bevy_app::App;
 use bevy_ecs::resource::Resource;
 use bevy_platform::collections::HashSet;
 
-use super::{Tag, TagKey};
-use crate::{MettleError, MettleErrors, Registry};
+use super::{AnyTag, Tag, TagKey};
+use crate::error::{Error, Errors};
+use crate::registry::{Key, Registry};
 
-crate::number! {
-    /// A tag's number in the [`TagRegistry`]: what the network sends for it.
-    ///
-    /// The same on a server and its clients, as they check the same tags. A
-    /// [`TagKey`] is a tag as this process knows it; a `TagId` is its place in
-    /// the registry, shared.
-    pub struct TagId;
-}
+/// A tag's number in the [`TagRegistry`]: what the network sends for it.
+///
+/// The same on a server and its clients, as they check the same tags. A
+/// [`TagKey`] is a tag as this process knows it; a `TagId` is its place in
+/// the registry, shared.
+pub type TagId = Key<AnyTag>;
 
-/// The tags there are, checked and numbered: each a path whose parent is a
-/// tag too, so they make a tree with no gaps.
+/// The tags there are, checked and numbered: a tree of paths, with no gaps.
+///
+/// Each tag is a path whose parent is a tag too, so they make a tree with no
+/// gaps.
 ///
 /// What data naming tags is checked against: the content's tags, and those
 /// code adds ([`add_tag`](TagApp::add_tag)), with every tag above them, whether
@@ -32,7 +33,7 @@ crate::number! {
 /// was checked against.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct TagRegistry {
-    registry: Registry<TagId, TagKey>,
+    registry: Registry<AnyTag, TagKey>,
     /// The tags code adds, and every tag above them.
     code: Arc<Vec<TagKey>>,
     /// Every tag, in order of name.
@@ -49,7 +50,7 @@ impl TagRegistry {
     ///
     /// Every tag defined twice, that isn't a path, or whose parent isn't a tag
     /// of its own.
-    pub fn build(definitions: impl IntoIterator<Item = TagKey>) -> Result<Self, MettleErrors> {
+    pub fn build(definitions: impl IntoIterator<Item = TagKey>) -> Result<Self, Errors> {
         Self::default().rebuild(definitions)
     }
 
@@ -61,24 +62,21 @@ impl TagRegistry {
     /// # Errors
     ///
     /// As `build`'s.
-    pub fn rebuild(
-        &self,
-        definitions: impl IntoIterator<Item = TagKey>,
-    ) -> Result<Self, MettleErrors> {
+    pub fn rebuild(&self, definitions: impl IntoIterator<Item = TagKey>) -> Result<Self, Errors> {
         let mut errors = Vec::new();
         let mut known: HashSet<TagKey> = HashSet::default();
         for tag in definitions {
             if !known.insert(tag) {
-                errors.push(MettleError::Duplicate {
+                errors.push(Error::Duplicate {
                     kind: "tag",
-                    id: tag.name().to_owned(),
+                    name: tag.name().to_owned(),
                 });
             }
         }
         known.extend(self.code.iter().copied());
         for &tag in &known {
             if !tag.is_path() {
-                errors.push(MettleError::Invalid {
+                errors.push(Error::Invalid {
                     what: format!("a tag called `{tag}`: a tag is words joined by `.`"),
                     within: None,
                 });
@@ -90,7 +88,7 @@ impl TagRegistry {
         }
         if !errors.is_empty() {
             errors.sort_by_key(ToString::to_string);
-            return Err(MettleErrors(errors));
+            return Err(Errors(errors));
         }
         let mut sorted: Vec<TagKey> = known.into_iter().collect();
         sorted.sort_unstable_by_key(|tag| tag.name());
@@ -161,7 +159,7 @@ impl TagRegistry {
     /// # Errors
     ///
     /// If it isn't.
-    pub fn known(&self, tag: TagKey, within: Option<&str>) -> Result<(), MettleError> {
+    pub fn known(&self, tag: TagKey, within: Option<&str>) -> Result<(), Error> {
         if self.contains(tag) {
             Ok(())
         } else {
@@ -178,7 +176,7 @@ impl TagRegistry {
         &self,
         tags: impl IntoIterator<Item = TagKey>,
         within: Option<&str>,
-    ) -> Result<(), MettleError> {
+    ) -> Result<(), Error> {
         tags.into_iter().try_for_each(|tag| self.known(tag, within))
     }
 
@@ -189,10 +187,10 @@ impl TagRegistry {
 }
 
 /// That there's no tag called `tag`, named within `within`.
-fn unknown(tag: TagKey, within: Option<&str>) -> MettleError {
-    MettleError::Unknown {
+fn unknown(tag: TagKey, within: Option<&str>) -> Error {
+    Error::Unknown {
         kind: "tag",
-        id: tag.name().to_owned(),
+        name: tag.name().to_owned(),
         within: within.map(ToOwned::to_owned),
     }
 }
@@ -215,7 +213,7 @@ impl TagApp for App {
 
 /// Read as the [`Registry`] of each tag's key, by number.
 impl std::ops::Deref for TagRegistry {
-    type Target = Registry<TagId, TagKey>;
+    type Target = Registry<AnyTag, TagKey>;
 
     fn deref(&self) -> &Self::Target {
         &self.registry

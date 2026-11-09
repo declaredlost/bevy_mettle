@@ -2,32 +2,34 @@
 
 use std::any::TypeId;
 
-use bevy_mettle_core::IdTarget;
+use bevy_mettle_core::registry::{Key, Kind};
 use serde::{Deserialize, Serialize};
 
 use crate::Attribute;
 
-/// An attribute's name in data: what an `Id<AnyAttribute>` is, before it's
-/// resolved to an [`AttributeId`].
-#[derive(IdTarget)]
-#[id_target(name = "attribute")]
+/// The attribute kind: what data names, and an [`AttributeId`] numbers.
+///
+/// An attribute's name in data is a `Name<AnyAttribute>`, until it's resolved
+/// to an [`AttributeId`].
+#[derive(Kind)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnyAttribute {}
 
-bevy_mettle_core::number! {
-    /// An attribute's number in an app: dense, given as it's added, and what
-    /// state, modifiers and the network know it by.
-    ///
-    /// As Bevy's `ComponentId` is to a component: look one up from its type
-    /// with [`AttributeRegistry::id`](super::AttributeRegistry::id) or
-    /// [`AttributeWorld::attribute_id`](crate::read::AttributeWorld::attribute_id),
-    /// and its name and rules with
-    /// [`AttributeRegistry::get`](super::AttributeRegistry::get).
-    pub struct AttributeId;
-}
+/// An attribute's number in an app: what state, modifiers and the network use.
+///
+/// Dense, and given as it's added.
+///
+/// As Bevy's `ComponentId` is to a component: look one up from its type in
+/// the [`AttributeRegistry`](super::AttributeRegistry), with
+/// [`id_of`](bevy_mettle_core::registry::Registry::id_of), or with
+/// [`AttributeWorld::attribute_id`](crate::read::AttributeWorld::attribute_id),
+/// and its name and rules with
+/// [`get`](bevy_mettle_core::registry::Registry::get).
+pub type AttributeId = Key<AnyAttribute>;
 
-/// What an attribute is kept within, as its type says: a value, or another
-/// attribute's value.
+/// What an attribute is kept within: a value, or another attribute's value.
+///
+/// Set by the attribute's type.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Limit {
     /// This value.
@@ -55,8 +57,9 @@ pub enum Bound {
     Attribute(AttributeId),
 }
 
-/// What an attribute's base does as a limit that's another attribute moves:
-/// life as its maximum drops, or rises.
+/// What an attribute's base does as another attribute that limits it moves.
+///
+/// Life, say, as its maximum drops or rises.
 ///
 /// Only the world that decides attributes moves it: a server, or a game on
 /// its own. A client sees what the server serves.

@@ -1,4 +1,6 @@
-//! What using attributes takes: `use bevy_mettle_attribute::prelude::*`.
+//! What using attributes takes: their components, modifiers, reads and values.
+//!
+//! `use bevy_mettle_attribute::prelude::*`.
 //!
 //! Tags, curves and conditions are `bevy_mettle_core`'s, in its own prelude.
 //! Implementing [`Attribute`] by hand takes

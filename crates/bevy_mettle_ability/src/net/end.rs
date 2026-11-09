@@ -1,5 +1,7 @@
-//! Endings over a network: the server telling a client of the end of what ran
-//! under its activation, and a client asking the server to cancel its own.
+//! Endings over a network: what ran under a client's activation, and cancels.
+//!
+//! The server telling a client of the end of what ran under its activation,
+//! and a client asking the server to cancel its own.
 
 use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::prelude::*;
@@ -9,8 +11,10 @@ use serde::{Deserialize, Serialize};
 use super::{SERVERS, role, running};
 use crate::engine;
 
-/// A client's ask that the server cancel an ability it ran under its own
-/// activation, and cancelled itself: a channel let go of, a cast called off.
+/// A client's ask that the server cancel an ability it cancelled itself.
+///
+/// One it ran under its own activation, and cancelled itself: a channel let go
+/// of, a cast called off.
 #[derive(Message, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AbilityCancelRequest {
     /// The actor.
@@ -25,8 +29,10 @@ impl MapEntities for AbilityCancelRequest {
     }
 }
 
-/// The server's telling a client that an ability running under the client's
-/// activation ended there: interrupted, cancelled, or done.
+/// The server's telling a client that an ability it activated ended there.
+///
+/// One running under the client's activation, ended on the server:
+/// interrupted, cancelled, or done.
 #[derive(Message, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AbilityEnd {
     /// The actor.

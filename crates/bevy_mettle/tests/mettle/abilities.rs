@@ -3,6 +3,7 @@
 
 use bevy::prelude::*;
 use bevy_harness::TestApp;
+use bevy_mettle::core::Error;
 use bevy_mettle::prelude::*;
 
 use crate::common::{Mana, actor, attributes, close, get, own};
@@ -144,7 +145,7 @@ fn name_abilities(app: &mut App, abilities: &[AbilityData]) {
     fn add<A: Ability>(app: &mut App, abilities: &[AbilityData]) {
         if abilities
             .iter()
-            .any(|ability| ability.id.as_str() == A::NAME)
+            .any(|ability| ability.name.as_str() == A::NAME)
         {
             app.add_ability::<A>();
         }
@@ -204,7 +205,7 @@ fn app(abilities: &[AbilityData]) -> TestApp {
     let mut abilities = abilities.to_vec();
     if !abilities
         .iter()
-        .any(|ability| ability.id.as_str() == "channel")
+        .any(|ability| ability.name.as_str() == "channel")
     {
         abilities.push(channel());
     }
@@ -449,7 +450,7 @@ fn an_ability_left_out_is_as_new() {
                 name: "AbilityData",
                 len: 2,
             },
-            Token::Str("id"),
+            Token::Str("name"),
             Token::Str("fireball"),
             Token::Str("behaviour"),
             Token::Str("cast"),
@@ -1027,9 +1028,9 @@ fn code_naming_an_ability_content_lacks_fails_the_check() {
             },
         )
         .unwrap_err();
-    let missing = MettleError::NotInContent {
+    let missing = Error::NotInContent {
         kind: "ability",
-        id: "missing".to_owned(),
+        name: "missing".to_owned(),
     };
     assert!(errors.0.contains(&missing), "{errors}");
     assert!(

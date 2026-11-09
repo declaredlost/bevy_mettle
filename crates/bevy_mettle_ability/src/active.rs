@@ -1,4 +1,4 @@
-//! Abilities granted to actors, and those active.
+//! Abilities granted to actors, each an entity of its own, and those active.
 
 use std::sync::Arc;
 

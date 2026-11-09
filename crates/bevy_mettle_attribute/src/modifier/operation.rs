@@ -3,7 +3,9 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-/// How a modifier changes its attribute. An attribute is
+/// How a modifier changes its attribute: sets, adds, scales or divides it.
+///
+/// An attribute is
 ///
 /// ```text
 /// ((base + Σ flat) × (1 + Σ additive) × Π (1 + multiplicative) / (1 + Σ divide)) + Σ unscaled

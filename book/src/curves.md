@@ -6,7 +6,7 @@ their numbers by curves, as Unreal's curve tables do.
 
 ## Defining a curve
 
-A curve is data, a [`LevelCurve`]: an id, how it goes between its keys, and
+A curve is data, a [`LevelCurve`]: a name, how it goes between its keys, and
 its keys as `(level, value)` pairs, levels rising:
 
 ```rust
@@ -14,12 +14,12 @@ its keys as `(level, value)` pairs, levels rising:
 fn curves() -> Vec<LevelCurve> {
     vec![
         LevelCurve {
-            id: "fireball.damage".into(),
+            name: "fireball.damage".into(),
             interpolation: Interpolation::Constant,
             keys: vec![(1.0, 10.0), (10.0, 85.0), (20.0, 240.0)],
         },
         LevelCurve {
-            id: "burning.damage".into(),
+            name: "burning.damage".into(),
             interpolation: Interpolation::Linear,
             keys: vec![(1.0, 4.0), (20.0, 40.0)],
         },
@@ -30,7 +30,7 @@ fn curves() -> Vec<LevelCurve> {
 
 Here the fireball's damage steps up at levels 10 and 20, and burning's
 grows steadily between its keys. `LevelCurve` is a serde type: in a file, it's
-a struct with an `id` (the curve's name, a string), an `interpolation`, and
+a struct with a `name` (a string), an `interpolation`, and
 `keys` as a list of pairs. `interpolation` can be left out: it's `Linear`
 unless it says.
 
@@ -62,12 +62,12 @@ a curve's number by its name:
 # fn curves() -> Vec<LevelCurve> {
 #     vec![
 #         LevelCurve {
-#             id: "fireball.damage".into(),
+#             name: "fireball.damage".into(),
 #             interpolation: Interpolation::Constant,
 #             keys: vec![(1.0, 10.0), (10.0, 85.0), (20.0, 240.0)],
 #         },
 #         LevelCurve {
-#             id: "burning.damage".into(),
+#             name: "burning.damage".into(),
 #             interpolation: Interpolation::Linear,
 #             keys: vec![(1.0, 4.0), (20.0, 40.0)],
 #         },
@@ -105,8 +105,9 @@ adaptors:
 
 ```rust
 # use bevy_mettle::prelude::*;
+# use bevy_mettle::core::registry::Name;
 # let curves = CurveRegistry::build(&[LevelCurve {
-#     id: Id::from_static("burning.damage"),
+#     name: Name::from_static("burning.damage"),
 #     interpolation: Interpolation::Linear,
 #     keys: vec![(1.0, 4.0), (20.0, 40.0)],
 # }])

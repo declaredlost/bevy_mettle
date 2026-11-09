@@ -1,26 +1,28 @@
-//! Abilities as data, and what effects grant.
+//! Abilities as data: what runs them, what they cost, and what effects grant.
 
 mod def;
 
 use bevy_mettle_core::condition::Condition;
+use bevy_mettle_core::registry::{Kind, Name};
 use bevy_mettle_core::tag::{TagKey, Tags};
-use bevy_mettle_core::{Id, IdTarget};
 use bevy_mettle_effect::data::AnyEffect;
 use serde::{Deserialize, Serialize};
 
 pub use self::def::AbilityDef;
 use crate::behaviour::AnyBehaviour;
 
-/// An ability's name in content: what an `Id<AnyAbility>` is, before it's
-/// resolved to an [`AbilityId`](crate::AbilityId).
-#[derive(IdTarget)]
-#[id_target(name = "ability")]
+/// The ability kind: what content names, and an [`AbilityId`](crate::AbilityId)
+/// numbers.
+///
+/// An ability's name in content is a `Name<AnyAbility>`, until it's resolved
+/// to an [`AbilityId`](crate::AbilityId).
+#[derive(Kind)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnyAbility {}
 
 /// An ability, as data: what runs it, what it costs, and what activates it.
 ///
-/// Unreal's `GameplayAbility`, its properties. Named by an `Id<AnyAbility>`,
+/// Unreal's `GameplayAbility`, its properties. Named by an `Name<AnyAbility>`,
 /// its `id`.
 ///
 /// Written by a game's content, in whatever format it loads with serde, or
@@ -42,13 +44,13 @@ pub enum AnyAbility {}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AbilityData {
-    /// Its id.
-    pub id: Id<AnyAbility>,
+    /// Its name.
+    pub name: Name<AnyAbility>,
     /// What it is: what blocking, cancelling and activating by tag match on.
     #[serde(default, skip_serializing_if = "Tags::is_empty")]
     pub tags: Tags,
     /// The behaviour that runs it, registered in code.
-    pub behaviour: Id<AnyBehaviour>,
+    pub behaviour: Name<AnyBehaviour>,
     /// An instant effect it costs, applied to its owner as it commits: it can't
     /// activate if paying would take an attribute below 0.
     #[serde(
@@ -56,7 +58,7 @@ pub struct AbilityData {
         with = "bevy_mettle_core::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub cost: Option<Id<AnyEffect>>,
+    pub cost: Option<Name<AnyEffect>>,
     /// A lasting effect applied to its owner as it commits: it can't activate
     /// while its owner owns what that effect grants.
     #[serde(
@@ -64,7 +66,7 @@ pub struct AbilityData {
         with = "bevy_mettle_core::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub cooldown: Option<Id<AnyEffect>>,
+    pub cooldown: Option<Name<AnyEffect>>,
     /// What has to hold for it to activate: weighed in its own tags
     /// (`ReadTagged`) and its owner's (`OwnerHas`).
     #[serde(
@@ -104,7 +106,7 @@ pub struct AbilityData {
     pub commit: Commit,
 }
 
-/// What activates an ability besides being asked to.
+/// What activates an ability besides being asked to: an event, or a tag owned.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Trigger {
     /// A gameplay event sent to its owner with this tag, or one under it:
@@ -117,7 +119,7 @@ pub enum Trigger {
     TagPresent(TagKey),
 }
 
-/// When an ability's cost and cooldown are applied.
+/// When an ability's cost and cooldown are applied: as it activates, or later.
 #[derive(
     Debug,
     Clone,
@@ -142,9 +144,9 @@ impl AbilityData {
     /// An ability called `id`, run by `behaviour`, costing nothing yet: for
     /// abilities defined in code.
     #[must_use]
-    pub fn new(id: impl Into<Id<AnyAbility>>, behaviour: impl Into<Id<AnyBehaviour>>) -> Self {
+    pub fn new(id: impl Into<Name<AnyAbility>>, behaviour: impl Into<Name<AnyBehaviour>>) -> Self {
         Self {
-            id: id.into(),
+            name: id.into(),
             tags: Tags::new(),
             behaviour: behaviour.into(),
             cost: None,
@@ -170,14 +172,14 @@ impl AbilityData {
 
     /// Costing `effect`.
     #[must_use]
-    pub fn cost(mut self, effect: impl Into<Id<AnyEffect>>) -> Self {
+    pub fn cost(mut self, effect: impl Into<Name<AnyEffect>>) -> Self {
         self.cost = Some(effect.into());
         self
     }
 
     /// Cooling down by `effect`.
     #[must_use]
-    pub fn cooldown(mut self, effect: impl Into<Id<AnyEffect>>) -> Self {
+    pub fn cooldown(mut self, effect: impl Into<Name<AnyEffect>>) -> Self {
         self.cooldown = Some(effect.into());
         self
     }
@@ -261,16 +263,16 @@ impl AbilityData {
 #[serde(deny_unknown_fields)]
 pub struct Grant {
     /// The effect: a lasting one.
-    pub effect: Id<AnyEffect>,
+    pub effect: Name<AnyEffect>,
     /// The abilities its target is granted while it lasts.
-    pub abilities: Vec<Id<AnyAbility>>,
+    pub abilities: Vec<Name<AnyAbility>>,
 }
 
 impl Grant {
     /// `effect` granting `abilities`.
     #[must_use]
-    pub fn new<A: Into<Id<AnyAbility>>>(
-        effect: impl Into<Id<AnyEffect>>,
+    pub fn new<A: Into<Name<AnyAbility>>>(
+        effect: impl Into<Name<AnyEffect>>,
         abilities: impl IntoIterator<Item = A>,
     ) -> Self {
         Self {

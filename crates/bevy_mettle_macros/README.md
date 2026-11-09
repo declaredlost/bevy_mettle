@@ -20,9 +20,11 @@ Don't depend on it directly: each macro is re-exported by its part.
 
 | Macro | Re-exported by |
 |---|---|
-| `#[derive(Attribute)]` | `bevy_mettle_attribute`, and the `bevy_mettle` facade's prelude |
-| `#[derive(IdTarget)]` | `bevy_mettle_core`, and the `bevy_mettle` facade's prelude |
-| `#[derive(Behaviour)]` | `bevy_mettle_ability`, and the `bevy_mettle` facade's prelude |
+| `#[derive(Kind)]` | `bevy_mettle_core::registry` |
+| `#[derive(Tag)]` | `bevy_mettle_core`, and the `bevy_mettle` facade's prelude |
+| `#[derive(Attribute)]` | `bevy_mettle_attribute`, and the facade's prelude |
+| `#[derive(Effect)]`, `#[derive(Route)]`, `#[derive(Execution)]`, `#[derive(Calculation)]` | `bevy_mettle_effect`, and the facade's prelude |
+| `#[derive(Ability)]`, `#[derive(Behaviour)]` | `bevy_mettle_ability`, and the facade's prelude |
 
 ## Learn more
 

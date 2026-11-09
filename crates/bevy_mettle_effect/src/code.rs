@@ -1,5 +1,6 @@
-//! What effects run in code: executions, calculations, and routes with their
-//! routers, each numbered as it's added.
+//! What effects run in code: executions, calculations, and routes with routers.
+//!
+//! Each numbered as it's added.
 
 use std::sync::Arc;
 
@@ -8,14 +9,14 @@ use bevy_mettle_attribute::Attribute;
 use bevy_mettle_attribute::modifier::Operation;
 use bevy_mettle_attribute::read::{AttributeContext, AttributeWorld, Breakdown};
 use bevy_mettle_attribute::registry::AttributeId;
+use bevy_mettle_core::Error;
+use bevy_mettle_core::registry::{Key, Kind, Name, Registry};
 use bevy_mettle_core::tag::{OwnedTags, TagKey};
-use bevy_mettle_core::{Id, IdTarget, MettleError, Registry};
 
 use crate::data::EffectDef;
 use crate::{Effect, EffectId, EffectRegistry, EffectSpec};
 
-/// What an execution or a calculation sees: the world, the target, the effect
-/// and its spec.
+/// What an execution or a calculation sees: the world, target, effect and spec.
 ///
 /// The world read only, and how many stacks there are.
 pub struct EffectContext<'a> {
@@ -136,8 +137,9 @@ pub enum Changes {
     Route(RouteId),
 }
 
-/// A change an execution or a router makes, as an instant modifier: to an
-/// attribute's base, or dealt a route; its target's, unless it says.
+/// A change an execution or a router makes, as an instant modifier.
+///
+/// To an attribute's base, or dealt a route; its target's, unless it says.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BaseChange {
     /// What it changes.
@@ -182,8 +184,9 @@ impl BaseChange {
     }
 }
 
-/// A route: an amount effects deal that no actor holds, routed into the
-/// attributes they do as an effect executes.
+/// A route: an amount effects deal that no actor holds, routed into attributes.
+///
+/// Routed into the attributes actors do hold, as an effect executes.
 ///
 /// Incoming damage, say: dealt by every hit, then routed through armour and
 /// shields into life by one router, not each hit's own code. Derive it, and
@@ -212,17 +215,16 @@ pub trait Route: Send + Sync + 'static {
 
 pub use bevy_mettle_macros::Route;
 
-/// A route's name in data: what an `Id<AnyRoute>` is, before it's resolved to
-/// a [`RouteId`].
-#[derive(IdTarget)]
-#[id_target(name = "route")]
+/// The route kind: what data names and deals, and a [`RouteId`] numbers.
+///
+/// A route's name in data is a `Name<AnyRoute>`, until it's resolved to a
+/// [`RouteId`].
+#[derive(Kind)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnyRoute {}
 
-bevy_mettle_core::number! {
-    /// A route's number in an app, given as it's added.
-    pub struct RouteId;
-}
+/// A route's number in an app, given as it's added: what executions deal by.
+pub type RouteId = Key<AnyRoute>;
 
 /// An execution: a formula in code run as an effect executes, such as damage.
 ///
@@ -250,20 +252,18 @@ pub trait Execution: Send + Sync + 'static {
 
 pub use bevy_mettle_macros::Execution;
 
-/// An execution's name in data: what an `Id<AnyExecution>` is, before it's
-/// resolved to an [`ExecutionId`].
-#[derive(IdTarget)]
-#[id_target(name = "execution")]
+/// The execution kind: what data names, and an [`ExecutionId`] numbers.
+///
+/// An execution's name in data is a `Name<AnyExecution>`, until it's resolved
+/// to an [`ExecutionId`].
+#[derive(Kind)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnyExecution {}
 
-bevy_mettle_core::number! {
-    /// An execution's number in an app, given as it's added.
-    pub struct ExecutionId;
-}
+/// An execution's number in an app, given as it's added, as effects know it.
+pub type ExecutionId = Key<AnyExecution>;
 
-/// A calculation: a magnitude worked out in code, such as how long a burn
-/// lasts.
+/// A calculation: a magnitude worked out in code, such as a burn's duration.
 ///
 /// Derive it, and add it with what it works out:
 ///
@@ -288,35 +288,37 @@ pub trait Calculation: Send + Sync + 'static {
 
 pub use bevy_mettle_macros::Calculation;
 
-/// A calculation's name in data: what an `Id<AnyCalculation>` is, before it's
+/// The calculation kind: what data names, and a [`CalculationId`] numbers.
+///
+/// A calculation's name in data is a `Name<AnyCalculation>`, until it's
 /// resolved to a [`CalculationId`].
-#[derive(IdTarget)]
-#[id_target(name = "calculation")]
+#[derive(Kind)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnyCalculation {}
 
-bevy_mettle_core::number! {
-    /// A calculation's number in an app, given as it's added.
-    pub struct CalculationId;
-}
+/// A calculation's number in an app, given as it's added, as effects know it.
+pub type CalculationId = Key<AnyCalculation>;
 
-/// An execution: what it changes, worked out in code.
+/// The function an execution runs: what it changes, worked out from context.
 pub type ExecutionFn = Arc<dyn Fn(&EffectContext) -> Vec<BaseChange> + Send + Sync>;
 
-/// A calculation: a magnitude, worked out in code.
+/// The function a calculation runs: a magnitude, worked out from its context.
 pub type CalculationFn = Arc<dyn Fn(&EffectContext) -> f32 + Send + Sync>;
 
-/// A router: what a route's amount, all an execution dealt it, changes in the
-/// attributes actors have.
+/// The function a router runs: what a route's amount changes in attributes.
+///
+/// The amount is all an execution dealt the route; the changes, to attributes
+/// actors have.
 pub type RouterFn = Arc<dyn Fn(&EffectContext, f32) -> Vec<BaseChange> + Send + Sync>;
 
-/// The executions an app has, each numbered as it's added: what effects' data
-/// names by name, and runs by number.
+/// The executions an app has: named by data, and run by number.
+///
+/// Each numbered as it's added.
 ///
 /// Added to with [`add_execution`](EffectApp::add_execution). Read as a
 /// [`Registry`]: `get(id)`, `id(name)`, `id_of::<E>()`, `name(id)`, `iter()`.
 #[derive(Resource, Deref, Clone, Default, Debug)]
-pub struct ExecutionRegistry(Registry<ExecutionId, ExecutionFn>);
+pub struct ExecutionRegistry(Registry<AnyExecution, ExecutionFn>);
 
 impl ExecutionRegistry {
     /// With the execution `E` running `execution`: for a registry built by
@@ -342,21 +344,22 @@ impl ExecutionRegistry {
     /// If there's no such execution.
     pub fn resolve(
         &self,
-        name: &Id<AnyExecution>,
+        name: &Name<AnyExecution>,
         within: Option<&str>,
-    ) -> Result<ExecutionId, MettleError> {
+    ) -> Result<ExecutionId, Error> {
         self.id(name.as_str())
-            .ok_or_else(|| MettleError::unknown::<AnyExecution>(name.as_str(), within))
+            .ok_or_else(|| Error::unknown::<AnyExecution>(name.as_str(), within))
     }
 }
 
-/// The calculations an app has, each numbered as it's added: what effects'
-/// data names by name, and works out by number.
+/// The calculations an app has: named by data, worked out by number.
+///
+/// Each numbered as it's added.
 ///
 /// Added to with [`add_calculation`](EffectApp::add_calculation). Read as a
 /// [`Registry`].
 #[derive(Resource, Deref, Clone, Default, Debug)]
-pub struct CalculationRegistry(Registry<CalculationId, CalculationFn>);
+pub struct CalculationRegistry(Registry<AnyCalculation, CalculationFn>);
 
 impl CalculationRegistry {
     /// With the calculation `C` working out `calculation`: for a registry
@@ -383,20 +386,22 @@ impl CalculationRegistry {
     /// If there's no such calculation.
     pub fn resolve(
         &self,
-        name: &Id<AnyCalculation>,
+        name: &Name<AnyCalculation>,
         within: Option<&str>,
-    ) -> Result<CalculationId, MettleError> {
+    ) -> Result<CalculationId, Error> {
         self.id(name.as_str())
-            .ok_or_else(|| MettleError::unknown::<AnyCalculation>(name.as_str(), within))
+            .ok_or_else(|| Error::unknown::<AnyCalculation>(name.as_str(), within))
     }
 }
 
-/// The routes an app has, each with its router, numbered as it's added: what
-/// effects' data deals by name, and executions by number.
+/// The routes an app has, with their routers: named by data, dealt by number.
+///
+/// Each numbered as it's added. Effects' data deals a route by name, and
+/// executions by number.
 ///
 /// Added to with [`add_route`](EffectApp::add_route). Read as a [`Registry`].
 #[derive(Resource, Deref, Clone, Default, Debug)]
-pub struct RouteRegistry(Registry<RouteId, RouterFn>);
+pub struct RouteRegistry(Registry<AnyRoute, RouterFn>);
 
 impl RouteRegistry {
     /// With the route `R`, routed by `router`: for a registry built by hand.
@@ -419,18 +424,16 @@ impl RouteRegistry {
     /// # Errors
     ///
     /// If there's no such route.
-    pub fn resolve(
-        &self,
-        name: &Id<AnyRoute>,
-        within: Option<&str>,
-    ) -> Result<RouteId, MettleError> {
+    pub fn resolve(&self, name: &Name<AnyRoute>, within: Option<&str>) -> Result<RouteId, Error> {
         self.id(name.as_str())
-            .ok_or_else(|| MettleError::unknown::<AnyRoute>(name.as_str(), within))
+            .ok_or_else(|| Error::unknown::<AnyRoute>(name.as_str(), within))
     }
 }
 
-/// Adding effects' code to an app: executions, calculations and routes, each
-/// numbered as it's added, and the effects code names.
+/// Adding effects' code to an app: executions, calculations, routes, effects.
+///
+/// Executions, calculations and routes, each numbered as it's added, and the
+/// effects code names.
 pub trait EffectApp {
     /// Adds the execution `E`, running `execution`: a formula run as an effect
     /// naming it executes, such as damage.

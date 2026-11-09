@@ -3,18 +3,20 @@
 
 use bevy_mettle_attribute::modifier::{Operation, Per};
 use bevy_mettle_attribute::registry::AttributeId;
-use bevy_mettle_core::Id;
 use bevy_mettle_core::condition::Condition;
 use bevy_mettle_core::curve::CurveId;
+use bevy_mettle_core::registry::Name;
 use bevy_mettle_core::tag::{TagKey, Tags};
 
 use super::{AnyEffect, Capture, EffectDuration, Period, Stacking};
 use crate::code::{CalculationId, Changes, ExecutionId};
 use crate::registry::EffectId;
 
-/// An effect as an app has it: its [`EffectData`](super::EffectData) checked,
-/// the effects, curves, attributes, routes, executions and calculations it
-/// names resolved to their numbers.
+/// An effect as an app has it: its data checked, and what it names numbered.
+///
+/// Its [`EffectData`](super::EffectData) checked, the effects, curves,
+/// attributes, routes, executions and calculations it names resolved to their
+/// numbers.
 ///
 /// What [`EffectRegistry`](crate::EffectRegistry) holds, and an active effect
 /// runs by.
@@ -23,7 +25,7 @@ pub struct EffectDef {
     /// Its number.
     pub id: EffectId,
     /// Its name.
-    pub name: Id<AnyEffect>,
+    pub name: Name<AnyEffect>,
     /// What it's labelled.
     pub tags: Tags,
     /// How long it lasts.
@@ -81,8 +83,10 @@ pub struct ModifierDef {
     pub per: Option<Per>,
 }
 
-/// How much, as an app has it: a [`Magnitude`](super::Magnitude), what it
-/// names resolved to numbers.
+/// How much, as an app has it: a [`Magnitude`](super::Magnitude), its names
+/// numbered.
+///
+/// What the magnitude names resolved to their numbers.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MagnitudeDef {
     /// This value.

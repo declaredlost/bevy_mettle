@@ -12,8 +12,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::Tag;
 
-/// A gameplay tag, interned: cheap to copy, compare and look up, and the same
-/// whether code names it by type ([`Tag`]) or data by name.
+/// A gameplay tag, interned: cheap to copy, compare and look up.
+///
+/// The same whether code names it by type ([`Tag`]) or data by name.
 ///
 /// Made from a tag type (`Stunned.into()`, [`Tag::key`]), or from a name
 /// (`TagKey::from("state.stunned")`), interned the first time it's seen. Its

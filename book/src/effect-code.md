@@ -20,8 +20,8 @@ Code names an execution or a calculation by its type, as it does an
 Register it on the app with what it runs, with [`add_execution`] and
 [`add_calculation`] from [`EffectApp`], as attributes and behaviours are;
 it's numbered as it's registered, in the [`ExecutionRegistry`] or the
-[`CalculationRegistry`]. Data names it by that name, an `Id<AnyExecution>`
-or an `Id<AnyCalculation>`; checking the content resolves the name to its
+[`CalculationRegistry`]. Data names it by that name, an `Name<AnyExecution>`
+or an `Name<AnyCalculation>`; checking the content resolves the name to its
 number, and rejects a name that isn't registered:
 
 ```rust
@@ -363,7 +363,7 @@ assert_eq!(base(&app, attacker), 52.0, "a fifth stolen back");
 
 A route is registered with [`add_route`], with its router, and numbered in
 the [`RouteRegistry`]. In data, a modifier deals a route by naming it,
-`"incoming_damage"`, an `Id<AnyRoute>`, in place of an attribute. A router
+`"incoming_damage"`, an `Name<AnyRoute>`, in place of an attribute. A router
 gets all that an
 execution dealt its route, summed: the effect's modifiers and executions
 both. Its changes come after the effect's own, and are rounded and kept

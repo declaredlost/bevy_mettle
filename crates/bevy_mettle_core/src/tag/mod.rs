@@ -53,6 +53,13 @@ pub trait Tag: Send + Sync + 'static {
     fn key() -> TagKey;
 }
 
+/// The tag kind: what a [`TagId`] numbers, as the [`TagRegistry`] holds them.
+///
+/// Tags themselves are named by [`TagKey`], by type or by name.
+#[derive(crate::registry::Kind)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AnyTag {}
+
 pub use bevy_mettle_macros::Tag;
 
 /// The root every tag hangs from: what a top-level tag is under.

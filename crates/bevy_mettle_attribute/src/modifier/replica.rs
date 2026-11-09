@@ -7,9 +7,11 @@ use serde::{Deserialize, Serialize};
 
 use super::{Modifier, ModifierOf, Modifiers};
 
-/// On a modifier source a server replicates (an item, a passive): its
-/// [`Modifiers`], their conditions' tags by number, and the actor they count
-/// for, for the game to replicate in their place.
+/// On a modifier source a server replicates: its [`Modifiers`], sent by number.
+///
+/// On a source such as an item or a passive: its modifiers, their conditions'
+/// tags by number, and the actor they count for, for the game to replicate in
+/// their place.
 ///
 /// Opt in by putting it on the source, empty: on a server, it's kept as the
 /// source's modifiers and what it's [`ModifierOf`] change; on a client, the

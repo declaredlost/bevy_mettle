@@ -10,7 +10,7 @@ use bevy_mettle_ability::{AbilityChecks, AbilityRegistry};
 use bevy_mettle_attribute::registry::AttributeRegistry;
 use bevy_mettle_core::curve::{CurveRegistry, LevelCurve};
 use bevy_mettle_core::tag::{TagKey, TagRegistry};
-use bevy_mettle_core::{MettleError, MettleErrors};
+use bevy_mettle_core::{Error, Errors};
 #[cfg(feature = "effect")]
 use bevy_mettle_effect::code::{CalculationRegistry, ExecutionRegistry, RouteRegistry};
 #[cfg(feature = "effect")]
@@ -21,8 +21,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::MettleSystems;
 
-/// The game's content, all of it: tags, curves, effects, abilities and what
-/// effects grant.
+/// The game's content, all of it: tags, curves, effects and abilities.
+///
+/// Tags, curves, effects, abilities, and what effects grant.
 ///
 /// Mettle doesn't load anything: the game reads its files however it likes
 /// and inserts this as a resource, as the app is built or again on a reload. As
@@ -88,11 +89,11 @@ impl MettleContent {
     ///
     /// Everything wrong, at once. Effects are checked once the tags and the
     /// curves hold, and abilities once the effects do.
-    pub fn check(&self, world: &World) -> Result<(), MettleErrors> {
+    pub fn check(&self, world: &World) -> Result<(), Errors> {
         self.checked(world).map(|_| ())
     }
 
-    fn checked(&self, world: &World) -> Result<Checked, MettleErrors> {
+    fn checked(&self, world: &World) -> Result<Checked, Errors> {
         let mut errors = Vec::new();
         // The content's tags, with those code adds.
         let tags = held(
@@ -146,7 +147,7 @@ impl MettleContent {
                 #[cfg(feature = "ability")]
                 abilities: abilities.expect("checked"),
             }),
-            _ => Err(MettleErrors(errors)),
+            _ => Err(Errors(errors)),
         }
     }
 }
@@ -158,7 +159,7 @@ fn resource<R: Resource + Clone + Default>(world: &World) -> R {
 }
 
 /// What `result` built, its errors kept in `errors`.
-fn held<T>(result: Result<T, MettleErrors>, errors: &mut Vec<MettleError>) -> Option<T> {
+fn held<T>(result: Result<T, Errors>, errors: &mut Vec<Error>) -> Option<T> {
     result.map_err(|wrong| errors.extend(wrong.0)).ok()
 }
 
@@ -170,11 +171,12 @@ pub struct ContentLoaded;
 #[derive(Event, Debug, Clone, PartialEq)]
 pub struct ContentRejected {
     /// Everything wrong with it.
-    pub errors: MettleErrors,
+    pub errors: Errors,
 }
 
-/// Loads [`MettleContent`] as it changes, before any part runs: checked, then
-/// its tag tree, curves and registries replaced, or rejected.
+/// Loads [`MettleContent`] as it changes, before any part runs, or rejects it.
+///
+/// Checked, then its tag tree, curves and registries replaced, or rejected.
 ///
 /// Inserted as the app is built, it's loaded in `PreStartup`, for `Startup`
 /// systems to grant and apply what it defines; inserted or changed later, in

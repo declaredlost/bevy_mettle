@@ -1,6 +1,6 @@
 //! How applying an effect again stacks.
 
-use bevy_mettle_core::Id;
+use bevy_mettle_core::registry::Name;
 use serde::{Deserialize, Serialize};
 
 use crate::data::AnyEffect;
@@ -17,11 +17,11 @@ use crate::data::AnyEffect;
 /// apart. At the limit, applying again applies `overflow` instead of the
 /// effect's own `on_apply`.
 ///
-/// Its overflow effects are named (`E`, an `Id<AnyEffect>`) in data, and
+/// Its overflow effects are named (`E`, an `Name<AnyEffect>`) in data, and
 /// numbered (an [`EffectId`](crate::EffectId)) once checked.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Stacking<E = Id<AnyEffect>> {
+pub struct Stacking<E = Name<AnyEffect>> {
     /// Whose stacks are one: everyone's on the target, unless it says.
     #[serde(default)]
     pub by: StackBy,
@@ -83,7 +83,7 @@ pub enum Reapply {
     Keep,
 }
 
-/// What running out of time does to a stacked effect.
+/// What running out of time does to a stacked effect: clear, drop one, refresh.
 #[derive(
     Debug,
     Clone,

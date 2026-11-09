@@ -138,9 +138,7 @@ fn take_back(mut world: DeferredWorld, context: HookContext) {
 #[relationship(relationship_target = ActiveEffects)]
 pub struct EffectOf(pub Entity);
 
-/// On an actor: the effects on it, kept by [`EffectOf`].
-///
-/// Despawning the actor despawns them.
+/// On an actor: the effects on it, kept by [`EffectOf`] and despawned with it.
 #[derive(Component, Debug, Default)]
 #[relationship_target(relationship = EffectOf, linked_spawn)]
 pub struct ActiveEffects(Vec<Entity>);

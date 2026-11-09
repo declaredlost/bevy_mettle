@@ -22,9 +22,6 @@ fn a_modifier_is_written_by_number() {
                 len: 6,
             },
             Token::Str("attribute"),
-            Token::NewtypeStruct {
-                name: "AttributeId",
-            },
             Token::U32(index),
             Token::Str("op"),
             Token::UnitVariant {

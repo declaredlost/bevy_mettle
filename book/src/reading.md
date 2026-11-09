@@ -134,14 +134,14 @@ fn fireball_damage(
 `value` is `None` if the actor doesn't have the attribute. With nothing in
 play, read `Current<A>` instead: it's already worked out.
 
-The reader also has `value_at`, which names the attribute by id rather than
+The reader also has `value_at`, which names the attribute by number rather than
 by type, `breakdown` and `breakdown_at` (below), and `owned`, an actor's
 owned tags.
 
 ## On the world
 
 [`AttributeWorld`] does the same on a `World`, for exclusive systems, effect
-code and tests. It names attributes by id: `value_at`, `breakdown_at` and
+code and tests. It names attributes by number: `value_at`, `breakdown_at` and
 `base_at`.
 
 It also changes a base the way an instant effect does. `apply_to_base`

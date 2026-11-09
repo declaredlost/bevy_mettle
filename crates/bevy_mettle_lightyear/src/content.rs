@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::MettleChannel;
 
 /// How content is numbered: each registry's
-/// [`fingerprint`](bevy_mettle_core::Registry::fingerprint).
+/// [`fingerprint`](bevy_mettle_core::registry::Registry::fingerprint).
 ///
 /// The same on a client and its server when they number content the same, so
 /// what one sends by number names the same thing to the other. A server sends
@@ -49,8 +49,9 @@ impl ContentFingerprint {
     }
 }
 
-/// Triggered on a client whose content is numbered unlike its server's: what
-/// either sends by number would name something else to the other.
+/// Triggered on a client whose content is numbered unlike its server's.
+///
+/// What either sends by number would name something else to the other.
 ///
 /// Logged as an error too. Load the server's content (the same content,
 /// reloaded the same way), or leave: nothing stops the numbers mismatching.

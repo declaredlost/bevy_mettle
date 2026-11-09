@@ -3,6 +3,8 @@
 
 use bevy::prelude::*;
 use bevy_harness::TestApp;
+use bevy_mettle::core::Error;
+use bevy_mettle::core::registry::Name;
 use bevy_mettle::prelude::*;
 
 use crate::common::{
@@ -112,7 +114,7 @@ fn tags() -> TagRegistry {
 
 fn curves() -> CurveRegistry {
     CurveRegistry::build(&[LevelCurve {
-        id: Id::from_static("damage"),
+        name: Name::from_static("damage"),
         interpolation: Interpolation::Linear,
         keys: vec![(1.0, 10.0), (11.0, 110.0)],
     }])
@@ -378,7 +380,7 @@ fn stacks_count_their_modifiers_up_to_a_limit_then_overflow() {
             reapply: Reapply::Refresh,
             reset_period: false,
             expire: Expire::RemoveOne,
-            overflow: vec![Id::from_static("frenzy")],
+            overflow: vec![Name::from_static("frenzy")],
         });
     let frenzy = EffectData::instant("frenzy").modifier(flat::<Strength>(1.0));
     let mut app = app(&[rage, frenzy], |app| {
@@ -459,7 +461,7 @@ fn magnitudes_come_from_curves_params_attributes_and_code() {
     ));
     let custom = EffectData::instant("custom").modifier(EffectModifier::new::<Damage>(
         Operation::Flat,
-        Magnitude::Custom(Id::from_static("level_squared")),
+        Magnitude::Custom(Name::from_static("level_squared")),
     ));
     let mut app = app(&[curve, param, captured, custom], |app| {
         app.add_calculation::<LevelSquared>(|context: &EffectContext| {
@@ -632,7 +634,7 @@ fn an_effect_left_out_is_as_new() {
                 name: "EffectData",
                 len: 2,
             },
-            Token::Str("id"),
+            Token::Str("name"),
             Token::Str("burning"),
             Token::Str("duration"),
             Token::NewtypeVariant {
@@ -680,7 +682,7 @@ fn an_effect_with_everything_checks() {
 
 #[test]
 fn a_registry_reports_everything_wrong_at_once() {
-    let focus = EffectModifier::named(Id::from_static("focus"), Operation::Flat, 1.0);
+    let focus = EffectModifier::named(Name::from_static("focus"), Operation::Flat, 1.0);
     let bad = EffectData::instant("bad")
         .modifier(focus)
         .tag("effect.unknown")
@@ -750,7 +752,7 @@ fn executions_need_an_instant_effect_or_a_period() {
 
 #[test]
 fn an_effect_whose_duration_cant_be_isnt_applied() {
-    let numb = EffectData::lasting("numb", Magnitude::Custom(Id::from_static("nan")))
+    let numb = EffectData::lasting("numb", Magnitude::Custom(Name::from_static("nan")))
         .modifier(flat::<Damage>(5.0));
     let mut app = app(&[numb], |app| {
         app.add_calculation::<Nan>(|_: &EffectContext| f32::NAN)
@@ -903,9 +905,9 @@ fn code_naming_an_effect_content_lacks_fails_the_check() {
     let errors = named
         .recheck(&[EffectData::instant("hit")], checks)
         .unwrap_err();
-    let missing = MettleError::NotInContent {
+    let missing = Error::NotInContent {
         kind: "effect",
-        id: "burning".to_owned(),
+        name: "burning".to_owned(),
     };
     assert!(errors.0.contains(&missing), "{errors}");
     assert!(

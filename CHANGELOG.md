@@ -102,7 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Numbers, as Bevy's `ComponentId`: attributes, behaviours, routes,
   executions and calculations each get a number as they're added
   (`AttributeId`, `BehaviourId`, `RouteId`, `ExecutionId`,
-  `CalculationId`, made with core's `number!`), and everything that runs
+  `CalculationId`, each a `Key` of its kind), and everything that runs
   knows them by it: actors' state, modifiers, changes, events and the
   network. Names stay for data, debug output and what a client shows.
   - Typed code finds them: `world.attribute_id::<A>()`,
@@ -142,8 +142,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by string. Content keeps naming them by name.
   - The data structs are `EffectData` and `AbilityData`. Content names are
     typed by `Any*` markers, as routes, attributes and behaviours were:
-    `Id<AnyEffect>`, `Id<AnyAbility>`, `Id<AnyCurve>`, `Id<AnyExecution>`,
-    `Id<AnyCalculation>`.
+    `Name<AnyEffect>`, `Name<AnyAbility>`, `Name<AnyCurve>`,
+    `Name<AnyExecution>`, `Name<AnyCalculation>`. Content structs hold their
+    name in `name`, not `id`.
   - `#[derive(Effect)] struct Burning;` is the effect content defines as
     `burning`, added with `add_effect::<Burning>()`. The type is its spec:
     `apply_effect(Burning)`, `apply_effect(Burning.level(3.0).param(..))`.
@@ -159,7 +160,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `#[derive(Execution)]` and `#[derive(Calculation)]`, added with
     `add_execution::<T>(f)` and `add_calculation::<T>(f)`, as routes are.
   - Content without an effect or ability code adds fails its check
-    (`MettleError::NotInContent`), so a misspelled name is caught as content
+    (`Error::NotInContent`), so a misspelled name is caught as content
     loads.
   - `EffectContext` has the effect's `def`.
 - Content is numbered, as Bevy numbers components: `EffectId`, `AbilityId`,
@@ -190,9 +191,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     lightyear, a server tells each client its `ContentFingerprint` as it
     connects and as its content changes; a client numbering content
     otherwise logs an error and triggers `ContentMismatch`.
-- Every registry is one shape, `Registry<I, T>` in core, as Bevy's
-  `Components` is: entries by number, numbers by name and by type, and
-  `get`, `id`, `id_of`, `name`, `iter` and `fingerprint` alike.
+- Names and numbers are told apart, each typed by a `Kind`
+  (`#[derive(Kind)]`, an empty enum such as `AnyEffect`): `Id<T>` is
+  `Name<K>`, what content names something by, and `Key<K>` is its number.
+  `EffectId` is `Key<AnyEffect>`, and so on for every kind; `number!` and
+  `IdTarget` are gone.
+- Core is reached by its modules: names, keys and registries are all in
+  `registry` (`Name`, `Kind`, `Key`, `Registry`). Nothing else is
+  re-exported at its root but `Error` and `Errors`, which were
+  `MettleError` and `MettleErrors`, and aren't in its prelude.
+- Every registry is one shape, `Registry<K, T>` in core, as Bevy's
+  `Components` is: entries of kind `K` by number, numbers by name and by
+  type, and `get`, `id`, `id_of`, `name`, `iter` and `fingerprint` alike.
   - Two types adding something by one name panic, naming both: data
     couldn't tell them apart.
   - `EffectRegistry::check` and `AbilityRegistry::check` make a registry
@@ -239,7 +249,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MettleNetPlugin { replicas: Replicas::Everyone }` sends them to all.
 
 - Behaviours are `#[derive(Behaviour)]`, named as data names them, and added
-  with `add_behaviour::<B>()`; their ids are `Id<AnyBehaviour>`. They're in
+  with `add_behaviour::<B>()`; content names them by `Name<AnyBehaviour>`. They're in
   `bevy_mettle_ability::behaviour`, code apart from `data`, as effects'
   executions are in `effect::code`.
 - An ability whose behaviour takes input can't have triggers.
@@ -270,7 +280,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overflow) keeps a spec naming itself, not the effect that chained it.
 - An actor's attribute slots compare by what they hold: one taken off past
   the last no longer counts as a change.
-- `number!` works from a crate depending only on `bevy_mettle`.
 - An ability committing as it activates pays before it starts: before
   what it cancels, grants or cues, and before its behaviour. One that can't
   pay by then fails with `Failure::Cost` with nothing started, rather than

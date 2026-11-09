@@ -1,5 +1,4 @@
-//! The untyped layer: attributes by number, their rules, and each actor's
-//! state.
+//! The untyped layer: attributes by number, their rules, and actors' state.
 //!
 //! What data names them by, and what's told as values change.
 
@@ -8,15 +7,15 @@ mod rules;
 pub(crate) mod state;
 
 use bevy::prelude::*;
-use bevy_mettle_core::{Id, MettleError, Registry};
+use bevy_mettle_core::Error;
+use bevy_mettle_core::registry::{Name, Registry};
 
 pub use self::events::AttributeChanged;
 pub use self::rules::{AnyAttribute, AttributeId, Bound, Limit, OnLimit, Rounding};
 pub use self::state::AttributeState;
 use crate::{Attribute, Base};
 
-/// What an app knows of one attribute: its number, its name, its rules, and
-/// access to its base.
+/// What an app knows of one attribute: its number, name, rules and base.
 ///
 /// It reaches the attribute's [`Base`] on an actor without its type.
 #[derive(Clone)]
@@ -72,15 +71,14 @@ impl AttributeInfo {
     }
 }
 
-/// The attributes an app has: each one's info by its number, and its number by
-/// its type and by its name.
+/// The attributes an app has: info by number, and numbers by type and by name.
 ///
 /// Added to with [`add_attribute`](AttributeApp::add_attribute), which gives
 /// each the next number, as Bevy numbers components: the same app adds them in
 /// the same order, on a server and its clients alike. Read as a [`Registry`]:
 /// `get(id)`, `id(name)`, `id_of::<A>()`, `name(id)`, `iter()`.
 #[derive(Resource, Deref, Clone, Default)]
-pub struct AttributeRegistry(Registry<AttributeId, AttributeInfo>);
+pub struct AttributeRegistry(Registry<AnyAttribute, AttributeInfo>);
 
 impl AttributeRegistry {
     /// The number of the attribute data names `name`, named within `within` if
@@ -91,11 +89,11 @@ impl AttributeRegistry {
     /// If there's no such attribute.
     pub fn resolve(
         &self,
-        name: &Id<AnyAttribute>,
+        name: &Name<AnyAttribute>,
         within: Option<&str>,
-    ) -> Result<AttributeId, MettleError> {
+    ) -> Result<AttributeId, Error> {
         self.id(name.as_str())
-            .ok_or_else(|| MettleError::unknown::<AnyAttribute>(name.as_str(), within))
+            .ok_or_else(|| Error::unknown::<AnyAttribute>(name.as_str(), within))
     }
 
     /// Adds `A`: its number, and whether it's new.

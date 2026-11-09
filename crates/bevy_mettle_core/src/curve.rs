@@ -1,4 +1,4 @@
-//! Curve tables: values by level, from data, sampled as Bevy's curves.
+//! Curves: values by level from content, sampled as Bevy's curves, numbered.
 
 use std::sync::Arc;
 
@@ -11,7 +11,8 @@ use bevy_platform::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
-use crate::{Id, IdTarget, MettleError, MettleErrors, Registry};
+use crate::error::{Error, Errors};
+use crate::registry::{Key, Kind, Name, Registry};
 
 /// How a curve goes between its keys: held, straight, or eased.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
@@ -26,23 +27,24 @@ pub enum Interpolation {
     Ease(EaseFunction),
 }
 
-/// A curve's name in content: what an `Id<AnyCurve>` is, before it's resolved
-/// to a [`CurveId`].
-#[derive(IdTarget)]
-#[id_target(name = "curve")]
+/// The curve kind: what a `Name<AnyCurve>` names and a [`CurveId`] numbers.
+///
+/// A curve's name in content is a `Name<AnyCurve>`, until it's resolved to a
+/// [`CurveId`].
+#[derive(Kind)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnyCurve {}
 
 /// A curve: a value by level, from keys `(level, value)` with levels rising.
 ///
 /// What an effect's magnitude scales by, as Unreal's `ScalableFloat` does;
-/// defined in data, and named by an `Id<AnyCurve>`.
+/// defined in data, and named by an `Name<AnyCurve>`.
 ///
 /// ```
 /// # use bevy_mettle_core::prelude::*;
 /// # use bevy_curve::EaseFunction;
 /// let damage = LevelCurve {
-///     id: "fireball.damage".into(),
+///     name: "fireball.damage".into(),
 ///     interpolation: Interpolation::Ease(EaseFunction::QuadraticIn),
 ///     keys: vec![(1.0, 10.0), (10.0, 85.0), (20.0, 240.0)],
 /// };
@@ -51,7 +53,7 @@ pub enum AnyCurve {}
 #[serde(deny_unknown_fields)]
 pub struct LevelCurve {
     /// Its name.
-    pub id: Id<AnyCurve>,
+    pub name: Name<AnyCurve>,
     /// How it goes between keys: linearly, unless it says.
     #[serde(default)]
     pub interpolation: Interpolation,
@@ -103,11 +105,10 @@ impl LevelCurve {
     }
 }
 
-crate::number! {
-    /// A curve's number in the [`CurveRegistry`]: what magnitudes scale by once
-    /// content is checked.
-    pub struct CurveId;
-}
+/// A curve's number in the [`CurveRegistry`]: what magnitudes scale by.
+///
+/// Magnitudes name a curve by number once content is checked.
+pub type CurveId = Key<AnyCurve>;
 
 /// The curves there are, checked, built as Bevy's curves, and numbered.
 ///
@@ -117,7 +118,7 @@ crate::number! {
 /// `name(id)`, `iter()`. Cheap to clone; empty by default. A resource: the
 /// curves the app's content was checked against.
 #[derive(Resource, Debug, Clone, Default)]
-pub struct CurveRegistry(Registry<CurveId, Arc<Built>>);
+pub struct CurveRegistry(Registry<AnyCurve, Arc<Built>>);
 
 impl CurveRegistry {
     /// Checks and builds `definitions`, numbered in order of name.
@@ -127,7 +128,7 @@ impl CurveRegistry {
     /// Every curve defined twice, or whose keys can't be.
     pub fn build<'a>(
         definitions: impl IntoIterator<Item = &'a LevelCurve>,
-    ) -> Result<Self, MettleErrors> {
+    ) -> Result<Self, Errors> {
         Self::default().rebuild(definitions)
     }
 
@@ -141,27 +142,30 @@ impl CurveRegistry {
     pub fn rebuild<'a>(
         &self,
         definitions: impl IntoIterator<Item = &'a LevelCurve>,
-    ) -> Result<Self, MettleErrors> {
+    ) -> Result<Self, Errors> {
         let mut errors = Vec::new();
         let mut built: HashMap<SmolStr, Arc<Built>> = HashMap::new();
         for def in definitions {
             match def.build() {
                 Ok(curve) => {
-                    if built.insert(SmolStr::new(def.id.as_str()), curve).is_some() {
-                        errors.push(MettleError::Duplicate {
+                    if built
+                        .insert(SmolStr::new(def.name.as_str()), curve)
+                        .is_some()
+                    {
+                        errors.push(Error::Duplicate {
                             kind: AnyCurve::NAME,
-                            id: def.id.to_string(),
+                            name: def.name.to_string(),
                         });
                     }
                 }
-                Err(what) => errors.push(MettleError::Invalid {
+                Err(what) => errors.push(Error::Invalid {
                     what: format!("a curve {what}"),
-                    within: Some(def.id.to_string()),
+                    within: Some(def.name.to_string()),
                 }),
             }
         }
         if !errors.is_empty() {
-            return Err(MettleErrors(errors));
+            return Err(Errors(errors));
         }
         let mut names: Vec<SmolStr> = built.keys().cloned().collect();
         names.sort_unstable();
@@ -193,19 +197,15 @@ impl CurveRegistry {
     /// # Errors
     ///
     /// If there's no such curve.
-    pub fn known(
-        &self,
-        curve: &Id<AnyCurve>,
-        within: Option<&str>,
-    ) -> Result<CurveId, MettleError> {
+    pub fn known(&self, curve: &Name<AnyCurve>, within: Option<&str>) -> Result<CurveId, Error> {
         self.id(curve.as_str())
-            .ok_or_else(|| MettleError::unknown::<AnyCurve>(curve.as_str(), within))
+            .ok_or_else(|| Error::unknown::<AnyCurve>(curve.as_str(), within))
     }
 }
 
 /// Read as the [`Registry`] of each curve, built, by number.
 impl std::ops::Deref for CurveRegistry {
-    type Target = Registry<CurveId, Arc<Built>>;
+    type Target = Registry<AnyCurve, Arc<Built>>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -218,7 +218,7 @@ mod tests {
 
     fn table(interpolation: Interpolation) -> CurveRegistry {
         CurveRegistry::build(&[LevelCurve {
-            id: Id::from_static("damage"),
+            name: Name::from_static("damage"),
             interpolation,
             keys: vec![(1.0, 10.0), (10.0, 100.0), (20.0, 300.0)],
         }])
@@ -247,7 +247,7 @@ mod tests {
     #[test]
     fn a_single_key_is_its_value_everywhere() {
         let table = CurveRegistry::build(&[LevelCurve {
-            id: Id::from_static("flat"),
+            name: Name::from_static("flat"),
             interpolation: Interpolation::Linear,
             keys: vec![(1.0, 7.0)],
         }])
@@ -257,7 +257,7 @@ mod tests {
 
     fn curve(name: &'static str) -> LevelCurve {
         LevelCurve {
-            id: Id::from_static(name),
+            name: Name::from_static(name),
             interpolation: Interpolation::Linear,
             keys: vec![(1.0, 1.0)],
         }
@@ -278,7 +278,7 @@ mod tests {
     #[test]
     fn a_curve_table_checks_its_keys() {
         let mut def = LevelCurve {
-            id: Id::from_static("damage"),
+            name: Name::from_static("damage"),
             interpolation: Interpolation::Linear,
             keys: vec![(10.0, 100.0), (1.0, 10.0)],
         };

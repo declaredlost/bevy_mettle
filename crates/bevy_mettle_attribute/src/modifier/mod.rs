@@ -1,4 +1,4 @@
-//! Modifiers: what sources hold, and attributes fold.
+//! Modifiers: what sources hold, and attributes fold into their current values.
 
 mod operation;
 mod replica;
@@ -6,7 +6,7 @@ mod sources;
 mod spec;
 
 use bevy::prelude::*;
-use bevy_mettle_core::MettleError;
+use bevy_mettle_core::Error;
 use bevy_mettle_core::condition::{Condition, ConditionOver};
 use bevy_mettle_core::tag::{TagKey, TagRegistry};
 use serde::{Deserialize, Serialize};
@@ -205,11 +205,7 @@ impl Modifier {
     /// # Errors
     ///
     /// The first that isn't.
-    pub fn check(
-        &self,
-        attributes: &AttributeRegistry,
-        tags: &TagRegistry,
-    ) -> Result<(), MettleError> {
+    pub fn check(&self, attributes: &AttributeRegistry, tags: &TagRegistry) -> Result<(), Error> {
         self.check_values(attributes)?;
         match &self.condition {
             Some(condition) => condition.check(tags, None),
@@ -219,8 +215,8 @@ impl Modifier {
 
     /// Checks its attributes and numbers, its condition's too, not its tags:
     /// what folding needs, without the tag tree.
-    pub(crate) fn check_values(&self, attributes: &AttributeRegistry) -> Result<(), MettleError> {
-        let invalid = |what: String| MettleError::Invalid { what, within: None };
+    pub(crate) fn check_values(&self, attributes: &AttributeRegistry) -> Result<(), Error> {
+        let invalid = |what: String| Error::Invalid { what, within: None };
         let name = |attribute: AttributeId| {
             attributes
                 .get(attribute)

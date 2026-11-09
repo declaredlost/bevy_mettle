@@ -51,7 +51,7 @@ fn effects() -> Vec<EffectData> {
     ]
 }
 # let burning = &effects()[0];
-# assert_eq!(burning.id.as_str(), "burning");
+# assert_eq!(burning.name.as_str(), "burning");
 # assert!(burning.lasts());
 ```
 
@@ -63,7 +63,7 @@ defaults. [Loading data](loading-data.md) says more.
 
 ## Naming effects in code
 
-Content names effects by string, since it's data: an `Id<AnyEffect>`. Code names an effect by
+Content names effects by string, since it's data: an `Name<AnyEffect>`. Code names an effect by
 its type, as it does a [tag](tags.md#tags-in-code). Derive [`Effect`] on a
 unit struct, and add it to the app:
 
@@ -99,12 +99,12 @@ it an ability to grant.
 
 ## Fields
 
-Only `id` and `duration` are required. Everything else is empty unless the
+Only `name` and `duration` are required. Everything else is empty unless the
 effect says.
 
 | Field | What it does |
 |---|---|
-| `id` | Its name: what content and an [`Effect`] type call it by |
+| `name` | What content and an [`Effect`] type call it by |
 | `tags` | What it is: what removal, immunity and requirements match on |
 | `duration` | `Instant`, `Infinite`, or `For(..)` so many seconds |
 | `period` | Executes every so often while it lasts, instead of its modifiers counting all along |
@@ -285,6 +285,7 @@ To ask before inserting it, call [`MettleContent::check`]:
 ```rust
 # use bevy::prelude::*;
 # use bevy_mettle::prelude::*;
+# use bevy_mettle::core::Errors;
 # #[derive(Attribute)]
 # #[attribute(base = 100.0, min = 0.0, max = MaxLife)]
 # struct Life;
@@ -354,7 +355,7 @@ assert_eq!(
     errors.to_string(),
     "code names effect `frostbite`, which content doesn't define"
 );
-# Ok::<(), MettleErrors>(())
+# Ok::<(), Errors>(())
 ```
 
 Mettle doesn't load files. The game reads them however it likes and hands

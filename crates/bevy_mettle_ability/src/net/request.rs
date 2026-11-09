@@ -1,5 +1,7 @@
-//! Asking the server to activate an ability, and its answer: predicted on the
-//! client, served on the server, resolved as it comes back.
+//! Asking the server to activate an ability: predicted, served, and resolved.
+//!
+//! The ask and its answer: predicted on the client, served on the server,
+//! resolved as it comes back.
 
 use std::any::TypeId;
 
@@ -37,9 +39,10 @@ impl MapEntities for AbilityRequest {
     }
 }
 
-/// A client's ask that the server activate an ability with its input, which
-/// it already predicts: an [`AbilityRequest`], and the input it activated it
-/// with.
+/// A client's ask that the server activate an ability with its input.
+///
+/// One it already predicts: an [`AbilityRequest`], and the input it activated
+/// it with.
 #[derive(Message, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AbilityRequestWith<I> {
     /// The actor.

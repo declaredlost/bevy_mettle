@@ -58,7 +58,7 @@ pub enum Blocked {
     StackLimit,
 }
 
-/// What an execution changed one attribute's base by.
+/// What an execution changed one attribute's base by, such as damage taken.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Delta {
     /// The attribute.
@@ -68,7 +68,7 @@ pub struct Delta {
     pub delta: f32,
 }
 
-/// What an execution dealt one route, before its router.
+/// What an execution dealt one route, before its router turned it into changes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Routed {
     /// The route.
@@ -99,8 +99,9 @@ pub struct EffectExecuted {
     pub routed: Vec<Routed>,
 }
 
-/// An active effect taken off an actor: run out of time (`expired`), or
-/// removed.
+/// An active effect taken off an actor: run out of time, or removed.
+///
+/// Whether it ran out of time is `expired`.
 #[derive(EntityEvent, Debug, Clone, PartialEq, Eq)]
 pub struct EffectRemoved {
     /// The actor.

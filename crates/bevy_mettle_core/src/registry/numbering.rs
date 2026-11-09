@@ -6,7 +6,7 @@ use std::hash::Hash;
 
 use bevy_platform::collections::HashMap;
 
-/// The numbers of what content names: effects, abilities, curves, tags.
+/// The numbers of what a registry holds, by name.
 ///
 /// What a registry keeps beside its entries, as Bevy's `Components` keeps
 /// each component's `ComponentId`. Numbered in the order names are given, so
@@ -18,7 +18,7 @@ use bevy_platform::collections::HashMap;
 /// number (an active effect, a replica) still names the same thing. New names
 /// are numbered after the last; a name gone leaves its number empty.
 #[derive(Debug, Clone)]
-pub struct Numbering<K> {
+pub(crate) struct Numbering<K> {
     names: Vec<Option<K>>,
     numbers: HashMap<K, u32>,
 }
@@ -41,7 +41,7 @@ impl<K: Hash + Eq + Clone> Numbering<K> {
     ///
     /// Past 2^32 numbers.
     #[must_use]
-    pub fn renumbered(&self, names: impl IntoIterator<Item = K>) -> Self {
+    pub(crate) fn renumbered(&self, names: impl IntoIterator<Item = K>) -> Self {
         let mut next = Self {
             names: vec![None; self.names.len()],
             numbers: HashMap::default(),
@@ -67,7 +67,7 @@ impl<K: Hash + Eq + Clone> Numbering<K> {
     /// # Panics
     ///
     /// Past 2^32 numbers.
-    pub fn push(&mut self, name: K) -> u32 {
+    pub(crate) fn push(&mut self, name: K) -> u32 {
         if let Some(&number) = self.numbers.get(&name) {
             return number;
         }
@@ -79,7 +79,7 @@ impl<K: Hash + Eq + Clone> Numbering<K> {
 
     /// `name`'s number, if it's numbered.
     #[must_use]
-    pub fn number<Q>(&self, name: &Q) -> Option<u32>
+    pub(crate) fn number<Q>(&self, name: &Q) -> Option<u32>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
@@ -89,32 +89,27 @@ impl<K: Hash + Eq + Clone> Numbering<K> {
 
     /// The name numbered `number`, if one is.
     #[must_use]
-    pub fn name(&self, number: u32) -> Option<&K> {
+    pub(crate) fn name(&self, number: u32) -> Option<&K> {
         self.names.get(number as usize)?.as_ref()
     }
 
     /// How many numbers there are, empty ones too: one past the last.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.names.len()
     }
 
     /// Whether nothing's numbered, or ever was.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.names.is_empty()
     }
 
     /// Every name with its number, in order of number.
-    pub fn iter(&self) -> impl Iterator<Item = (u32, &K)> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (u32, &K)> {
         (0u32..)
             .zip(&self.names)
             .filter_map(|(number, name)| Some((number, name.as_ref()?)))
-    }
-
-    /// Every number, in order, with its name if it has one.
-    pub fn slots(&self) -> impl Iterator<Item = Option<&K>> {
-        self.names.iter().map(Option::as_ref)
     }
 }
 

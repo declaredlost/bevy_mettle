@@ -1,4 +1,4 @@
-//! `#[derive(IdTarget)]` and `#[derive(Tag)]`, re-exported by
+//! `#[derive(Kind)]` and `#[derive(Tag)]`, re-exported by
 //! `bevy_mettle_core`;
 //! `#[derive(Attribute)]`, by `bevy_mettle_attribute`;
 //! `#[derive(Effect)]`, `#[derive(Route)]`, `#[derive(Execution)]` and
@@ -12,7 +12,7 @@ mod behaviour;
 mod calculation;
 mod effect;
 mod execution;
-mod id_target;
+mod kind;
 mod route;
 mod shared;
 mod tag;
@@ -35,7 +35,7 @@ pub fn derive_attribute(input: TokenStream) -> TokenStream {
         .into()
 }
 
-/// A route: a marker type, its name on `#[route(..)]`.
+/// A route effects deal: a marker type, its name on `#[route(..)]`.
 ///
 /// ```ignore
 /// #[derive(Route)]
@@ -122,22 +122,19 @@ pub fn derive_behaviour(input: TokenStream) -> TokenStream {
         .into()
 }
 
-/// Derives `IdTarget`: named as the type is in `snake_case`, unless overridden.
+/// A kind of thing content names, named in messages after its type.
 ///
-/// Override with `#[id_target(name = "..")]`.
+/// Named as the type is in `snake_case`, without a leading `Any`, unless
+/// `#[kind(name = "..")]` says otherwise.
 ///
 /// ```ignore
-/// #[derive(IdTarget)]
-/// pub struct EffectData { pub id: Id<AnyEffect>, .. }
-///
-/// #[derive(IdTarget)]
-/// #[id_target(name = "curve")]
-/// pub struct LevelCurve { .. }
+/// #[derive(Kind)]
+/// pub enum AnyEffect {}
 /// ```
-#[proc_macro_derive(IdTarget, attributes(id_target))]
-pub fn derive_id_target(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(Kind, attributes(kind))]
+pub fn derive_kind(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    id_target::expand(&input)
+    kind::expand(&input)
         .unwrap_or_else(Error::into_compile_error)
         .into()
 }

@@ -53,7 +53,7 @@ impl EffectCommands for EntityCommands<'_> {
     }
 }
 
-/// Applying and removing effects on the world, at once.
+/// Applying and removing effects on the world at once, not as commands.
 ///
 /// In an exclusive system, or a test.
 pub trait EffectWorld {

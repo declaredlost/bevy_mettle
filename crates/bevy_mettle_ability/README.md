@@ -18,7 +18,7 @@ can do, granted to it, activated, paid for, cooled down and ended.
 
 ## Overview
 
-- An [`Ability`] is data, named by an id: the behaviour that runs it, its
+- An [`AbilityData`] is content, named by its name: the behaviour that runs it, its
   cost and cooldown (effects), what it needs and what blocks it, what it
   cancels and blocks while active, the tags it grants, and what triggers
   it.
@@ -181,7 +181,7 @@ for development setup and guidelines.
 Licensed under either of [Apache License, Version 2.0](https://github.com/declaredlost/bevy_mettle/blob/main/LICENSE-APACHE)
 or [MIT license](https://github.com/declaredlost/bevy_mettle/blob/main/LICENSE-MIT) at your option.
 
-[`Ability`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/data/struct.Ability.html
+[`AbilityData`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/data/struct.AbilityData.html
 [`add_behaviour`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/behaviour/trait.BehaviourApp.html#tymethod.add_behaviour
 [`AbilityRegistry`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilityRegistry.html
 [`Grant`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/data/struct.Grant.html

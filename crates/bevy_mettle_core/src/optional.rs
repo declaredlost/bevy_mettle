@@ -1,6 +1,5 @@
-//! Optional fields written bare: `condition: ReadTagged("fire")`, not
-//! `condition: Some(ReadTagged("fire"))`; left out when there's nothing. For a
-//! field with
+//! Optional fields written as their value, not wrapped in `Some`, and left out
+//! when there's nothing. For a field with
 //! `#[serde(default, with = "optional", skip_serializing_if =
 //! "Option::is_none")]`. Shared by the crates whose data has optional fields.
 
