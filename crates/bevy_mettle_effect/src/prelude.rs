@@ -8,7 +8,7 @@
 #[doc(no_inline)]
 pub use crate::active::{ActiveEffect, ActiveEffects, EffectOf};
 #[doc(no_inline)]
-pub use crate::code::{BaseChange, EffectCode, EffectCodeApp, EffectContext};
+pub use crate::code::{BaseChange, EffectCode, EffectCodeApp, EffectContext, MetaAttribute, Whose};
 #[doc(no_inline)]
 pub use crate::cue::{
     ActiveCue, ActiveCues, Cue, CueAdded, CueApp, CueCommands, CueEvent, CueExecuted, CueOf,
@@ -20,7 +20,7 @@ pub use crate::data::{
 };
 #[doc(no_inline)]
 pub use crate::events::{
-    Blocked, EffectApplied, EffectBlocked, EffectExecuted, EffectRemoved, EffectStacked,
+    Blocked, Delta, EffectApplied, EffectBlocked, EffectExecuted, EffectRemoved, EffectStacked,
 };
 #[doc(no_inline)]
 pub use crate::net::{EffectReplica, PredictedUnder, Proxy};

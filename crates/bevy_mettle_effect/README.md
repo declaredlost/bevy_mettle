@@ -33,9 +33,14 @@ often.
 - While it counts, a lasting effect's modifiers count for its target and
   the target owns what it grants; while inhibited, neither, and its time
   stands still.
+- Meta attributes are amounts no actor has, such as incoming damage: dealt
+  by effects, then routed by one router per meta attribute into the
+  attributes actors have, through shields into life, the same on a server
+  and a predicting client.
 - [`EffectApplied`], [`EffectStacked`], [`EffectBlocked`],
   [`EffectExecuted`] and [`EffectRemoved`] are triggered on the target, for
-  abilities and the game.
+  abilities and the game. [`EffectExecuted`] says what changed, on the
+  target and its source, and what each meta attribute was dealt.
 - Cues are what's shown of effects and abilities: lasting ones as entities
   on the actor while they hold, one-shots as they execute, run by the
   handler for their most specific tag, and replicated to every client that

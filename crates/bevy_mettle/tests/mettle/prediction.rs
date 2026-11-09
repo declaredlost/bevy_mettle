@@ -8,10 +8,21 @@ use bevy::prelude::*;
 use bevy_harness::TestApp;
 use bevy_mettle::prelude::*;
 
-use crate::common::{Mana, actor, attributes, close, get, own};
+use crate::common::{Mana, Strength, actor, attributes, close, get, own};
 
 #[derive(Component, Default, Behaviour)]
 struct Cast;
+
+/// A price paid in mana, and paid back in strength to whoever paid it.
+#[derive(MetaAttribute)]
+struct Price;
+
+fn route_price(_: &EffectContext, price: f32) -> Vec<BaseChange> {
+    vec![
+        BaseChange::new::<Mana>(Operation::Flat, -price),
+        BaseChange::new::<Strength>(Operation::Flat, 1.0).on_source(),
+    ]
+}
 
 /// Where a shot is aimed: how far along.
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
@@ -71,6 +82,7 @@ fn world(role: NetRole) -> TestApp {
         &[
             Effect::instant("fireball.cost")
                 .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
+            Effect::instant("bolt.cost").modifier(EffectModifier::meta::<Price>(20.0)),
             Effect::lasting("fireball.cooldown", 1.0).grant("cooldown.fireball"),
             Effect::instant("focus.cost")
                 .modifier(EffectModifier::new::<Mana>(Operation::Additive, -0.5)),
@@ -96,7 +108,7 @@ fn world(role: NetRole) -> TestApp {
             tags: &tags(),
             curves: &CurveTable::default(),
             attributes: &attributes,
-            code: &EffectCode::new(),
+            code: &EffectCode::new().meta_attribute::<Price>(route_price),
         },
     )
     .unwrap();
@@ -110,8 +122,11 @@ fn world(role: NetRole) -> TestApp {
         .commit(Commit::Manual);
     let focus = Ability::new("focus", "cast").cost("focus.cost");
     let shot = Ability::new("shot", "shoot").cost("fireball.cost");
+    let bolt = Ability::new("bolt", "cast")
+        .cost("bolt.cost")
+        .blocked_by("state.stunned");
     let abilities = AbilityRegistry::check(
-        &[fireball, charge, focus, shot],
+        &[fireball, charge, focus, shot, bolt],
         &[],
         AbilityChecks {
             tags: &tags(),
@@ -364,6 +379,43 @@ fn a_client_predicts_at_once_and_the_servers_own_replaces_it() {
         "the server's, shown"
     );
     assert!(owns(&game.client, game.here, "cooldown.fireball"));
+}
+
+#[test]
+fn what_a_cost_is_routed_into_is_predicted_and_undone_if_rejected() {
+    let mut game = Game::with(&["bolt"], &[]);
+    game.client
+        .world_mut()
+        .activate_ability(game.here, "bolt")
+        .unwrap();
+    game.client.tick();
+    assert!(close(get::<Mana>(&game.client, game.here), 10.0));
+    assert!(
+        close(get::<Strength>(&game.client, game.here), 11.0),
+        "paid back"
+    );
+
+    // The server stuns the mage first: it refuses, and both are undone.
+    own(&mut game.server, game.there, "state.stunned", true);
+    game.server.tick();
+    game.ask();
+    game.answer();
+    assert!(close(get::<Mana>(&game.client, game.here), 30.0));
+    assert!(close(get::<Strength>(&game.client, game.here), 10.0));
+}
+
+#[test]
+fn what_a_cost_is_routed_into_is_confirmed_as_the_server_has_it() {
+    let mut game = Game::with(&["bolt"], &[]);
+    game.client
+        .world_mut()
+        .activate_ability(game.here, "bolt")
+        .unwrap();
+    game.ask();
+    assert!(close(get::<Mana>(&game.server, game.there), 10.0));
+    assert!(close(get::<Strength>(&game.server, game.there), 11.0));
+    game.answer();
+    assert!(close(get::<Mana>(&game.client, game.here), 10.0));
 }
 
 #[test]

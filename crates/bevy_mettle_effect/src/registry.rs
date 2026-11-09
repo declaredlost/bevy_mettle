@@ -4,13 +4,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use bevy::prelude::*;
-use bevy_mettle_attribute::registry::AttributeRegistry;
+use bevy_mettle_attribute::modifier::Operation;
+use bevy_mettle_attribute::registry::{AnyAttribute, AttributeRegistry};
 use bevy_mettle_core::curve::CurveTable;
 use bevy_mettle_core::tag::TagTree;
 use bevy_mettle_core::{Id, MettleError, MettleErrors};
 
-use crate::code::{Calculation, CalculationFn, EffectCode, Execution, ExecutionFn};
-use crate::data::{Effect, EffectDuration, Magnitude};
+use crate::code::{Calculation, CalculationFn, EffectCode, Execution, ExecutionFn, RouterFn};
+use crate::data::{Effect, EffectDuration, EffectModifier, Magnitude};
 
 /// The effects there are, checked against the tags, curves and effect code.
 ///
@@ -39,6 +40,10 @@ impl std::fmt::Debug for EffectRegistry {
                 "calculations",
                 &self.code.calculations.keys().collect::<Vec<_>>(),
             )
+            .field(
+                "meta attributes",
+                &self.code.routers.keys().collect::<Vec<_>>(),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -64,7 +69,9 @@ impl EffectRegistry {
     ///
     /// Everything wrong with them, at once: effects defined twice; tags,
     /// curves, attributes, effects, executions and calculations named that
-    /// aren't; numbers that can't be; and what an instant effect can't have.
+    /// aren't; numbers that can't be; what an instant effect can't have; meta
+    /// attributes read, dealt other than flat, or held by a lasting effect;
+    /// and a meta attribute sharing an attribute's name.
     pub fn check(definitions: &[Effect], against: EffectChecks<'_>) -> Result<Self, MettleErrors> {
         let EffectChecks {
             tags,
@@ -82,6 +89,14 @@ impl EffectRegistry {
                 errors.push(MettleError::Duplicate {
                     kind: "effect",
                     id: def.id.to_string(),
+                });
+            }
+        }
+        for meta in code.routers.keys() {
+            if attributes.get(meta).is_some() {
+                errors.push(MettleError::Invalid {
+                    what: format!("an attribute and a meta attribute both named `{meta}`"),
+                    within: None,
                 });
             }
         }
@@ -118,6 +133,28 @@ impl EffectRegistry {
 
     pub(crate) fn execution(&self, id: &Id<Execution>) -> Option<&ExecutionFn> {
         self.code.executions.get(id)
+    }
+
+    /// The router of the meta attribute `id`, if it's one.
+    pub(crate) fn router(&self, id: &Id<AnyAttribute>) -> Option<&RouterFn> {
+        self.code.routers.get(id)
+    }
+
+    /// Checks `attribute` is one actors have, whose value can be read: not a
+    /// meta attribute, which has none.
+    fn readable(
+        &self,
+        attribute: &Id<AnyAttribute>,
+        attributes: &AttributeRegistry,
+        within: Option<&str>,
+    ) -> Result<(), MettleError> {
+        if self.router(attribute).is_some() {
+            return Err(MettleError::Invalid {
+                what: format!("reading meta attribute `{attribute}`: it has no value"),
+                within: within.map(ToOwned::to_owned),
+            });
+        }
+        attributes.check(attribute, within)
     }
 
     pub(crate) fn calculation(&self, id: &Id<Calculation>) -> Option<&CalculationFn> {
@@ -164,22 +201,7 @@ impl EffectRegistry {
             push(self.positive(&period.every, "a period", tags, attributes, within));
         }
         for modifier in &def.modifiers {
-            push(attributes.check(&modifier.attribute, within));
-            push(self.magnitude(&modifier.value, tags, attributes, within));
-            if let Some(condition) = &modifier.condition {
-                push(condition.check(tags, within));
-            }
-            if let Some(per) = &modifier.per {
-                push(attributes.check(&per.attribute, within));
-            }
-            if let Some(per) = &modifier.per
-                && !(per.every.is_finite() && per.every > 0.0)
-            {
-                push(Err(invalid(format!(
-                    "a modifier per {} {:?}",
-                    per.every, per.attribute
-                ))));
-            }
+            self.check_modifier(def, modifier, tags, attributes, &mut push);
         }
         for execution in &def.executions {
             if self.execution(execution).is_none() {
@@ -231,6 +253,52 @@ impl EffectRegistry {
         }
     }
 
+    /// Checks `def`'s `modifier`, pushing what's wrong to `push`.
+    fn check_modifier(
+        &self,
+        def: &Effect,
+        modifier: &EffectModifier,
+        tags: &TagTree,
+        attributes: &AttributeRegistry,
+        push: &mut impl FnMut(Result<(), MettleError>),
+    ) {
+        let within = Some(def.id.as_str());
+        let invalid = |what: String| MettleError::Invalid {
+            what,
+            within: within.map(ToOwned::to_owned),
+        };
+        if self.router(&modifier.attribute).is_some() {
+            if modifier.op != Operation::Flat {
+                push(Err(invalid(format!(
+                    "an {:?} modifier of meta attribute `{}`: it's dealt flat amounts only",
+                    modifier.op, modifier.attribute
+                ))));
+            }
+            if def.lasts() && def.period.is_none() {
+                push(Err(invalid(format!(
+                    "meta attribute `{}` on a lasting effect with no period: it's routed only as \
+                     an effect executes",
+                    modifier.attribute
+                ))));
+            }
+        } else {
+            push(attributes.check(&modifier.attribute, within));
+        }
+        push(self.magnitude(&modifier.value, tags, attributes, within));
+        if let Some(condition) = &modifier.condition {
+            push(condition.check(tags, within));
+        }
+        if let Some(per) = &modifier.per {
+            push(self.readable(&per.attribute, attributes, within));
+            if !(per.every.is_finite() && per.every > 0.0) {
+                push(Err(invalid(format!(
+                    "a modifier per {} {:?}",
+                    per.every, per.attribute
+                ))));
+            }
+        }
+    }
+
     /// Checks `magnitude` can be worked out.
     fn magnitude(
         &self,
@@ -240,7 +308,7 @@ impl EffectRegistry {
         within: Option<&str>,
     ) -> Result<(), MettleError> {
         if let Some(attribute) = magnitude.attribute() {
-            attributes.check(attribute, within)?;
+            self.readable(attribute, attributes, within)?;
         }
         let invalid = |what: String| MettleError::Invalid {
             what,

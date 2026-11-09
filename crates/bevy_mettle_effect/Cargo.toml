@@ -27,6 +27,8 @@ bevy_mettle_core = { workspace = true, features = [] }
 
 # Attributes, which effects change
 bevy_mettle_attribute = { workspace = true, features = [] }
+# The meta attribute derive
+bevy_mettle_macros = { workspace = true, features = [] }
 
 # Game engine
 bevy = { workspace = true, features = ["bevy_log", "serialize"] }

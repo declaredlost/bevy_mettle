@@ -46,12 +46,26 @@ assert_eq!(MaxResistance::NAME, "max_resistance");
 | `min = 0.0`, `min = Other` | The least it can be: a number, or another attribute's current value | none |
 | `max = ..` | The most it can be, like `min` | none |
 | `rounding = Down`, `Up`, `Nearest` | It's a whole number, rounded that way | none |
+| `on_limit = Clamp`, `Ratio` | What its base does as a limit that's another attribute moves | `Clamp` |
 | `name = ".."` | The name data uses for it | the type's name in `snake_case` |
 
 A limit that names another attribute reads that attribute's current value on
 the same actor. `Life` can't go above the mage's `MaxLife`, whatever raises
 `MaxLife`. The limits win over everything else: a modifier can't push `Life`
 past them.
+
+When such a limit moves, the base follows it, the same frame:
+
+- **`Clamp`**, as it is unless it says: the base is kept within its limits.
+  A mage at 100 life whose `MaxLife` drops to 80 has 80 life, and still 80
+  as the maximum comes back. Taking a buff off and putting it on again
+  doesn't heal.
+- **`Ratio`**: the base keeps its fraction of its maximum, which has to be
+  another attribute. Half life stays half as `MaxLife` rises or falls.
+
+Only the world that decides attributes moves bases: a server, or a game on
+its own. A client sees what the server serves. A base set by the game, with
+`Base::set`, isn't kept within its limits; its current value is.
 
 `Down` rounds 2.9 to 2. `Up` rounds 2.1 to 3. `Nearest` rounds halves away
 from zero, so 2.5 is 3. Use rounding for counts, such as projectiles or

@@ -164,6 +164,14 @@ scales the amount. A `Base` or `Override` counts only when it holds in full.
 `.per::<A>(every)` makes a modifier count once for each whole `every` of the
 target's `A`: +1 damage per 10 spell power.
 
+A modifier can deal a [meta attribute](effect-code.md#meta-attributes)
+instead: an amount no actor has, routed into attributes they do as the
+effect executes. `EffectModifier::meta::<IncomingDamage>(40.0)`, or in data
+`(attribute: "incoming_damage", op: Flat, value: Value(40))`. A meta
+attribute is dealt flat amounts only, by an effect that executes: instant,
+or periodic. The registry rejects any other, and any magnitude or `per`
+reading one: it has no value.
+
 ## Magnitudes
 
 A [`Magnitude`] is how much: a modifier's value, a duration, or a period.

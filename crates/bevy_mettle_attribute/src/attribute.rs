@@ -2,7 +2,7 @@
 
 use bevy_mettle_core::Id;
 
-use crate::registry::{AnyAttribute, Limit, Rounding};
+use crate::registry::{AnyAttribute, Limit, OnLimit, Rounding};
 
 /// An attribute: a number an actor has, as a marker type its rules are on.
 ///
@@ -20,6 +20,7 @@ use crate::registry::{AnyAttribute, Limit, Rounding};
 /// | `min = 0.0`, `min = Other` | The least it can be: a value, or another attribute's current value, read in the same context | none |
 /// | `max = ..` | The most it can be, as `min` | none |
 /// | `rounding = Down`, `Up`, `Nearest` | A whole number, rounded so | none |
+/// | `on_limit = Clamp`, `Ratio` | What its base does as a limit that's another attribute moves: kept within it, or kept at the same fraction of its maximum | `Clamp` |
 /// | `name = ".."` | The name data names it by | its type's, in `snake_case` |
 ///
 /// An attribute that differs by kind (a resistance per damage type) is one
@@ -71,4 +72,7 @@ pub trait Attribute: Send + Sync + 'static {
 
     /// How it's rounded, if it's a whole number.
     const ROUNDING: Option<Rounding> = None;
+
+    /// What its base does as a limit that's another attribute moves.
+    const ON_LIMIT: OnLimit = OnLimit::Clamp;
 }

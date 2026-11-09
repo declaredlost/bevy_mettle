@@ -1,4 +1,5 @@
-//! What effects run in code: executions and calculations.
+//! What effects run in code: executions, calculations, and meta attributes
+//! and their routers.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -93,15 +94,28 @@ impl EffectContext<'_> {
     }
 }
 
-/// A change an execution makes to its target's base, as an instant modifier.
+/// Whose base a change is to: the effect's target's, or its source's.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum Whose {
+    /// The target's: damage taken.
+    #[default]
+    Target,
+    /// The source's: life stolen back. None if the effect has no source.
+    Source,
+}
+
+/// A change an execution or a router makes to a base, as an instant modifier:
+/// its target's, unless it says.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BaseChange {
-    /// The attribute.
+    /// The attribute, or a meta attribute to route.
     pub attribute: Id<AnyAttribute>,
     /// How.
     pub op: Operation,
     /// By how much.
     pub value: f32,
+    /// Whose base.
+    pub on: Whose,
 }
 
 impl BaseChange {
@@ -112,9 +126,62 @@ impl BaseChange {
             attribute: A::ID,
             op,
             value,
+            on: Whose::Target,
         }
     }
+
+    /// `value` to the meta attribute `M`, for its router: what an execution
+    /// deals, before shields and resistances.
+    #[must_use]
+    pub fn meta<M: MetaAttribute>(value: f32) -> Self {
+        Self {
+            attribute: M::ID,
+            op: Operation::Flat,
+            value,
+            on: Whose::Target,
+        }
+    }
+
+    /// To the source's base, not the target's.
+    #[must_use]
+    pub fn on_source(mut self) -> Self {
+        self.on = Whose::Source;
+        self
+    }
 }
+
+/// A meta attribute: a number an effect deals to its target that no actor
+/// has, routed into attributes they do as it executes.
+///
+/// Incoming damage, say: dealt by every hit, then routed through armour and
+/// shields into life by one router, not each hit's own code. Derive it, and
+/// add it with its router:
+///
+/// ```ignore
+/// #[derive(MetaAttribute)]
+/// pub struct IncomingDamage;
+///
+/// app.add_meta_attribute::<IncomingDamage>(route_damage);
+/// ```
+///
+/// Data names it as it does attributes, `"incoming_damage"`, in the flat
+/// modifiers of an effect that executes: instant, or periodic. It has no base,
+/// limits or rounding, isn't held by actors, and isn't replicated: what it's
+/// routed into is.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` isn't a meta attribute",
+    label = "not a meta attribute",
+    note = "derive it: `#[derive(MetaAttribute)]`"
+)]
+pub trait MetaAttribute: Send + Sync + 'static {
+    /// The name data names it by: `"incoming_damage"`.
+    const NAME: &'static str;
+
+    /// Its id: its name, among the attributes'.
+    const ID: Id<AnyAttribute> = Id::from_static(Self::NAME);
+}
+
+pub use bevy_mettle_macros::MetaAttribute;
 
 /// An execution: what it changes, worked out in code.
 pub type ExecutionFn = Arc<dyn Fn(&EffectContext) -> Vec<BaseChange> + Send + Sync>;
@@ -122,15 +189,22 @@ pub type ExecutionFn = Arc<dyn Fn(&EffectContext) -> Vec<BaseChange> + Send + Sy
 /// A calculation: a magnitude, worked out in code.
 pub type CalculationFn = Arc<dyn Fn(&EffectContext) -> f32 + Send + Sync>;
 
-/// What effects run in code, by name: their executions and calculations.
+/// A router: what a meta attribute's amount, all an execution dealt of it,
+/// changes in attributes actors have.
+pub type RouterFn = Arc<dyn Fn(&EffectContext, f32) -> Vec<BaseChange> + Send + Sync>;
+
+/// What effects run in code, by name: their executions, calculations, and
+/// meta attributes with their routers.
 ///
 /// What effects' data names, and their registry is checked against. A
-/// resource, added to with [`add_execution`](EffectCodeApp::add_execution) and
-/// [`add_calculation`](EffectCodeApp::add_calculation).
+/// resource, added to with [`add_execution`](EffectCodeApp::add_execution),
+/// [`add_calculation`](EffectCodeApp::add_calculation) and
+/// [`add_meta_attribute`](EffectCodeApp::add_meta_attribute).
 #[derive(Resource, Clone, Default)]
 pub struct EffectCode {
     pub(crate) executions: HashMap<Id<Execution>, ExecutionFn>,
     pub(crate) calculations: HashMap<Id<Calculation>, CalculationFn>,
+    pub(crate) routers: HashMap<Id<AnyAttribute>, RouterFn>,
 }
 
 impl EffectCode {
@@ -159,6 +233,16 @@ impl EffectCode {
         calculation: impl Fn(&EffectContext) -> f32 + Send + Sync + 'static,
     ) -> Self {
         self.calculations.insert(name.into(), Arc::new(calculation));
+        self
+    }
+
+    /// The meta attribute `M`, routed by `router`.
+    #[must_use]
+    pub fn meta_attribute<M: MetaAttribute>(
+        mut self,
+        router: impl Fn(&EffectContext, f32) -> Vec<BaseChange> + Send + Sync + 'static,
+    ) -> Self {
+        self.routers.insert(M::ID, Arc::new(router));
         self
     }
 }
@@ -193,6 +277,13 @@ pub trait EffectCodeApp {
         name: impl Into<Id<Calculation>>,
         calculation: impl Fn(&EffectContext) -> f32 + Send + Sync + 'static,
     ) -> &mut Self;
+
+    /// Adds the meta attribute `M`, routed by `router`: all an execution
+    /// dealt of it, into changes to attributes actors have.
+    fn add_meta_attribute<M: MetaAttribute>(
+        &mut self,
+        router: impl Fn(&EffectContext, f32) -> Vec<BaseChange> + Send + Sync + 'static,
+    ) -> &mut Self;
 }
 
 impl EffectCodeApp for App {
@@ -213,6 +304,15 @@ impl EffectCodeApp for App {
     ) -> &mut Self {
         let mut code = self.world_mut().get_resource_or_init::<EffectCode>();
         code.calculations.insert(name.into(), Arc::new(calculation));
+        self
+    }
+
+    fn add_meta_attribute<M: MetaAttribute>(
+        &mut self,
+        router: impl Fn(&EffectContext, f32) -> Vec<BaseChange> + Send + Sync + 'static,
+    ) -> &mut Self {
+        let mut code = self.world_mut().get_resource_or_init::<EffectCode>();
+        code.routers.insert(M::ID, Arc::new(router));
         self
     }
 }

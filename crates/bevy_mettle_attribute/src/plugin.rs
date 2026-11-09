@@ -19,6 +19,8 @@ pub(crate) enum Phase {
     Fold,
     /// Owned tags told, values worked out.
     Refresh,
+    /// Bases moved as their limits did, and their values worked out again.
+    Follow,
     /// `Current`s written, changes told.
     Publish,
 }
@@ -73,7 +75,13 @@ impl Plugin for AttributePlugin {
             .insert_resource(AttributeSchedule(self.schedule))
             .configure_sets(
                 self.schedule,
-                (Phase::Sync, Phase::Fold, Phase::Refresh, Phase::Publish)
+                (
+                    Phase::Sync,
+                    Phase::Fold,
+                    Phase::Refresh,
+                    Phase::Follow,
+                    Phase::Publish,
+                )
                     .chain()
                     .in_set(AttributeSystems),
             )
@@ -85,6 +93,8 @@ impl Plugin for AttributePlugin {
                     (publish_tags, state::refresh)
                         .chain()
                         .in_set(Phase::Refresh),
+                    // After every attribute's bases followed their limits.
+                    state::rework.after(Phase::Follow).before(Phase::Publish),
                 ),
             );
     }

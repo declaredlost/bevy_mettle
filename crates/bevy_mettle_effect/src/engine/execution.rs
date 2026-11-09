@@ -2,16 +2,16 @@
 //! modifiers it carries.
 
 use bevy::prelude::*;
-use bevy_mettle_attribute::modifier::Modifier;
+use bevy_mettle_attribute::modifier::{Modifier, Operation};
 use bevy_mettle_attribute::read::AttributeContext;
 use bevy_mettle_core::tag::{OwnedTags, TagCounts};
 
 use super::{Check, count, source_tags};
 use crate::active::{ActiveEffect, EffectOf};
-use crate::code::{BaseChange, EffectContext};
-use crate::cue::{Cue, CueChange};
+use crate::code::{BaseChange, EffectContext, Whose};
+use crate::cue::Cue;
 use crate::data::{Capture, Effect, Magnitude};
-use crate::events::EffectExecuted;
+use crate::events::{Delta, EffectExecuted};
 use crate::{EffectRegistry, EffectSpec, net};
 
 /// How much `magnitude` is: as `captured`, if it was.
@@ -65,9 +65,16 @@ pub(super) fn resolve(
     }
 }
 
+/// What executing an effect works out: the changes it makes to bases, and
+/// what each meta attribute was dealt before its router.
+pub(super) struct Worked {
+    pub(super) changes: Vec<BaseChange>,
+    pub(super) routed: Vec<Delta>,
+}
+
 /// What executing `def` on `target` would change, without changing it: its
 /// modifiers and executions, worked out, its attribute magnitudes as
-/// `captured` if they were.
+/// `captured` if they were, and what it dealt meta attributes routed.
 pub(super) fn changes(
     world: &World,
     registry: &EffectRegistry,
@@ -77,9 +84,12 @@ pub(super) fn changes(
     stacks: u32,
     source_tags: &TagCounts,
     captured: &[Option<f32>],
-) -> Vec<BaseChange> {
+) -> Worked {
     let Some(owner) = world.get::<OwnedTags>(target) else {
-        return Vec::new();
+        return Worked {
+            changes: Vec::new(),
+            routed: Vec::new(),
+        };
     };
     let check = Check {
         tags: &def.tags,
@@ -116,6 +126,7 @@ pub(super) fn changes(
             attribute: modifier.attribute.clone(),
             op: modifier.op,
             value,
+            on: Whose::Target,
         });
     }
     for execution in &def.executions {
@@ -123,7 +134,58 @@ pub(super) fn changes(
             changes.extend(run(&context));
         }
     }
-    changes
+    route(&context, registry, changes)
+}
+
+/// Routes what `changes` deal meta attributes: each one's amount summed, then
+/// handed to its router, its changes after the effect's own. Single-pass: what
+/// a router deals a meta attribute is dropped.
+fn route(context: &EffectContext, registry: &EffectRegistry, changes: Vec<BaseChange>) -> Worked {
+    let mut kept = Vec::with_capacity(changes.len());
+    let mut routed: Vec<Delta> = Vec::new();
+    for change in changes {
+        if registry.router(&change.attribute).is_none() {
+            kept.push(change);
+            continue;
+        }
+        if change.op != Operation::Flat || change.on != Whose::Target {
+            warn!(
+                "effect `{}` deals meta attribute `{}` other than flat to its target: dropped",
+                context.spec.effect, change.attribute
+            );
+            continue;
+        }
+        match routed
+            .iter_mut()
+            .find(|dealt| dealt.attribute == change.attribute)
+        {
+            Some(dealt) => dealt.delta += change.value,
+            None => routed.push(Delta {
+                attribute: change.attribute,
+                delta: change.value,
+            }),
+        }
+    }
+    for dealt in &routed {
+        let Some(run) = registry.router(&dealt.attribute) else {
+            continue;
+        };
+        for change in run(context, dealt.delta) {
+            if registry.router(&change.attribute).is_some() {
+                warn!(
+                    "the router of `{}` deals meta attribute `{}`: dropped, as routing is \
+                     single-pass",
+                    dealt.attribute, change.attribute
+                );
+                continue;
+            }
+            kept.push(change);
+        }
+    }
+    Worked {
+        changes: kept,
+        routed,
+    }
 }
 
 /// What applying `spec` to `target` as an instant effect would change, if
@@ -132,16 +194,7 @@ pub(crate) fn preview(world: &World, target: Entity, spec: &EffectSpec) -> Optio
     let registry = world.get_resource::<EffectRegistry>()?;
     let def = registry.get(&spec.effect)?;
     let source_tags = source_tags(world, spec.source);
-    Some(changes(
-        world,
-        registry,
-        target,
-        spec,
-        def,
-        1,
-        &source_tags,
-        &[],
-    ))
+    Some(changes(world, registry, target, spec, def, 1, &source_tags, &[]).changes)
 }
 
 /// Executes `def` on `target`: its modifiers and executions, changing bases.
@@ -160,7 +213,7 @@ pub(super) fn execute(
     if net::answered(world, spec) {
         return;
     }
-    let changes = changes(
+    let worked = changes(
         world,
         registry,
         target,
@@ -171,17 +224,31 @@ pub(super) fn execute(
         captured,
     );
     let predicted = net::predicting(world, spec);
-    // What each attribute's base was changed by, in the order the effect
-    // first changes it.
-    let mut dealt: Vec<CueChange> = Vec::new();
-    for change in &changes {
-        let delta = net::change_base(world, predicted, target, change);
-        match dealt
+    // What each attribute's base was changed by, on each side, in the order
+    // the effect first changes it.
+    let mut dealt: Vec<Delta> = Vec::new();
+    let mut stolen: Vec<Delta> = Vec::new();
+    for change in &worked.changes {
+        let (entity, deltas) = match change.on {
+            Whose::Target => (target, &mut dealt),
+            Whose::Source => {
+                let Some(source) = spec.source else {
+                    warn!(
+                        "effect `{}` changes its source's `{}`, but has no source: dropped",
+                        def.id, change.attribute
+                    );
+                    continue;
+                };
+                (source, &mut stolen)
+            }
+        };
+        let delta = net::change_base(world, predicted, entity, change);
+        match deltas
             .iter_mut()
             .find(|dealt| dealt.attribute == change.attribute)
         {
             Some(dealt) => dealt.delta += delta,
-            None => dealt.push(CueChange {
+            None => deltas.push(Delta {
                 attribute: change.attribute.clone(),
                 delta,
             }),
@@ -190,6 +257,10 @@ pub(super) fn execute(
     world.trigger(EffectExecuted {
         entity: target,
         id: def.id.clone(),
+        source: spec.source,
+        changes: dealt.clone(),
+        source_changes: stolen,
+        routed: worked.routed,
     });
     for tag in def.cues.written() {
         let mut cue = Cue::new(tag.clone())

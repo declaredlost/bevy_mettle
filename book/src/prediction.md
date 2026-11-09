@@ -117,7 +117,10 @@ What's applied under a predicted activation is marked:
 - **An instant change**, the cost, is never written to a base. The server
   owns bases, and replicates them. The change is worked out on the base as
   shown, kept within its limits, and the difference shown as a flat
-  modifier until the server answers.
+  modifier until the server answers. A cost dealt to a
+  [meta attribute](effect-code.md#meta-attributes) is routed first, as the
+  server routes it, and what's routed to the source is shown on the source
+  the same way.
 
 ## The server decides
 

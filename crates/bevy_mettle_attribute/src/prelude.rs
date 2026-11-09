@@ -15,6 +15,8 @@ pub use crate::read::{
     AttributeContext, AttributeReader, AttributeWorld, Breakdown, attribute_above, attribute_below,
 };
 #[doc(no_inline)]
-pub use crate::registry::{AttributeApp, AttributeChanged, AttributeRegistry, Limit, Rounding};
+pub use crate::registry::{
+    AttributeApp, AttributeChanged, AttributeRegistry, Limit, OnLimit, Rounding,
+};
 #[doc(no_inline)]
 pub use crate::{Attribute, AttributePlugin, AttributeSystems, Base, Current};

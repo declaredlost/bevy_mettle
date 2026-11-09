@@ -221,6 +221,10 @@ names an attribute, an [`Operation`] and a value, and changes the target's
 base as an executing modifier would: `Flat` adds, `Additive` scales,
 `Override` sets. The base is then rounded and kept within its limits.
 
+A change is to the target's base, unless `.on_source()` says it's to the
+source's: life stolen back. An execution can also deal a meta attribute,
+with `BaseChange::meta::<IncomingDamage>(damage)`, for its router to route.
+
 Executions don't scale with stacks by themselves, since they work out their
 own numbers. Multiply by `stacks` where the effect should count once per
 stack, as `fire_damage` does.
@@ -250,6 +254,93 @@ fn strike(effect: &EffectContext) -> Vec<BaseChange> {
 # App::new().add_execution("strike", strike);
 ```
 
+## Meta attributes
+
+Every hit takes the shield's share first, then life's. Written into each
+execution, that's the same code many times over. A meta attribute puts it
+in one place: hits deal `incoming_damage`, and its router decides what that
+does to the attributes actors have.
+
+```rust
+# use bevy::prelude::*;
+# use bevy_mettle::prelude::*;
+# #[derive(Attribute)] #[attribute(base = 100.0, min = 0.0, max = MaxLife)] struct Life;
+# #[derive(Attribute)] #[attribute(base = 100.0)] struct MaxLife;
+#[derive(Attribute)]
+#[attribute(min = 0.0)]
+struct Shield;
+
+/// Damage dealt, before the shield takes its share.
+#[derive(MetaAttribute)]
+struct IncomingDamage;
+
+/// The shield takes what it can and life the rest; the attacker steals back a
+/// fifth of what life lost.
+fn route_damage(effect: &EffectContext, damage: f32) -> Vec<BaseChange> {
+    let shield = effect
+        .value::<Shield>(effect.target, &AttributeContext::new())
+        .unwrap_or_default();
+    let absorbed = damage.min(shield);
+    let taken = damage - absorbed;
+    vec![
+        BaseChange::new::<Shield>(Operation::Flat, -absorbed),
+        BaseChange::new::<Life>(Operation::Flat, -taken),
+        BaseChange::new::<Life>(Operation::Flat, taken / 5.0).on_source(),
+    ]
+}
+
+# use bevy::time::TimeUpdateStrategy;
+let mut app = App::new();
+app.add_plugins((MinimalPlugins, MettlePlugins))
+#   // One fixed step, where attributes are kept, each update.
+#   .insert_resource(TimeUpdateStrategy::FixedTimesteps(1))
+    .add_attribute::<Life>()
+    .add_attribute::<MaxLife>()
+    .add_attribute::<Shield>()
+    .add_meta_attribute::<IncomingDamage>(route_damage)
+    .insert_resource(MettleContent {
+        effects: vec![Effect::instant("hit").modifier(EffectModifier::meta::<IncomingDamage>(40.0))],
+        ..default()
+    });
+app.update();
+let base = |app: &App, entity| app.world().get::<Base<Life>>(entity).unwrap().get();
+let mage = app
+    .world_mut()
+    .spawn((Base::<Life>::default(), Base::<MaxLife>::default(), Base::<Shield>::new(30.0)))
+    .id();
+let attacker = app
+    .world_mut()
+    .spawn((Base::<Life>::new(50.0), Base::<MaxLife>::default()))
+    .id();
+app.update();
+
+app.world_mut().apply_effect(mage, EffectSpec::new("hit").source(attacker));
+assert_eq!(base(&app, mage), 90.0, "30 to the shield, 10 to life");
+assert_eq!(base(&app, attacker), 52.0, "a fifth stolen back");
+```
+
+A router gets all that an execution dealt its meta attribute, summed: the
+effect's modifiers and executions both. Its changes come after the effect's
+own, and are rounded and kept within limits like any other.
+
+- **It's the same everywhere.** Routing happens as the effect works out its
+  changes, so a [preview](applying-effects.md#previewing) sees it, and an
+  ability's cost paid through a meta attribute, "blood magic" paying mana
+  costs in life, is checked as routed. A client predicting an ability routes
+  its cost as the server will, and undoes it if the server refuses.
+- **Routing is single-pass.** What a router deals a meta attribute is
+  dropped, with a warning. One router can do the whole pipeline.
+- **No actor has one.** A meta attribute has no base, limits or rounding,
+  isn't replicated, and can't be read: a magnitude or a `per` reading one is
+  rejected. What it's routed into is replicated as ever.
+- **Its name is an attribute's.** Data names it as it does attributes, so
+  the two can't share a name: the registry rejects it.
+
+[`EffectExecuted`] says what came of it: `changes` to the target's bases
+after routing and limits, `source_changes` to its source's, and `routed`,
+what each meta attribute was dealt. A combat log reads "40 dealt, 30
+absorbed" from them.
+
 ## Calculations
 
 A calculation is a `Custom` magnitude. Anywhere a [`Magnitude`] goes, so can
@@ -268,6 +359,9 @@ them.
 
 ## Pitfalls
 
+- **A router can't apply effects.** Like executions, it reads the world and
+  returns changes. To apply something as a hit lands, observe
+  [`EffectExecuted`].
 - **Executions need something to run on.** An effect with neither `Instant`
   duration nor a period never executes, so the registry rejects executions
   on it. Use a modifier, or give the effect a period.

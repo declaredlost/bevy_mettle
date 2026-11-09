@@ -31,6 +31,22 @@ impl Limit {
     }
 }
 
+/// What an attribute's base does as a limit that's another attribute moves:
+/// life as its maximum drops, or rises.
+///
+/// Only the world that decides attributes moves it: a server, or a game on
+/// its own. A client sees what the server serves.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum OnLimit {
+    /// Kept within its limits: life above its new maximum comes down to it,
+    /// and stays there as the maximum rises again.
+    #[default]
+    Clamp,
+    /// Kept at the same fraction of its maximum: half life stays half as the
+    /// maximum moves, either way. Then kept within its limits.
+    Ratio,
+}
+
 /// How a whole-number attribute is rounded: down, up, or to the nearest.
 #[derive(
     Debug,

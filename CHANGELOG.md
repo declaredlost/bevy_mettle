@@ -66,6 +66,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Asking without doing: `can_activate`, `can_afford` and
   `cooldown_remaining`, on `AbilityWorld` and the new `AbilityReader` system
   parameter.
+- Meta attributes: `#[derive(MetaAttribute)]`, an amount effects deal that
+  no actor has (incoming damage), added with its router,
+  `add_meta_attribute::<M>(router)`, which routes all an execution dealt it
+  into attributes actors have. Single-pass, the same on a server and a
+  predicting client, and seen by previews and ability costs. Dealt flat, by
+  effects that execute, with `EffectModifier::meta` or `BaseChange::meta`;
+  never read, held or replicated.
+- `BaseChange::on_source()`: a change to the source's base, life stolen
+  back; `Whose` says whose.
+- `EffectExecuted` says what came of it: `source`, `changes` to the
+  target's bases after routing and limits, `source_changes` to its
+  source's, and what each meta attribute was dealt (`routed`).
+- `on_limit = Clamp | Ratio` on an attribute: its base follows a limit
+  that's another attribute as it moves, the same frame, on the world that
+  decides attributes. `Clamp`, the default, keeps it within its limits;
+  `Ratio` keeps its fraction of its maximum.
 - Cues (`bevy_mettle_effect::cue`): what's shown of effects and abilities.
   Lasting cues held while an effect counts or an ability is active (`cues`
   in their data), or by `add_cue`, each an entity (`ActiveCue`, `CueOf`);
@@ -79,6 +95,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `CueChange` is `Delta`, shared with `EffectExecuted`.
+- `bevy_mettle_macros` has a file per derive.
 - `bevy_mettle_ability::net` is split by what goes over the wire:
   `net::request` (`AbilityRequest`, `AbilityRequestWith`, `AbilityReply`),
   `net::input` (`AbilityInput`), `net::end` (`AbilityEnd`,
