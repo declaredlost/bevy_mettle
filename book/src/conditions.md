@@ -186,7 +186,7 @@ assert!(Condition::fact_set("fact.behind").check(&tags, None).is_err());
 A `Condition` names its tags by [`TagKey`]: what content holds and what
 mettle weighs. Over a network, a tag goes as its number in the
 [tag registry](tags.md#the-tag-registry), so a condition goes as a
-[`ConditionOver<TagId>`](ConditionOver): the same terms over tag numbers.
+[`ConditionOver<TagId>`][ConditionOver]: the same terms over tag numbers.
 `Condition` is `ConditionOver<TagKey>`. [`ConditionOver::map_tags`] goes
 between the two, and gives `None` if a tag doesn't map:
 
