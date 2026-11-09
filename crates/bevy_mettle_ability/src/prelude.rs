@@ -12,9 +12,11 @@ pub use crate::active::{
 #[doc(no_inline)]
 pub use crate::behaviour::{Behaviour, BehaviourApp, BehaviourRegistry, InputCheck, NoInput};
 #[doc(no_inline)]
-pub use crate::data::{AbilityData, AnyAbility, Commit, Grant, Trigger};
+pub use crate::data::{AbilityData, AnyAbility, Commit, Grant, NetExecution, Trigger};
 #[doc(no_inline)]
-pub use crate::events::{AbilityActivated, AbilityEnded, AbilityFailed, Failure, GameplayEvent};
+pub use crate::events::{
+    AbilityActivated, AbilityEnded, AbilityFailed, Activated, Failure, GameplayEvent,
+};
 #[doc(no_inline)]
 pub use crate::net::end::{AbilityCancelRequest, AbilityEnd};
 #[doc(no_inline)]

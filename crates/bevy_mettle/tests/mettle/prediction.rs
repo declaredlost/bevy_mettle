@@ -757,7 +757,8 @@ fn a_client_predicts_with_its_input_and_the_server_runs_with_the_same() {
         .client
         .world_mut()
         .activate_ability_with::<Shoot>(game.here, Shot, Aim(4.0))
-        .unwrap();
+        .unwrap()
+        .ability();
     game.client.entity(here).assert_eq(Aim(4.0));
     game.ask();
     let there = game.ability_there::<Shot>();
@@ -781,7 +782,8 @@ fn input_the_server_rejects_undoes_the_prediction() {
         .client
         .world_mut()
         .activate_ability_with::<Shoot>(game.here, Shot, Aim(40.0))
-        .unwrap();
+        .unwrap()
+        .ability();
     game.client.tick();
     assert!(
         close(get::<Mana>(&game.client, game.here), 10.0),
@@ -815,7 +817,8 @@ fn new_input_is_predicted_and_cancels_both_sides_if_the_server_rejects_it() {
         .client
         .world_mut()
         .activate_ability_with::<Shoot>(game.here, Shot, Aim(4.0))
-        .unwrap();
+        .unwrap()
+        .ability();
     game.ask();
     game.answer();
     let there = game.ability_there::<Shot>();
@@ -858,7 +861,8 @@ fn a_cast_the_server_interrupts_ends_on_the_client_too() {
         .client
         .world_mut()
         .activate_ability(game.here, Fireball)
-        .unwrap();
+        .unwrap()
+        .ability();
     game.ask();
     game.answer();
 
@@ -884,7 +888,8 @@ fn casting(game: &mut Game) -> (Entity, Entity) {
         .client
         .world_mut()
         .activate_ability(game.here, Fireball)
-        .unwrap();
+        .unwrap()
+        .ability();
     game.ask();
     game.answer();
     let there = game.ability_there::<Fireball>();
@@ -934,7 +939,8 @@ fn a_client_that_cant_pay_from_what_it_predicts_leaves_it_to_the_server() {
         .client
         .world_mut()
         .activate_ability(game.here, Charge)
-        .unwrap();
+        .unwrap()
+        .ability();
     game.ask();
     game.answer();
     let there = game.ability_there::<Charge>();
@@ -969,7 +975,8 @@ fn a_cancel_that_overtakes_its_cast_is_held_for_it() {
         .client
         .world_mut()
         .activate_ability(game.here, Fireball)
-        .unwrap();
+        .unwrap()
+        .ability();
     game.client.world_mut().cancel_ability(here);
 
     // The cancel arrives a frame before the request.
@@ -994,7 +1001,8 @@ fn a_cancel_held_past_its_time_is_let_go() {
         .client
         .world_mut()
         .activate_ability(game.here, Fireball)
-        .unwrap();
+        .unwrap()
+        .ability();
     game.client.world_mut().cancel_ability(here);
     let request: Vec<AbilityRequest> = game
         .client
@@ -1020,7 +1028,8 @@ fn a_cancel_asked_with_the_cast_follows_it_to_the_server() {
         .client
         .world_mut()
         .activate_ability(game.here, Fireball)
-        .unwrap();
+        .unwrap()
+        .ability();
     game.client.world_mut().cancel_ability(here);
     game.ask();
     game.server

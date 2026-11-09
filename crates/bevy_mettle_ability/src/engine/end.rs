@@ -37,14 +37,15 @@ pub(crate) fn end_quietly(world: &mut World, ability: Entity, cancelled: bool) {
 }
 
 /// Cancels `ability`, as the game asks: a client asks the server to cancel
-/// its copy too, if it's the client's own activation.
+/// its copy too, if the server runs one it does too.
 pub(crate) fn cancel(world: &mut World, ability: Entity) {
     let ran = world
         .get::<ActiveAbility>(ability)
-        .map(|active| (active.actor, active.activation));
+        .zip(world.get::<GrantedAbility>(ability))
+        .map(|(active, granted)| (active.actor, granted.def.net, active.activation));
     end(world, ability, true);
-    if let Some((actor, activation)) = ran {
-        crate::net::ask_cancel(world, actor, activation);
+    if let Some((actor, net, activation)) = ran {
+        crate::net::ask_cancel(world, actor, net, activation);
     }
 }
 
@@ -58,7 +59,7 @@ fn end_as(world: &mut World, ability: Entity, cancelled: bool, ending: Ending) {
     };
     let actor = active.actor;
     let activation = active.activation;
-    let id = granted.def.id;
+    let (id, net) = (granted.def.id, granted.def.net);
     // What it activated with, not what its definition says now: it may have
     // been replaced since.
     let (granted_tags, cues, running) = world
@@ -94,7 +95,7 @@ fn end_as(world: &mut World, ability: Entity, cancelled: bool, ending: Ending) {
         cancelled,
     });
     if ending == Ending::Told {
-        crate::net::tell_end(world, actor, activation, cancelled);
+        crate::net::tell_end(world, actor, net, activation, cancelled);
     }
 }
 

@@ -6,7 +6,7 @@ use bevy_mettle_core::tag::Tags;
 use crate::ability::{AbilitySpec, IntoAbilityId};
 use crate::behaviour::{Behaviour, BehaviourId, BehaviourRegistry};
 use crate::engine::{self, Commitment};
-use crate::events::{Failure, GameplayEvent};
+use crate::events::{Activated, Failure, GameplayEvent};
 use crate::{AbilityId, AbilityRegistry};
 
 /// Granting, activating, committing and ending abilities, as commands.
@@ -119,7 +119,7 @@ impl AbilityCommands for EntityCommands<'_> {
     fn activate_tagged(&mut self, tags: Tags) -> &mut Self {
         self.queue(move |entity: EntityWorldMut| {
             let actor = entity.id();
-            engine::activate_tagged(entity.into_world_mut(), actor, &tags);
+            crate::net::predict_tagged(entity.into_world_mut(), actor, &tags);
         })
     }
 
@@ -153,7 +153,7 @@ impl AbilityCommands for EntityCommands<'_> {
     fn activate(&mut self) -> &mut Self {
         self.queue(|entity: EntityWorldMut| {
             let ability = entity.id();
-            let _ = engine::activate(entity.into_world_mut(), ability, None, None);
+            let _ = crate::net::predict_granted(entity.into_world_mut(), ability);
         })
     }
 
@@ -208,8 +208,8 @@ pub trait AbilityWorld {
     /// if there's such an ability.
     fn grant_ability(&mut self, actor: Entity, spec: impl Into<AbilitySpec>) -> Option<Entity>;
 
-    /// Activates `actor`'s `ability` (on a client, predicted, and asked of the
-    /// server): the granted ability, or why it didn't.
+    /// Activates `actor`'s `ability`, as it runs over a network: what it came
+    /// to, running here or asked of the server, or why it didn't.
     ///
     /// # Errors
     ///
@@ -218,11 +218,11 @@ pub trait AbilityWorld {
         &mut self,
         actor: Entity,
         ability: impl IntoAbilityId,
-    ) -> Result<Entity, Failure>;
+    ) -> Result<Activated, Failure>;
 
-    /// Activates `actor`'s `ability`, run by `B`, with `input`, what `B` takes
-    /// (on a client, predicted, and asked of the server with it): the granted
-    /// ability, or why it didn't.
+    /// Activates `actor`'s `ability`, run by `B`, with `input`, what `B` takes,
+    /// as it runs over a network: what it came to, running here or asked of
+    /// the server with the input, or why it didn't.
     ///
     /// # Errors
     ///
@@ -233,7 +233,7 @@ pub trait AbilityWorld {
         actor: Entity,
         ability: impl IntoAbilityId,
         input: B::Input,
-    ) -> Result<Entity, Failure>;
+    ) -> Result<Activated, Failure>;
 
     /// Gives the active `ability` new `input`, in place of what it had (on a
     /// client, predicted and sent to the server).
@@ -251,12 +251,13 @@ pub trait AbilityWorld {
     /// Cancels every one of `actor`'s active abilities: those it cancelled.
     fn cancel_all_abilities(&mut self, actor: Entity) -> Vec<Entity>;
 
-    /// Activates the granted ability `ability`.
+    /// Activates the granted ability `ability`, as it runs over a network:
+    /// what it came to, running here or asked of the server.
     ///
     /// # Errors
     ///
     /// Why it didn't activate.
-    fn activate(&mut self, ability: Entity) -> Result<(), Failure>;
+    fn activate(&mut self, ability: Entity) -> Result<Activated, Failure>;
 
     /// Applies the active `ability`'s cost and cooldown, each once an
     /// activation: whether it could pay. One that can't is cancelled.
@@ -307,7 +308,7 @@ impl AbilityWorld for World {
         &mut self,
         actor: Entity,
         ability: impl IntoAbilityId,
-    ) -> Result<Entity, Failure> {
+    ) -> Result<Activated, Failure> {
         let ability = resolve(self, &ability).ok_or(Failure::NotGranted)?;
         crate::net::predict(self, actor, ability)
     }
@@ -317,7 +318,7 @@ impl AbilityWorld for World {
         actor: Entity,
         ability: impl IntoAbilityId,
         input: B::Input,
-    ) -> Result<Entity, Failure> {
+    ) -> Result<Activated, Failure> {
         let ability = resolve(self, &ability).ok_or(Failure::NotGranted)?;
         crate::net::predict_with::<B>(self, actor, ability, input)
     }
@@ -335,8 +336,8 @@ impl AbilityWorld for World {
         engine::cancel_tagged(self, actor, None)
     }
 
-    fn activate(&mut self, ability: Entity) -> Result<(), Failure> {
-        engine::activate(self, ability, None, None)
+    fn activate(&mut self, ability: Entity) -> Result<Activated, Failure> {
+        crate::net::predict_granted(self, ability)
     }
 
     fn commit_ability(&mut self, ability: Entity) -> bool {

@@ -133,6 +133,17 @@ fn aim(casting: Query<&ActiveAbility, Added<CastFireball>>) {
 A [`GameplayEvent`] is an entity event too, triggered on the actor whether or
 not an ability is listening. Observe it for anything else a parry should do.
 
+#### Sent by an ability
+
+A behaviour sending an event marks it with its own activation:
+`GameplayEvent::new(mage, "event.parried").under(active.activation)`. That
+matters over a network. A predicted ability it triggers then runs under an
+activation derived from it, the same on the client and the server, so the
+client predicts the riposte at once and the server confirms it, without
+asking. Undone with its parent, if the server rejects that. An event sent by
+no ability, from the game's own code, is the server's to act on: see
+[On a client](#on-a-client).
+
 ### Tags
 
 The mage lashes out with `smolder` while it's burning: its trigger is
@@ -219,10 +230,18 @@ Each goes through its checks on its own: those that can activate do.
 
 ## On a client
 
-A client leaves triggers, and abilities effects grant, to the server. Gameplay
-events are still told to observers there, but activate nothing. What the
-server activates and grants arrives by replication. See
-[Prediction](prediction.md).
+A client leaves triggers, and abilities effects grant, to the server, with one
+exception: a [predicted](prediction.md#execution-policies) ability triggered
+by an event sent [under an activation](#sent-by-an-ability) is predicted
+there too. Other events are still told to observers on a client, but activate
+nothing, and tags owned never trigger anything there. What the server
+activates and grants arrives by replication, and a
+[`ServerInitiated`](prediction.md#execution-policies) ability it activates is
+run on the controlling client too. See [Prediction](prediction.md).
+
+`activate_tagged`, and `activate` on a granted ability, go through each
+ability's policy on a client, as `activate_ability` does: a predicted one is
+predicted and asked of the server.
 
 [`AbilityFailed`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityFailed.html
 [`MettleContent`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleContent.html

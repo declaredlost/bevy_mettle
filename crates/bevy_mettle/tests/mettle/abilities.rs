@@ -3,6 +3,7 @@
 
 use bevy::prelude::*;
 use bevy_harness::TestApp;
+use bevy_mettle::ability::data::NetExecution;
 use bevy_mettle::core::Error;
 use bevy_mettle::prelude::*;
 
@@ -254,7 +255,7 @@ fn activate(
 ) -> Result<Entity, Failure> {
     let activated = app.world_mut().activate_ability(actor, ability);
     app.tick();
-    activated
+    activated.map(Activated::ability)
 }
 
 fn owns(app: &TestApp, actor: Entity, tag: &'static str) -> bool {
@@ -624,7 +625,8 @@ fn an_ability_activates_with_its_input_and_ends_without_it() {
     let shooting = app
         .world_mut()
         .activate_ability_with::<Shoot>(mage, Shot, Aim(4.0))
-        .unwrap();
+        .unwrap()
+        .ability();
     app.entity(shooting)
         .assert_has::<Shoot>()
         .assert_eq(Aim(4.0));
@@ -680,7 +682,8 @@ fn new_input_replaces_the_old_and_input_that_fails_cancels_the_ability() {
     let shooting = app
         .world_mut()
         .activate_ability_with::<Shoot>(mage, Shot, Aim(4.0))
-        .unwrap();
+        .unwrap()
+        .ability();
     app.world_mut()
         .set_input::<Shoot>(shooting, Aim(-6.0))
         .unwrap();
@@ -724,6 +727,55 @@ fn an_ability_whose_behaviour_takes_input_cant_be_triggered() {
     );
 }
 
+/// What `abilities` fail their check with, if anything: checked against
+/// `app`'s effects and behaviours.
+fn check(app: &TestApp, abilities: &[AbilityData]) -> Result<(), String> {
+    AbilityRegistry::check(
+        abilities,
+        &[],
+        AbilityChecks {
+            tags: &tags(),
+            effects: app.resource::<EffectRegistry>(),
+            behaviours: app.resource::<BehaviourRegistry>(),
+        },
+    )
+    .map(drop)
+    .map_err(|errors| errors.to_string())
+}
+
+#[test]
+fn an_ability_run_locally_only_cant_have_a_cost_or_a_cooldown() {
+    let app = app(&[]);
+    for local in [
+        AbilityData::new("zoom", "cast").cost("fireball.cost"),
+        AbilityData::new("zoom", "cast").cooldown("fireball.cooldown"),
+    ] {
+        let errors = check(&app, &[local.net(NetExecution::LocalOnly)]).unwrap_err();
+        assert!(
+            errors.contains("a cost or a cooldown on an ability run locally only"),
+            "{errors}"
+        );
+    }
+}
+
+#[test]
+fn an_ability_run_locally_only_without_a_cost_checks() {
+    let app = app(&[]);
+    let zoom = AbilityData::new("zoom", "cast").net(NetExecution::LocalOnly);
+    assert_eq!(check(&app, &[zoom]), Ok(()));
+    // Run otherwise, the same cost is fine.
+    for net in [
+        NetExecution::Predicted,
+        NetExecution::ServerOnly,
+        NetExecution::ServerInitiated,
+    ] {
+        let paid = AbilityData::new("zoom", "cast")
+            .cost("fireball.cost")
+            .net(net);
+        assert_eq!(check(&app, &[paid]), Ok(()), "{net:?}");
+    }
+}
+
 #[test]
 fn input_for_another_behaviour_than_the_abilitys_cancels_it() {
     let mut app = app(&[shot()]);
@@ -731,7 +783,8 @@ fn input_for_another_behaviour_than_the_abilitys_cancels_it() {
     let shooting = app
         .world_mut()
         .activate_ability_with::<Shoot>(mage, Shot, Aim(4.0))
-        .unwrap();
+        .unwrap()
+        .ability();
     assert_eq!(
         app.world_mut().set_input::<Cast>(shooting, NoInput),
         Err(Failure::Input)

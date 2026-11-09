@@ -9,6 +9,8 @@ use bevy_mettle_core::net::NetRole;
 use serde::{Deserialize, Serialize};
 
 use super::{SERVERS, role, running};
+use crate::active::GrantedAbility;
+use crate::data::NetExecution;
 use crate::engine;
 
 /// A client's ask that the server cancel an ability it cancelled itself.
@@ -49,11 +51,28 @@ impl MapEntities for AbilityEnd {
     }
 }
 
-/// On a server: tells the client whose activation `actor`'s ability ran
-/// under that it ended here. A server's own activations, and a client's
-/// endings, aren't told.
-pub(crate) fn tell_end(world: &mut World, actor: Entity, activation: u64, cancelled: bool) {
-    if activation & SERVERS == 0 && role(world) == NetRole::Server {
+/// Whether the client controlling an actor runs an ability run as `net`, under
+/// `activation`, too: its own predicted activations, and every server-initiated
+/// one.
+pub(crate) fn client_runs(net: NetExecution, activation: u64) -> bool {
+    match net {
+        NetExecution::Predicted => activation & SERVERS == 0,
+        NetExecution::ServerInitiated => true,
+        NetExecution::ServerOnly | NetExecution::LocalOnly => false,
+    }
+}
+
+/// On a server: tells the client running `actor`'s ability too that it ended
+/// here: one it predicted, or one the server initiated. What a client doesn't
+/// run, and a client's endings, aren't told.
+pub(crate) fn tell_end(
+    world: &mut World,
+    actor: Entity,
+    net: NetExecution,
+    activation: u64,
+    cancelled: bool,
+) {
+    if client_runs(net, activation) && role(world) == NetRole::Server {
         world.write_message(AbilityEnd {
             actor,
             activation,
@@ -62,10 +81,11 @@ pub(crate) fn tell_end(world: &mut World, actor: Entity, activation: u64, cancel
     }
 }
 
-/// On a client: asks the server to cancel what `actor` ran under the client's
-/// own `activation`, as the client cancelled it.
-pub(crate) fn ask_cancel(world: &mut World, actor: Entity, activation: u64) {
-    if activation & SERVERS == 0 && role(world) == NetRole::Client {
+/// On a client: asks the server to cancel what `actor` ran under
+/// `activation`, as the client cancelled it: one it predicted, or one the
+/// server initiated. A local-only one is the client's alone.
+pub(crate) fn ask_cancel(world: &mut World, actor: Entity, net: NetExecution, activation: u64) {
+    if client_runs(net, activation) && role(world) == NetRole::Client {
         world.write_message(AbilityCancelRequest { actor, activation });
     }
 }
@@ -84,28 +104,16 @@ const HELD_PER_ACTOR: usize = 16;
 pub(crate) struct EarlyCancels(Vec<(AbilityCancelRequest, f32)>);
 
 /// On a server: cancels what clients cancelled themselves, under their own
-/// activations. One not running yet is held a while, as its request may be
-/// yet to come; one still not running then is past.
+/// activations, or the server's where it initiated a client runs too. One of
+/// a client's not running yet is held a while, as its request may be yet to
+/// come; one still not running then is past.
 pub(crate) fn hear_cancels(
     mut requests: MessageReader<AbilityCancelRequest>,
     held: Res<EarlyCancels>,
     time: Res<Time>,
     mut commands: Commands,
 ) {
-    let heard: Vec<AbilityCancelRequest> = requests
-        .read()
-        .filter(|request| {
-            let theirs = request.activation & SERVERS == 0;
-            if !theirs {
-                warn!(
-                    "a client asked to cancel the server's activation {}: ignored",
-                    request.activation
-                );
-            }
-            theirs
-        })
-        .cloned()
-        .collect();
+    let heard: Vec<AbilityCancelRequest> = requests.read().cloned().collect();
     if heard.is_empty() && held.0.is_empty() {
         return;
     }
@@ -130,8 +138,40 @@ pub(crate) fn hear_cancels(
             cancels.push((request, now));
         }
         cancels.retain(|(request, heard)| {
-            if let Some(ability) = running(world, request.actor, request.activation) {
-                engine::end_quietly(world, ability, true);
+            let running = running(world, request.actor, request.activation);
+            if request.activation & SERVERS != 0 {
+                // The server's own: running already, if it's the client's
+                // to cancel at all.
+                let initiated = running.is_some_and(|ability| {
+                    world
+                        .get::<GrantedAbility>(ability)
+                        .is_some_and(|granted| granted.def.net == NetExecution::ServerInitiated)
+                });
+                if let Some(ability) = running.filter(|_| initiated) {
+                    engine::end_quietly(world, ability, true);
+                } else {
+                    warn!(
+                        "a client asked to cancel the server's activation {}, which isn't one \
+                         it runs: ignored",
+                        request.activation
+                    );
+                }
+                return false;
+            }
+            if let Some(ability) = running {
+                // A client cancels only what it runs: not a server-run one it
+                // only asked for.
+                let theirs = world
+                    .get::<GrantedAbility>(ability)
+                    .is_some_and(|granted| client_runs(granted.def.net, request.activation));
+                if theirs {
+                    engine::end_quietly(world, ability, true);
+                } else {
+                    warn!(
+                        "a client asked to cancel activation {}, which it doesn't run: ignored",
+                        request.activation
+                    );
+                }
                 return false;
             }
             now - heard < HOLD

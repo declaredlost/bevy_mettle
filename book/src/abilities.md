@@ -84,6 +84,7 @@ grants, needn't be types.
 | `cues` | Cues held on its owner while it's active, such as a cast's glow. See [Cues](cues.md). |
 | `triggers` | What activates it besides being asked. See [Grants and triggers](grants-triggers.md). |
 | `commit` | When its cost and cooldown are applied: `OnActivate` or `Manual`. |
+| `net` | How it runs over a network: `Predicted` (the default), `ServerOnly`, `ServerInitiated` or `LocalOnly`. See [Prediction](prediction.md#execution-policies). |
 
 A tag in `blocked_by`, `cancels` or `blocks` matches the tags under it too.
 `.blocks("ability.spell")` keeps every spell from activating, fire or not.

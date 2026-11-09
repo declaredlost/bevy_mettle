@@ -104,6 +104,9 @@ pub struct AbilityData {
     /// When its cost and cooldown are applied: as it activates, unless it says.
     #[serde(default)]
     pub commit: Commit,
+    /// How it runs over a network: predicted by the client, unless it says.
+    #[serde(default)]
+    pub net: NetExecution,
 }
 
 /// What activates an ability besides being asked to: an event, or a tag owned.
@@ -140,6 +143,41 @@ pub enum Commit {
     Manual,
 }
 
+/// How an ability runs over a network: who runs it, and who's told.
+///
+/// Unreal's net execution policies. Standalone, every one runs where it's
+/// activated. Chosen in content, as how an ability plays is.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize
+)]
+pub enum NetExecution {
+    /// The client runs it at once and asks the server, which runs it too and
+    /// confirms or rejects it: what a player's own abilities want.
+    #[default]
+    Predicted,
+    /// Only the server runs it. A client's ask is sent, not run: the client
+    /// sees what it does through replicas and cues, and is told if it fails.
+    /// For outcomes a client can't know: a random proc, a hidden target.
+    ServerOnly,
+    /// The server runs it, then tells the owning client, which runs its
+    /// behaviour under the server's activation, without paying or checking
+    /// again: for client-side logic (aim, camera, local feedback) on what the
+    /// server decides.
+    ServerInitiated,
+    /// Runs only where it's activated, and is never sent: zoom, an aim
+    /// preview, a menu. It can't have a cost or a cooldown: what it'd pay, a
+    /// server's replicated values would undo.
+    LocalOnly,
+}
+
 impl AbilityData {
     /// An ability called `id`, run by `behaviour`, costing nothing yet: for
     /// abilities defined in code.
@@ -160,6 +198,7 @@ impl AbilityData {
             cues: Tags::new(),
             triggers: Vec::new(),
             commit: Commit::OnActivate,
+            net: NetExecution::Predicted,
         }
     }
 
@@ -245,6 +284,13 @@ impl AbilityData {
     #[must_use]
     pub fn commit(mut self, commit: Commit) -> Self {
         self.commit = commit;
+        self
+    }
+
+    /// Run over a network as `net` says.
+    #[must_use]
+    pub fn net(mut self, net: NetExecution) -> Self {
+        self.net = net;
         self
     }
 }

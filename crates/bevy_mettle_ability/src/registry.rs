@@ -13,7 +13,7 @@ use bevy_mettle_effect::{EffectId, EffectRegistry};
 
 use crate::ability::Ability;
 use crate::behaviour::{AnyBehaviour, BehaviourRegistry};
-use crate::data::{AbilityData, AbilityDef, AnyAbility, Grant, Trigger};
+use crate::data::{AbilityData, AbilityDef, AnyAbility, Grant, NetExecution, Trigger};
 
 /// An ability's number in the [`AbilityRegistry`], as the app knows it.
 ///
@@ -267,6 +267,48 @@ fn compile(
             }
         }
     }
+    let (cost, cooldown) = paid(def, effects, errors);
+    if errors.len() > before {
+        return None;
+    }
+    Some(AbilityDef {
+        id,
+        name: def.name.clone(),
+        tags: def.tags.clone(),
+        behaviour: behaviour?,
+        cost,
+        cooldown,
+        require: def.require.clone(),
+        cancel_if: def.cancel_if.clone(),
+        blocked_by: def.blocked_by.clone(),
+        cancels: def.cancels.clone(),
+        blocks: def.blocks.clone(),
+        grants: def.grants.clone(),
+        cues: def.cues.clone(),
+        triggers: def.triggers.clone(),
+        commit: def.commit,
+        net: def.net,
+    })
+}
+
+/// The numbers of the effects `def` pays with, its cost and its cooldown,
+/// those there are; what's wrong with them, or with paying at all as it runs
+/// over a network, noted in `errors`.
+fn paid(
+    def: &AbilityData,
+    effects: &EffectRegistry,
+    errors: &mut Vec<Error>,
+) -> (Option<EffectId>, Option<EffectId>) {
+    let within = Some(def.name.as_str());
+    let invalid = |what: String| Error::Invalid {
+        what,
+        within: within.map(ToOwned::to_owned),
+    };
+    let mut push = |result: Result<(), Error>| {
+        if let Err(error) = result {
+            errors.push(error);
+        }
+    };
     let cost = def.cost.as_ref().and_then(|cost| {
         let Some(id) = effects.id(cost.as_str()) else {
             push(Err(Error::unknown::<AnyEffect>(cost.as_str(), within)));
@@ -296,24 +338,12 @@ fn compile(
         }
         Some(id)
     });
-    if errors.len() > before {
-        return None;
+    if def.net == NetExecution::LocalOnly && (def.cost.is_some() || def.cooldown.is_some()) {
+        push(Err(invalid(
+            "a cost or a cooldown on an ability run locally only: a server's values would undo \
+             what it paid"
+                .to_owned(),
+        )));
     }
-    Some(AbilityDef {
-        id,
-        name: def.name.clone(),
-        tags: def.tags.clone(),
-        behaviour: behaviour?,
-        cost,
-        cooldown,
-        require: def.require.clone(),
-        cancel_if: def.cancel_if.clone(),
-        blocked_by: def.blocked_by.clone(),
-        cancels: def.cancels.clone(),
-        blocks: def.blocks.clone(),
-        grants: def.grants.clone(),
-        cues: def.cues.clone(),
-        triggers: def.triggers.clone(),
-        commit: def.commit,
-    })
+    (cost, cooldown)
 }
