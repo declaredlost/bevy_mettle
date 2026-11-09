@@ -147,6 +147,49 @@ What's applied under a predicted activation is marked:
   [route](effect-code.md#routes) is routed first, as the server routes it,
   and what's routed to the source is shown on the source the same way.
 
+## Execution policies
+
+How an ability runs over a network is its own: [`NetExecution`], the `net`
+field of its definition, as in Unreal.
+
+| Policy | On the client | On the server |
+|---|---|---|
+| `Predicted` (default) | Runs at once, and asks the server | Runs it, and confirms or rejects |
+| `ServerOnly` | Asks the server, running nothing | Runs it; the client sees what it does through replicas and cues |
+| `ServerInitiated` | Runs its behaviour as the server says it started, not paying or checking again | Runs it, however it started, and tells the controlling client: [`AbilityStarted`] |
+| `LocalOnly` | Runs it, and sends nothing | Runs it only if it's the server's own |
+
+```rust
+# use bevy_mettle::prelude::*;
+// A random proc: the client can't know the roll.
+let proc = AbilityData::new("chaos_bolt", "cast_bolt").net(NetExecution::ServerOnly);
+// Channelled from the server, aimed on the client.
+let beam = AbilityData::new("beam", "channel_beam").net(NetExecution::ServerInitiated);
+// Zoom: the player's own view.
+let zoom = AbilityData::new("zoom", "zoom").net(NetExecution::LocalOnly);
+# let _ = (proc, beam, zoom);
+```
+
+- **`Predicted`** is what a player's own abilities want: what follows is how
+  it's predicted and resolved.
+- **`ServerOnly`** suits outcomes a client can't know: a random proc, a hidden
+  target, a teleport that would look wrong rejected. Activating one on a
+  client comes to [`Activated::Asked`]: nothing runs there yet. Rejected, the
+  client is told by [`AbilityFailed`], with nothing to undo; a client can't
+  cancel it.
+- **`ServerInitiated`** suits client-side logic on what the server decides: a
+  channel the client aims, a camera following a dash the server started. The
+  server pays; the client mirrors its activation, and its end. Asked for on a
+  client, it comes to [`Activated::Asked`] until the server's start arrives.
+  A client cancelling it asks the server to cancel it too. A predicted ability
+  its mirrored behaviour triggers is the server's to decide: a client
+  predicts only under its own activations.
+- **`LocalOnly`** suits what's only the player's: zoom, an aim preview, a menu.
+  It can't have a cost or a cooldown, which content checking rejects: what it
+  paid, the server's replicated values would undo. Triggered, it runs where
+  its trigger happened, by an event or a tag, on a client too. A server
+  rejects a client asking for one.
+
 ## The server decides
 
 On the server, each [`AbilityRequest`] is activated under the client's
@@ -340,3 +383,6 @@ Ability requests, replies and replicas are handled in [`AbilitySystems`], in
 [`reject_prediction`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/trait.EffectWorld.html#tymethod.reject_prediction
 [`Remote`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/authority/struct.Remote.html
 [`Served<A>`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/authority/struct.Served.html
+[`NetExecution`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/data/enum.NetExecution.html
+[`AbilityStarted`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/start/struct.AbilityStarted.html
+[`Activated::Asked`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/enum.Activated.html#variant.Asked

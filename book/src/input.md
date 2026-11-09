@@ -122,7 +122,7 @@ assert_eq!(
 // Within reach: cast.
 let fireball = world
     .activate_ability_with::<CastFireball>(mage, Fireball, Aim(Vec2::new(8.0, 0.0)))
-    .unwrap();
+    .unwrap().ability();
 assert_eq!(world.get::<Aim>(fireball), Some(&Aim(Vec2::new(8.0, 0.0))));
 ```
 

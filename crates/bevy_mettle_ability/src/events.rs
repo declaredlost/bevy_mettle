@@ -22,10 +22,13 @@ pub struct GameplayEvent {
     pub target: Option<Entity>,
     /// How much.
     pub magnitude: f32,
+    /// The activation it was sent under, if an ability running sent it:
+    /// what a predicted ability it triggers is predicted under.
+    pub activation: Option<u64>,
 }
 
 impl GameplayEvent {
-    /// `tag`, sent to `entity`, by no one, of nothing.
+    /// `tag`, sent to `entity`, by no one, of nothing, under no activation.
     #[must_use]
     pub fn new(entity: Entity, tag: impl Into<TagKey>) -> Self {
         Self {
@@ -34,7 +37,17 @@ impl GameplayEvent {
             instigator: None,
             target: None,
             magnitude: 0.0,
+            activation: None,
         }
+    }
+
+    /// Sent under `activation`: the running ability's, as its behaviour sends
+    /// it. A predicted ability it triggers is then predicted too, on the
+    /// client and the server alike, its activation derived from this one.
+    #[must_use]
+    pub fn under(mut self, activation: u64) -> Self {
+        self.activation = Some(activation);
+        self
     }
 }
 
@@ -60,6 +73,42 @@ pub struct AbilityFailed {
     pub id: AbilityId,
     /// Why.
     pub reason: Failure,
+}
+
+/// What activating an ability came to: running here, or asked of the server.
+///
+/// On a client, a server-run ability ([`ServerOnly`], [`ServerInitiated`]) is
+/// only asked for: nothing runs yet, and how it went is told later, by an
+/// [`AbilityFailed`], an [`AbilityStarted`] (mirrored here) or replicas.
+///
+/// [`ServerOnly`]: crate::data::NetExecution::ServerOnly
+/// [`ServerInitiated`]: crate::data::NetExecution::ServerInitiated
+/// [`AbilityStarted`]: crate::net::start::AbilityStarted
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Activated {
+    /// Running here: the granted ability, active.
+    Running(Entity),
+    /// Asked of the server: the granted ability, not active here.
+    Asked(Entity),
+}
+
+impl Activated {
+    /// The granted ability, running or asked for.
+    #[must_use]
+    pub fn ability(self) -> Entity {
+        match self {
+            Self::Running(ability) | Self::Asked(ability) => ability,
+        }
+    }
+
+    /// The granted ability, if it's running here.
+    #[must_use]
+    pub fn running(self) -> Option<Entity> {
+        match self {
+            Self::Running(ability) => Some(ability),
+            Self::Asked(_) => None,
+        }
+    }
 }
 
 /// Why an ability didn't activate, or couldn't commit: its cost, a cooldown.

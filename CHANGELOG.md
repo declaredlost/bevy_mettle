@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Network execution policies per ability, as Unreal's: `AbilityData::net`, a
+  `NetExecution`. `Predicted` (the default) is as before; `ServerOnly` is
+  asked of the server and run there alone; `ServerInitiated` is run by the
+  server, which tells the controlling client (`AbilityStarted`,
+  `AbilityStartedWith<I>`) to run its behaviour too, its end and a client's
+  cancel going both ways; `LocalOnly` runs where it's activated and is never
+  sent, and can't have a cost or cooldown. A server rejects a client asking
+  for a local-only ability.
+- Activating an ability returns what it came to, an `Activated`: running here,
+  or, a client's server-run ability, asked of the server
+  (`AbilityWorld::activate_ability`, `activate_ability_with` and `activate`).
+- Predicted triggers: a `GameplayEvent` sent under a running ability's
+  activation (`GameplayEvent::under`) triggers a predicted ability under an
+  activation derived from it, the same on a client and its server. A client
+  predicts it at once, under its own activations only; the server answers
+  it; and it's undone with its parent while that awaits its answer. A
+  local-only ability runs where it's triggered, by an event or a tag, on a
+  client too.
 - `bevy_mettle`, a gameplay framework in the spirit of Unreal's GAS: a
   facade over `bevy_mettle_core` (gameplay and owned tags, curves,
   conditions), `bevy_mettle_attribute` (attributes, with
@@ -276,6 +294,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- On a client, `activate_tagged` and `activate` on a granted ability run
+  each ability as its policy says, as `activate_ability` does: they ran it
+  locally and asked nothing of the server, its predictions never answered.
 - An effect chained by another (`on_apply`, `on_remove`, `on_expire`,
   overflow) keeps a spec naming itself, not the effect that chained it.
 - An actor's attribute slots compare by what they hold: one taken off past

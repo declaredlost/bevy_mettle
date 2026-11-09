@@ -7,6 +7,7 @@ use crate::active::GrantedBy;
 use crate::behaviour::BehaviourRegistry;
 use crate::net::end::{AbilityCancelRequest, AbilityEnd};
 use crate::net::request::{AbilityReply, AbilityRequest};
+use crate::net::start::AbilityStarted;
 use crate::net::{self};
 use crate::{AbilityRegistry, engine};
 
@@ -39,6 +40,7 @@ impl Plugin for AbilityPlugin {
             .add_message::<AbilityReply>()
             .add_message::<AbilityCancelRequest>()
             .add_message::<AbilityEnd>()
+            .add_message::<AbilityStarted>()
             .add_systems(
                 PreUpdate,
                 (
@@ -50,6 +52,8 @@ impl Plugin for AbilityPlugin {
                     net::hear_cancels
                         .after(net::Serving)
                         .run_if(resource_equals(NetRole::Server)),
+                    // Starts before ends: one started and ended at once ends.
+                    net::hear_started.run_if(resource_equals(NetRole::Client)),
                     net::hear_ends.run_if(resource_equals(NetRole::Client)),
                     net::show_replicas.run_if(resource_equals(NetRole::Client)),
                 )

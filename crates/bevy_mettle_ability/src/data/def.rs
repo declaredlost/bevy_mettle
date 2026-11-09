@@ -6,7 +6,7 @@ use bevy_mettle_core::registry::Name;
 use bevy_mettle_core::tag::Tags;
 use bevy_mettle_effect::EffectId;
 
-use super::{AnyAbility, Commit, Trigger};
+use super::{AnyAbility, Commit, NetExecution, Trigger};
 use crate::behaviour::BehaviourId;
 use crate::registry::AbilityId;
 
@@ -49,4 +49,6 @@ pub struct AbilityDef {
     pub triggers: Vec<Trigger>,
     /// When it pays its cost and starts its cooldown.
     pub commit: Commit,
+    /// How it runs over a network.
+    pub net: NetExecution,
 }

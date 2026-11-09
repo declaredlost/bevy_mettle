@@ -10,9 +10,7 @@ use bevy::prelude::*;
 use bevy_mettle_core::condition::Context;
 use bevy_mettle_core::tag::{OwnedTags, TagCounts, TagKey, Tags};
 
-pub(crate) use self::activate::{
-    activate, activate_id, activate_id_with, activate_tagged, set_input,
-};
+pub(crate) use self::activate::{activate, activate_id, activate_id_with, mirror, set_input};
 pub(crate) use self::check::{can_activate, can_afford, cooldown_remaining};
 pub(crate) use self::commit::{Commitment, commit};
 pub(crate) use self::end::{

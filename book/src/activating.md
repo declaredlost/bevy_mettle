@@ -128,7 +128,7 @@ let world = app.world_mut();
 assert_eq!(world.activate_ability(mage, Fireball), Err(Failure::NotGranted));
 
 world.grant_ability(mage, Fireball);
-let ability = world.activate_ability(mage, Fireball).unwrap();
+let ability = world.activate_ability(mage, Fireball).unwrap().ability();
 
 // Paid, casting, cooling down, and running its behaviour.
 assert_eq!(world.get::<Base<Mana>>(mage).unwrap().get(), 80.0);
@@ -299,7 +299,7 @@ app.add_plugins((MinimalPlugins, MettlePlugins))
 app.update();
 let mage = app.world_mut().spawn(Base::<Mana>::default()).id();
 app.world_mut().grant_ability(mage, Fireball).unwrap();
-let cast = app.world_mut().activate_ability(mage, Fireball).unwrap();
+let cast = app.world_mut().activate_ability(mage, Fireball).unwrap().ability();
 
 // Stunned mid-cast: interrupted.
 app.world_mut()

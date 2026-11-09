@@ -75,7 +75,7 @@ fn mage_app() -> (TestApp, Entity) {
 let (mut app, mage) = mage_app();
 
 // Cast: 20 mana paid.
-let fireball = app.world_mut().activate_ability(mage, Fireball).unwrap();
+let fireball = app.world_mut().activate_ability(mage, Fireball).unwrap().ability();
 app.tick();
 app.entity(mage).assert::<Current<Mana>>(|mana| mana.get() == 80.0);
 
@@ -97,8 +97,10 @@ app.entity(mage).assert::<Current<Mana>>(|mana| mana.get() == 60.0);
 ```
 
 In your crate, the body is a `#[test]` function. `activate_ability` on the
-world returns the granted ability's entity, or why it didn't activate. Its
-behaviour's component is on that entity while it's active.
+world returns what activating came to, an [`Activated`], or why it didn't
+activate: running here, the usual, or only asked of the server, a client's
+server-run ability. `.ability()` is the granted ability's entity either way,
+and its behaviour's component is on it while it's active.
 
 ## What helps
 
@@ -117,3 +119,4 @@ behaviour's component is on that entity while it's active.
   take, so a test doesn't depend on the tick rate.
 
 [bevy_harness]: https://github.com/declaredlost/bevy_harness
+[`Activated`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/enum.Activated.html

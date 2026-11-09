@@ -174,7 +174,11 @@ fn a_cue_held_twice_ends_once_both_let_go() {
 fn an_abilitys_cue_is_held_while_its_active() {
     let (mut app, mage) = app(NetRole::Standalone);
     app.world_mut().grant_ability(mage, Fireball).unwrap();
-    let fireball = app.world_mut().activate_ability(mage, Fireball).unwrap();
+    let fireball = app
+        .world_mut()
+        .activate_ability(mage, Fireball)
+        .unwrap()
+        .ability();
     app.tick();
     assert_eq!(shown(&app, mage), ["cue.casting"]);
     app.world_mut().end_ability(fireball);
@@ -392,7 +396,11 @@ fn a_shown_effect_replicated_away_lets_go_of_its_cues() {
 fn an_ability_reloaded_mid_cast_ends_what_it_started_with() {
     let (mut app, mage) = app(NetRole::Standalone);
     app.world_mut().grant_ability(mage, Fireball).unwrap();
-    let fireball = app.world_mut().activate_ability(mage, Fireball).unwrap();
+    let fireball = app
+        .world_mut()
+        .activate_ability(mage, Fireball)
+        .unwrap()
+        .ability();
     app.tick();
     assert_eq!(shown(&app, mage), ["cue.casting"]);
 

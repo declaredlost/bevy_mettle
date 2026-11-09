@@ -8,9 +8,9 @@ use bevy_mettle_core::net::NetRole;
 use serde::{Deserialize, Serialize};
 
 use super::request::{AbilityReply, AbilityRequestWith, serve};
-use super::{SERVERS, Serving, running};
+use super::start::AbilityStartedWith;
+use super::{Serving, running};
 use crate::engine;
-use crate::events::Failure;
 
 /// A client's new input to an ability it's running, for the server to check.
 ///
@@ -55,6 +55,15 @@ pub(crate) fn add_input<I: Component + Clone>(app: &mut App) {
     app.init_resource::<NetRole>()
         .add_message::<AbilityRequestWith<I>>()
         .add_message::<AbilityInput<I>>()
+        .add_message::<AbilityStartedWith<I>>()
+        .add_systems(
+            PreUpdate,
+            super::hear_started_with::<I>
+                .after(super::hear_started)
+                .before(super::hear_ends)
+                .in_set(crate::AbilitySystems)
+                .run_if(resource_equals(NetRole::Client)),
+        )
         .add_systems(
             PreUpdate,
             (serve_with::<I>.in_set(Serving), hear_input::<I>)
@@ -73,23 +82,19 @@ fn serve_with<I: Component + Clone>(
 ) {
     for request in requests.read().cloned() {
         commands.queue(move |world: &mut World| {
-            let rejected = if request.activation & SERVERS == 0 {
-                engine::activate_id_with(
-                    world,
-                    request.actor,
-                    request.ability,
-                    Some(request.activation),
-                    None,
-                    Some(request.input),
-                )
-                .err()
-            } else {
-                warn!(
-                    "a client asked to activate {:?} under the server's activation {}: rejected",
-                    request.ability, request.activation
-                );
-                Some(Failure::NotGranted)
-            };
+            let rejected =
+                super::request::askable(world, request.actor, request.ability, request.activation)
+                    .and_then(|()| {
+                        engine::activate_id_with(
+                            world,
+                            request.actor,
+                            request.ability,
+                            Some(request.activation),
+                            None,
+                            Some(request.input),
+                        )
+                    })
+                    .err();
             world.write_message(AbilityReply {
                 actor: request.actor,
                 ability: request.ability,

@@ -4,7 +4,7 @@
 use std::any::TypeId;
 
 use bevy::prelude::*;
-use bevy_mettle_core::tag::{OwnedTags, Tags};
+use bevy_mettle_core::tag::OwnedTags;
 use bevy_mettle_effect::cue::{Cue, CueWorld};
 
 use super::check::can_activate;
@@ -14,7 +14,7 @@ use super::{abilities_of, next_activation};
 use crate::AbilityId;
 use crate::active::{AbilityOf, ActiveAbility, GrantedAbility};
 use crate::behaviour::{BehaviourId, BehaviourRegistry, InputChecks, NoInput};
-use crate::data::Commit;
+use crate::data::{AbilityDef, Commit};
 use crate::events::{AbilityActivated, AbilityFailed, Failure, GameplayEvent};
 
 /// Activates `id` for `actor`, under `activation` if it's given: its first
@@ -82,23 +82,6 @@ fn runs(world: &World, ability: Entity, behaviour: Option<BehaviourId>) -> bool 
     runs
 }
 
-/// Activates every ability granted to `actor` tagged any of `tags`: those that
-/// did.
-pub(crate) fn activate_tagged(world: &mut World, actor: Entity, tags: &Tags) -> Vec<Entity> {
-    let tagged: Vec<Entity> = abilities_of(world, actor)
-        .into_iter()
-        .filter(|ability| {
-            world
-                .get::<GrantedAbility>(*ability)
-                .is_some_and(|granted| granted.def.tags.contains_any(tags))
-        })
-        .collect();
-    tagged
-        .into_iter()
-        .filter(|ability| activate(world, *ability, None, None).is_ok())
-        .collect()
-}
-
 /// Activates `ability`, for `event` if one triggered it, under `activation` if
 /// it's given (a client's, or the server answering it).
 pub(crate) fn activate(
@@ -148,6 +131,58 @@ pub(crate) fn activate_with<I: Component + Clone>(
         failed(world, ability, Failure::Cost);
         return Err(Failure::Cost);
     }
+    // Only what a client's told of needs the input again.
+    let tells = crate::net::tells_start(world, &def);
+    let told = if tells { input.clone() } else { None };
+    start(world, ability, actor, &def, level, event, activation, input);
+    if tells {
+        crate::net::started(world, actor, &def, activation, told);
+    }
+    Ok(())
+}
+
+/// Starts `ability` on a client as the server says it started there, under
+/// the server's `activation`, with its `input`: not checked or paid again,
+/// the server having done both. What a [`ServerInitiated`] ability's owning
+/// client runs.
+///
+/// [`ServerInitiated`]: crate::data::NetExecution::ServerInitiated
+pub(crate) fn mirror<I: Component + Clone>(
+    world: &mut World,
+    ability: Entity,
+    activation: u64,
+    input: Option<I>,
+) {
+    let Some(actor) = world.get::<AbilityOf>(ability).map(|of| of.0) else {
+        return;
+    };
+    if world.get::<ActiveAbility>(ability).is_some() {
+        // Running already: the server started it again, after its end.
+        end_quietly(world, ability, true);
+    }
+    let Some(granted) = world.get::<GrantedAbility>(ability) else {
+        return;
+    };
+    let (def, level) = (granted.def.clone(), granted.level);
+    start(world, ability, actor, &def, level, None, activation, input);
+}
+
+/// Starts `ability`, checked and paid for: what it cancels ended, its tags
+/// granted, its cues played, and its behaviour put on with its input.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "what an activation starts with, in one place"
+)]
+fn start<I: Component + Clone>(
+    world: &mut World,
+    ability: Entity,
+    actor: Entity,
+    def: &AbilityDef,
+    level: f32,
+    event: Option<GameplayEvent>,
+    activation: u64,
+    input: Option<I>,
+) {
     let cancelled: Vec<Entity> = abilities_of(world, actor)
         .into_iter()
         .filter(|other| {
@@ -196,7 +231,6 @@ pub(crate) fn activate_with<I: Component + Clone>(
     });
     // What it paid, granted or cancelled may interrupt it.
     interrupt(world, actor);
-    Ok(())
 }
 
 /// Tells that `ability` didn't activate, and why.

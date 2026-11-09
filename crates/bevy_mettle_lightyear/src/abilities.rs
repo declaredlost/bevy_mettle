@@ -8,6 +8,7 @@ use bevy_mettle_ability::events::Failure;
 use bevy_mettle_ability::net::end::{AbilityCancelRequest, AbilityEnd};
 use bevy_mettle_ability::net::input::AbilityInput;
 use bevy_mettle_ability::net::request::{AbilityReply, AbilityRequest, AbilityRequestWith};
+use bevy_mettle_ability::net::start::{AbilityStarted, AbilityStartedWith};
 use bevy_replicon::prelude::RepliconTick;
 use bevy_replicon::server::server_tick::ServerTick;
 use lightyear::prelude::server::ClientOf;
@@ -163,31 +164,59 @@ pub(super) fn hear_cancels(
     }
 }
 
-/// On a server: tells the client controlling each actor of the ends of
-/// abilities run under its activations.
-pub(super) fn tell_ends(
-    mut ends: ResMut<Messages<AbilityEnd>>,
+/// A message from the server for the client controlling its actor: an end
+/// of what that client runs, a start of what the server initiated.
+pub(super) trait ForController: bevy::ecs::message::Message + Clone {
+    /// The actor it's about.
+    fn actor(&self) -> Entity;
+}
+
+impl ForController for AbilityEnd {
+    fn actor(&self) -> Entity {
+        self.actor
+    }
+}
+
+impl ForController for AbilityStarted {
+    fn actor(&self) -> Entity {
+        self.actor
+    }
+}
+
+impl<I: Send + Sync + Clone + 'static> ForController for AbilityStartedWith<I> {
+    fn actor(&self) -> Entity {
+        self.actor
+    }
+}
+
+/// On a server: sends each `M` mettle wrote to the client controlling its
+/// actor, if one does.
+pub(super) fn tell<M: ForController>(
+    mut messages: ResMut<Messages<M>>,
     controlled: Query<&ControlledBy>,
-    mut senders: Query<&mut MessageSender<AbilityEnd>>,
+    mut senders: Query<&mut MessageSender<M>>,
 ) {
-    for end in ends.drain() {
-        let Ok(link) = controlled.get(end.actor).map(|controlled| controlled.owner) else {
+    for message in messages.drain() {
+        let Ok(link) = controlled
+            .get(message.actor())
+            .map(|controlled| controlled.owner)
+        else {
             continue;
         };
         if let Ok(mut sender) = senders.get_mut(link) {
-            sender.send::<MettleChannel>(end);
+            sender.send::<MettleChannel>(message);
         }
     }
 }
 
-/// On a client: hands the server's ends of its activations to mettle.
-pub(super) fn hear_ends(
-    mut receivers: Query<&mut MessageReceiver<AbilityEnd>, With<Client>>,
-    mut ends: MessageWriter<AbilityEnd>,
+/// On a client: hands each `M` from the server to mettle.
+pub(super) fn hear<M: ForController>(
+    mut receivers: Query<&mut MessageReceiver<M>, With<Client>>,
+    mut messages: MessageWriter<M>,
 ) {
     for mut receiver in &mut receivers {
-        for end in receiver.receive() {
-            ends.write(end);
+        for message in receiver.receive() {
+            messages.write(message);
         }
     }
 }

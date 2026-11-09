@@ -10,6 +10,7 @@ use bevy::ecs::entity::MapEntities;
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 use bevy_harness::{TestApp, TestWorld};
+use bevy_mettle_ability::data::NetExecution;
 use bevy_mettle_ability::prelude::*;
 use bevy_mettle_attribute::prelude::*;
 use bevy_mettle_core::prelude::*;
@@ -39,6 +40,39 @@ struct Fireball;
 #[derive(Ability)]
 struct Shot;
 
+/// Run by the server alone: a client's ask, sent and not run.
+#[derive(Ability)]
+struct Smite;
+
+/// Run by the server, then by its owning client as the server says.
+#[derive(Ability)]
+struct Ward;
+
+/// Run where it's activated, and never sent.
+#[derive(Ability)]
+struct Zoom;
+
+/// Predicted, and sending `event.spark` under its activation as it starts.
+#[derive(Ability)]
+struct Flare;
+
+/// Predicted, and triggered by `event.spark`.
+#[derive(Ability)]
+struct Spark;
+
+/// Server-initiated, triggered by `event.beacon`, and flaring as it starts:
+/// sending `event.spark` under its activation, the server's.
+#[derive(Ability)]
+struct Beacon;
+
+/// Local only, triggered by `event.lens`.
+#[derive(Ability)]
+struct Lens;
+
+/// Local only, triggered as `state.aiming` is added.
+#[derive(Ability)]
+struct Scope;
+
 #[derive(Effect)]
 #[effect(name = "fireball.cost")]
 struct FireballCost;
@@ -49,6 +83,32 @@ struct FireballCooldown;
 
 #[derive(Component, Default, Behaviour)]
 struct Cast;
+
+#[derive(Component, Default, Behaviour)]
+struct Smiting;
+
+#[derive(Component, Default, Behaviour)]
+struct Warding;
+
+#[derive(Component, Default, Behaviour)]
+struct Zooming;
+
+#[derive(Component, Default, Behaviour)]
+struct Flaring;
+
+#[derive(Component, Default, Behaviour)]
+struct Sparking;
+
+/// A flare, as it starts on either side: sends `event.spark` to its actor
+/// under its activation.
+fn flare(add: On<Add<Flaring>>, active: Query<&ActiveAbility>, mut commands: Commands) {
+    let Ok(active) = active.get(add.entity) else {
+        return;
+    };
+    let event =
+        GameplayEvent::new(active.actor, TagKey::named("event.spark")).under(active.activation);
+    commands.queue(move |world: &mut World| AbilityWorld::send_event(world, event));
+}
 
 /// Where a shot is aimed: how far along. Sent from clients.
 #[derive(
@@ -83,9 +143,23 @@ fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
         .add_plugins((EffectPlugin::default(), AbilityPlugin))
         .add_behaviour::<Cast>()
         .add_behaviour::<Shoot>()
+        .add_behaviour::<Smiting>()
+        .add_behaviour::<Warding>()
+        .add_behaviour::<Zooming>()
+        .add_behaviour::<Flaring>()
+        .add_behaviour::<Sparking>()
+        .add_observer(flare)
         .check_input::<Aim, _>(in_reach)
         .add_ability::<Fireball>()
         .add_ability::<Shot>()
+        .add_ability::<Smite>()
+        .add_ability::<Ward>()
+        .add_ability::<Zoom>()
+        .add_ability::<Flare>()
+        .add_ability::<Spark>()
+        .add_ability::<Beacon>()
+        .add_ability::<Lens>()
+        .add_ability::<Scope>()
         .add_effect::<FireballCost>()
         .add_effect::<FireballCooldown>()
         .insert_resource(Reach(if role == NetRole::Server { 10.0 } else { 100.0 }))
@@ -100,6 +174,13 @@ fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
         "cue",
         "cue.cooling",
         "cue.hit",
+        "ability",
+        "event",
+        "event.ward",
+        "event.spark",
+        "event.beacon",
+        "event.lens",
+        "state.aiming",
     ]
     .into_iter()
     .map(TagKey::named)
@@ -127,16 +208,10 @@ fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
             },
         )
         .unwrap();
-    let fireball = AbilityData::new("fireball", "cast")
-        .cost("fireball.cost")
-        .cooldown("fireball.cooldown")
-        .blocked_by("state.stunned")
-        .cancel_if(Condition::owner_has("state.stunned"));
-    let shot = AbilityData::new("shot", "shoot").cost("fireball.cost");
     let abilities = world
         .resource::<AbilityRegistry>()
         .recheck(
-            &[fireball, shot],
+            &abilities(),
             &[],
             AbilityChecks {
                 tags: &tags,
@@ -148,6 +223,42 @@ fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
     world.insert_resource(effects);
     world.insert_resource(abilities);
     world.insert_resource(tags);
+}
+
+/// Every ability both sides have, as data.
+fn abilities() -> [AbilityData; 10] {
+    let fireball = AbilityData::new("fireball", "cast")
+        .tag("ability")
+        .cost("fireball.cost")
+        .cooldown("fireball.cooldown")
+        .blocked_by("state.stunned")
+        .cancel_if(Condition::owner_has("state.stunned"));
+    let shot = AbilityData::new("shot", "shoot").cost("fireball.cost");
+    let smite = AbilityData::new("smite", "smiting")
+        .cost("fireball.cost")
+        .net(NetExecution::ServerOnly);
+    let ward = AbilityData::new("ward", "warding")
+        .cost("fireball.cost")
+        .trigger(Trigger::Event(TagKey::named("event.ward")))
+        .net(NetExecution::ServerInitiated);
+    let zoom = AbilityData::new("zoom", "zooming").net(NetExecution::LocalOnly);
+    let flare = AbilityData::new("flare", "flaring")
+        .cost("fireball.cost")
+        .blocked_by("state.stunned");
+    let spark =
+        AbilityData::new("spark", "sparking").trigger(Trigger::Event(TagKey::named("event.spark")));
+    let beacon = AbilityData::new("beacon", "flaring")
+        .trigger(Trigger::Event(TagKey::named("event.beacon")))
+        .net(NetExecution::ServerInitiated);
+    let lens = AbilityData::new("lens", "zooming")
+        .trigger(Trigger::Event(TagKey::named("event.lens")))
+        .net(NetExecution::LocalOnly);
+    let scope = AbilityData::new("scope", "zooming")
+        .trigger(Trigger::TagAdded(TagKey::named("state.aiming")))
+        .net(NetExecution::LocalOnly);
+    [
+        fireball, shot, smite, ward, zoom, flare, spark, beacon, lens, scope,
+    ]
 }
 
 /// The app of one side, `role`, on `plugins`: lightyear's, with mettle.
@@ -667,7 +778,8 @@ fn a_shot_aimed_again_past_reach_is_cancelled_on_both_sides() {
     let shooting = world["client"]
         .world_mut()
         .activate_ability_with::<Shoot>(here, Shot, Aim(4.0))
-        .unwrap();
+        .unwrap()
+        .ability();
     world.ticks(20);
     world["client"]
         .world_mut()
@@ -926,7 +1038,8 @@ fn a_cast_the_client_cancels_is_cancelled_on_the_server() {
     let cast = world["client"]
         .world_mut()
         .activate_ability(here, Fireball)
-        .unwrap();
+        .unwrap()
+        .ability();
     world
         .until(|world| casting(&world["server"], there))
         .describe("the server casts too")
@@ -946,7 +1059,8 @@ fn a_cast_cancelled_as_its_asked_for_never_runs_on_the_server() {
     let cast = world["client"]
         .world_mut()
         .activate_ability(here, Fireball)
-        .unwrap();
+        .unwrap()
+        .ability();
     world["client"].world_mut().cancel_ability(cast);
     world
         .until(|world| same(mana(&world["server"], there), 10.0))
@@ -1059,4 +1173,646 @@ fn a_client_with_other_content_is_told_as_it_connects() {
         [],
         "its content isn't its server's"
     );
+}
+
+/// The bit a server's own activations have set.
+const SERVERS: u64 = 1 << 63;
+
+/// The bit an activation derived from another's has set.
+const DERIVED: u64 = 1 << 62;
+
+/// An actor on the server, controlled by the client, given what `grant`
+/// grants it: it, and its actor on the client, once every ability it has
+/// replicated.
+fn granted(world: &mut TestWorld, grant: impl FnOnce(&mut World, Entity)) -> (Entity, Entity) {
+    let link = link(world);
+    let there = world["server"].spawn((
+        Base::<Mana>::default(),
+        Replicate::to_clients(NetworkTarget::All),
+        ControlledBy {
+            owner: link,
+            lifetime: Lifetime::default(),
+        },
+    ));
+    grant(world["server"].world_mut(), there);
+    let count = world["server"]
+        .entity(there)
+        .get::<Abilities>()
+        .iter()
+        .count();
+    world
+        .until(|world| {
+            let client = &world["client"];
+            mapped(client, there).is_some_and(|here| {
+                client
+                    .entity(here)
+                    .try_get::<Abilities>()
+                    .is_some_and(|abilities| {
+                        abilities
+                            .iter()
+                            .filter(|ability| client.entity(*ability).has::<GrantedAbility>())
+                            .count()
+                            == count
+                    })
+            })
+        })
+        .describe("the actor and its abilities replicate")
+        .within_ticks(50);
+    (there, mapped(&world["client"], there).unwrap())
+}
+
+/// `actor`'s granted `A`, as `app` has it.
+fn ability<A: Ability>(app: &TestApp, actor: Entity) -> Entity {
+    let id = app.resource::<AbilityRegistry>().id_of::<A>().unwrap();
+    app.entity(actor)
+        .get::<Abilities>()
+        .iter()
+        .find(|ability| {
+            app.entity(*ability)
+                .try_get::<GrantedAbility>()
+                .is_some_and(|granted| granted.def().id == id)
+        })
+        .unwrap()
+}
+
+/// The activation `actor`'s `A` runs under in `app`, if it's active.
+fn running<A: Ability>(app: &TestApp, actor: Entity) -> Option<u64> {
+    app.entity(ability::<A>(app, actor))
+        .try_get::<ActiveAbility>()
+        .map(|active| active.activation)
+}
+
+#[test]
+fn a_server_only_ability_runs_on_the_server_alone() {
+    let mut world = net();
+    let (there, here) = granted(&mut world, |server, there| {
+        server.grant_ability(there, Smite);
+    });
+    let activated = world["client"]
+        .world_mut()
+        .activate_ability(here, Smite)
+        .unwrap();
+    assert!(
+        matches!(activated, Activated::Asked(_)),
+        "asked of the server, not run here: {activated:?}"
+    );
+    for _ in 0..20 {
+        world.tick();
+        assert_eq!(
+            running::<Smite>(&world["client"], here),
+            None,
+            "never run here"
+        );
+        assert_eq!(world["client"].count::<With<Smiting>>(), 0);
+    }
+    let server = &world["server"];
+    assert!(running::<Smite>(server, there).is_some(), "run there");
+    server
+        .entity(ability::<Smite>(server, there))
+        .assert_has::<Smiting>();
+    assert!(same(mana(&world["server"], there), 10.0), "paid there");
+    assert!(
+        same(mana(&world["client"], here), 10.0),
+        "and shown here, replicated"
+    );
+}
+
+#[test]
+fn a_server_only_ability_the_server_cant_pay_for_fails_on_the_client() {
+    let mut world = net();
+    let (there, here) = granted(&mut world, |server, there| {
+        server.grant_ability(there, Smite);
+    });
+    world["server"]
+        .entity_mut(there)
+        .get_mut::<Base<Mana>>()
+        .unwrap()
+        .set(10.0);
+    world["client"].watch_triggered::<AbilityFailed>();
+    let activated = world["client"]
+        .world_mut()
+        .activate_ability(here, Smite)
+        .unwrap();
+    assert!(
+        matches!(activated, Activated::Asked(_)),
+        "asked of the server, not run here: {activated:?}"
+    );
+    world.ticks(20);
+    assert_eq!(running::<Smite>(&world["server"], there), None);
+    let smite = world["client"]
+        .resource::<AbilityRegistry>()
+        .id_of::<Smite>()
+        .unwrap();
+    world["client"].assert_triggered::<AbilityFailed>(|failed| {
+        failed.entity == here && failed.id == smite && failed.reason == Failure::Cost
+    });
+}
+
+#[test]
+fn a_server_initiated_ability_a_client_asks_for_mirrors_the_servers() {
+    let mut world = net();
+    let (there, here) = granted(&mut world, |server, there| {
+        server.grant_ability(there, Ward);
+    });
+    let activated = world["client"]
+        .world_mut()
+        .activate_ability(here, Ward)
+        .unwrap();
+    assert!(
+        matches!(activated, Activated::Asked(_)),
+        "asked of the server, not run here: {activated:?}"
+    );
+    assert_eq!(
+        running::<Ward>(&world["client"], here),
+        None,
+        "asked, not run yet"
+    );
+    world
+        .until(|world| running::<Ward>(&world["client"], here).is_some())
+        .describe("the client runs what the server started")
+        .within_ticks(20);
+    let server = &world["server"];
+    let activation = running::<Ward>(server, there).expect("the server runs it");
+    assert_eq!(
+        running::<Ward>(&world["client"], here),
+        Some(activation),
+        "under the server's activation"
+    );
+    let client = &world["client"];
+    client
+        .entity(ability::<Ward>(client, here))
+        .assert_has::<Warding>();
+    for _ in 0..20 {
+        world.tick();
+        let mana = mana(&world["client"], here);
+        assert!(
+            same(mana, 10.0) || same(mana, 30.0),
+            "never paid twice: {mana}"
+        );
+    }
+    assert!(same(mana(&world["server"], there), 10.0));
+    assert!(
+        same(mana(&world["client"], here), 10.0),
+        "as the server says"
+    );
+    assert_eq!(running::<Ward>(&world["client"], here), Some(activation));
+}
+
+#[test]
+fn a_server_initiated_ability_the_server_ends_ends_on_the_client() {
+    let mut world = net();
+    let (there, here) = granted(&mut world, |server, there| {
+        server.grant_ability(there, Ward);
+    });
+    let activated = world["client"]
+        .world_mut()
+        .activate_ability(here, Ward)
+        .unwrap();
+    assert!(
+        matches!(activated, Activated::Asked(_)),
+        "asked of the server, not run here: {activated:?}"
+    );
+    world
+        .until(|world| running::<Ward>(&world["client"], here).is_some())
+        .describe("the client runs what the server started")
+        .within_ticks(20);
+    let ward = ability::<Ward>(&world["server"], there);
+    world["server"].world_mut().end_ability(ward);
+    world
+        .until(|world| running::<Ward>(&world["client"], here).is_none())
+        .describe("the client's ends with the server's")
+        .within_ticks(20);
+    assert_eq!(world["client"].count::<With<Warding>>(), 0);
+}
+
+#[test]
+fn a_server_initiated_ability_the_server_triggers_runs_on_the_client() {
+    let mut world = net();
+    let (there, here) = granted(&mut world, |server, there| {
+        server.grant_ability(there, Ward);
+    });
+    AbilityWorld::send_event(
+        world["server"].world_mut(),
+        GameplayEvent::new(there, TagKey::named("event.ward")),
+    );
+    let activation = running::<Ward>(&world["server"], there).expect("triggered");
+    assert_ne!(activation & SERVERS, 0, "the server's own");
+    world
+        .until(|world| running::<Ward>(&world["client"], here) == Some(activation))
+        .describe("the client runs what the server triggered")
+        .within_ticks(20);
+    let client = &world["client"];
+    client
+        .entity(ability::<Ward>(client, here))
+        .assert_has::<Warding>();
+    world.ticks(20);
+    assert!(same(mana(&world["client"], here), 10.0), "paid once");
+}
+
+#[test]
+fn a_server_initiated_ability_the_client_cancels_is_cancelled_on_the_server() {
+    let mut world = net();
+    let (there, here) = granted(&mut world, |server, there| {
+        server.grant_ability(there, Ward);
+    });
+    AbilityWorld::send_event(
+        world["server"].world_mut(),
+        GameplayEvent::new(there, TagKey::named("event.ward")),
+    );
+    world
+        .until(|world| running::<Ward>(&world["client"], here).is_some())
+        .describe("the client runs what the server triggered")
+        .within_ticks(20);
+    let ward = ability::<Ward>(&world["client"], here);
+    world["client"].world_mut().cancel_ability(ward);
+    assert_eq!(running::<Ward>(&world["client"], here), None);
+    world
+        .until(|world| running::<Ward>(&world["server"], there).is_none())
+        .describe("the server's is cancelled")
+        .within_ticks(20);
+    world.ticks(10);
+    assert_eq!(
+        running::<Ward>(&world["client"], here),
+        None,
+        "and not started again"
+    );
+}
+
+#[test]
+fn a_local_only_ability_runs_on_the_client_alone() {
+    let mut world = net();
+    let (there, here) = granted(&mut world, |server, there| {
+        server.grant_ability(there, Zoom);
+    });
+    let activated = world["client"]
+        .world_mut()
+        .activate_ability(here, Zoom)
+        .unwrap();
+    assert!(
+        matches!(activated, Activated::Running(_)),
+        "running here: {activated:?}"
+    );
+    let client = &world["client"];
+    assert!(running::<Zoom>(client, here).is_some(), "run at once");
+    client
+        .entity(ability::<Zoom>(client, here))
+        .assert_has::<Zooming>();
+    for _ in 0..20 {
+        world.tick();
+        assert_eq!(running::<Zoom>(&world["server"], there), None, "never sent");
+    }
+    assert!(
+        running::<Zoom>(&world["client"], here).is_some(),
+        "still running"
+    );
+}
+
+#[test]
+fn a_client_asking_for_a_local_only_ability_is_rejected() {
+    let mut world = net();
+    let (there, here) = granted(&mut world, |server, there| {
+        server.grant_ability(there, Zoom);
+    });
+    world["client"].watch_triggered::<AbilityFailed>();
+    let zoom = world["client"]
+        .resource::<AbilityRegistry>()
+        .id_of::<Zoom>()
+        .unwrap();
+    world["client"].world_mut().write_message(AbilityRequest {
+        actor: here,
+        ability: zoom,
+        activation: 1,
+    });
+    world.ticks(20);
+    assert_eq!(running::<Zoom>(&world["server"], there), None);
+    world["client"].assert_triggered::<AbilityFailed>(|failed| {
+        failed.id == zoom && failed.reason == Failure::NotGranted
+    });
+}
+
+#[test]
+fn a_predicted_trigger_runs_at_once_under_the_activation_the_server_runs_it_under() {
+    let mut world = net();
+    let (there, here) = granted(&mut world, |server, there| {
+        server.grant_ability(there, Flare);
+        server.grant_ability(there, Spark);
+    });
+    world["client"]
+        .world_mut()
+        .activate_ability(here, Flare)
+        .unwrap();
+    let client = &world["client"];
+    let flare = running::<Flare>(client, here).expect("predicted");
+    let spark = running::<Spark>(client, here).expect("triggered, predicted at once");
+    assert_ne!(spark, flare);
+    assert_ne!(spark & DERIVED, 0, "derived");
+    assert_eq!(spark & SERVERS, 0, "from the client's");
+    client
+        .entity(ability::<Spark>(client, here))
+        .assert_has::<Sparking>();
+    world
+        .until(|world| running::<Spark>(&world["server"], there).is_some())
+        .describe("the server sparks too")
+        .within_ticks(20);
+    let server = &world["server"];
+    assert_eq!(running::<Flare>(server, there), Some(flare));
+    assert_eq!(
+        running::<Spark>(server, there),
+        Some(spark),
+        "under the same activation"
+    );
+    world.ticks(20);
+    let client = &world["client"];
+    assert_eq!(running::<Flare>(client, here), Some(flare));
+    assert_eq!(
+        running::<Spark>(client, here),
+        Some(spark),
+        "confirmed, kept"
+    );
+    assert!(same(mana(client, here), 10.0), "the flare paid once");
+}
+
+#[test]
+fn a_predicted_trigger_is_undone_with_its_rejected_parent() {
+    let mut world = net();
+    let (there, here) = granted(&mut world, |server, there| {
+        server.grant_ability(there, Flare);
+        server.grant_ability(there, Spark);
+    });
+    world["server"]
+        .entity_mut(there)
+        .get_mut::<OwnedTags>()
+        .unwrap()
+        .add("state.stunned");
+    world["client"]
+        .world_mut()
+        .activate_ability(here, Flare)
+        .unwrap();
+    assert!(
+        running::<Spark>(&world["client"], here).is_some(),
+        "predicted"
+    );
+    world
+        .until(|world| {
+            let client = &world["client"];
+            running::<Flare>(client, here).is_none() && running::<Spark>(client, here).is_none()
+        })
+        .describe("the flare and its spark are undone")
+        .within_ticks(20);
+    world.ticks(10);
+    let server = &world["server"];
+    assert_eq!(running::<Flare>(server, there), None, "refused");
+    assert_eq!(running::<Spark>(server, there), None, "never triggered");
+    assert_eq!(world["client"].count::<With<Sparking>>(), 0);
+    assert!(same(mana(&world["client"], here), 30.0), "mana back");
+}
+
+#[test]
+fn abilities_a_client_activates_by_tag_are_predicted_and_sent() {
+    let mut world = net();
+    let (there, here) = mage(&mut world, true);
+    let client = world["client"].world_mut();
+    client
+        .commands()
+        .entity(here)
+        .activate_tagged([TagKey::named("ability")].into_iter().collect());
+    client.flush();
+    assert!(casting(&world["client"], here), "predicted at once");
+    world.tick();
+    assert!(same(mana(&world["client"], here), 10.0), "paid, predicted");
+    world
+        .until(|world| casting(&world["server"], there))
+        .describe("the server casts too")
+        .within_ticks(20);
+    world.ticks(20);
+    assert!(same(mana(&world["server"], there), 10.0));
+    assert!(same(mana(&world["client"], here), 10.0), "paid once");
+}
+
+#[test]
+fn a_granted_ability_a_client_activates_is_predicted_and_sent() {
+    let mut world = net();
+    let (there, here) = mage(&mut world, true);
+    let fireball = ability::<Fireball>(&world["client"], here);
+    let activated = AbilityWorld::activate(world["client"].world_mut(), fireball).unwrap();
+    assert_eq!(activated, Activated::Running(fireball), "running here");
+    assert!(casting(&world["client"], here), "predicted at once");
+    world
+        .until(|world| casting(&world["server"], there))
+        .describe("the server casts too")
+        .within_ticks(20);
+    world.ticks(20);
+    assert!(same(mana(&world["server"], there), 10.0));
+    assert!(same(mana(&world["client"], here), 10.0), "paid once");
+}
+
+#[test]
+fn a_granted_server_only_ability_a_client_activates_is_asked_for() {
+    let mut world = net();
+    let (there, here) = granted(&mut world, |server, there| {
+        server.grant_ability(there, Smite);
+    });
+    let smite = ability::<Smite>(&world["client"], here);
+    let activated = AbilityWorld::activate(world["client"].world_mut(), smite).unwrap();
+    assert_eq!(activated, Activated::Asked(smite), "asked, not run here");
+    assert_eq!(running::<Smite>(&world["client"], here), None);
+    world
+        .until(|world| running::<Smite>(&world["server"], there).is_some())
+        .describe("the server runs it")
+        .within_ticks(20);
+    assert_eq!(running::<Smite>(&world["client"], here), None, "never here");
+}
+
+#[test]
+fn a_server_initiated_ability_started_and_ended_at_once_isnt_left_running_on_the_client() {
+    let mut world = net();
+    let (there, here) = granted(&mut world, |server, there| {
+        server.grant_ability(there, Ward);
+    });
+    world["client"].watch_triggered::<AbilityActivated>();
+    // Started and ended in one server frame: its start and its end go out
+    // together, the start first.
+    AbilityWorld::send_event(
+        world["server"].world_mut(),
+        GameplayEvent::new(there, TagKey::named("event.ward")),
+    );
+    let activation = running::<Ward>(&world["server"], there).expect("triggered");
+    let ward = ability::<Ward>(&world["server"], there);
+    world["server"].world_mut().end_ability(ward);
+    assert_eq!(running::<Ward>(&world["server"], there), None, "ended");
+    world.ticks(20);
+    let id = world["client"]
+        .resource::<AbilityRegistry>()
+        .id_of::<Ward>()
+        .unwrap();
+    world["client"].assert_triggered::<AbilityActivated>(|activated| {
+        activated.entity == here && activated.id == id && activated.activation == activation
+    });
+    assert_eq!(
+        running::<Ward>(&world["client"], here),
+        None,
+        "started, then ended"
+    );
+    assert_eq!(world["client"].count::<With<Warding>>(), 0);
+}
+
+#[test]
+fn a_predicted_trigger_under_the_servers_activation_runs_on_the_server_alone() {
+    let mut world = net();
+    let (there, here) = granted(&mut world, |server, there| {
+        server.grant_ability(there, Beacon);
+        server.grant_ability(there, Spark);
+    });
+    AbilityWorld::send_event(
+        world["server"].world_mut(),
+        GameplayEvent::new(there, TagKey::named("event.beacon")),
+    );
+    let server = &world["server"];
+    let beacon = running::<Beacon>(server, there).expect("triggered");
+    assert_ne!(beacon & SERVERS, 0, "the server's own");
+    let spark = running::<Spark>(server, there).expect("sparked under the beacon");
+    assert_ne!(spark & SERVERS, 0, "the server's, derived");
+    assert_ne!(spark & DERIVED, 0, "derived");
+    world
+        .until(|world| running::<Beacon>(&world["client"], here) == Some(beacon))
+        .describe("the client mirrors the beacon")
+        .within_ticks(20);
+    let client = &world["client"];
+    client
+        .entity(ability::<Beacon>(client, here))
+        .assert_has::<Flaring>();
+    for _ in 0..20 {
+        assert_eq!(
+            running::<Spark>(&world["client"], here),
+            None,
+            "not predicted under the server's activation"
+        );
+        assert_eq!(world["client"].count::<With<Sparking>>(), 0);
+        world.tick();
+    }
+    assert_eq!(
+        running::<Spark>(&world["server"], there),
+        Some(spark),
+        "the server runs it"
+    );
+    assert_eq!(running::<Beacon>(&world["client"], here), Some(beacon));
+}
+
+#[test]
+fn a_local_only_ability_an_event_on_the_client_triggers_runs_there_alone() {
+    let mut world = net();
+    let (there, here) = granted(&mut world, |server, there| {
+        server.grant_ability(there, Lens);
+    });
+    AbilityWorld::send_event(
+        world["client"].world_mut(),
+        GameplayEvent::new(here, TagKey::named("event.lens")),
+    );
+    let client = &world["client"];
+    assert!(running::<Lens>(client, here).is_some(), "run at once");
+    client
+        .entity(ability::<Lens>(client, here))
+        .assert_has::<Zooming>();
+    for _ in 0..20 {
+        world.tick();
+        assert_eq!(running::<Lens>(&world["server"], there), None, "never sent");
+    }
+    assert!(
+        running::<Lens>(&world["client"], here).is_some(),
+        "still running"
+    );
+}
+
+#[test]
+fn a_local_only_ability_a_tag_on_the_client_triggers_runs_there_alone() {
+    let mut world = net();
+    let (there, here) = granted(&mut world, |server, there| {
+        server.grant_ability(there, Scope);
+    });
+    world["client"]
+        .entity_mut(here)
+        .get_mut::<OwnedTags>()
+        .unwrap()
+        .add("state.aiming");
+    world
+        .until(|world| running::<Scope>(&world["client"], here).is_some())
+        .describe("the client runs it as the tag comes")
+        .within_ticks(5);
+    let client = &world["client"];
+    client
+        .entity(ability::<Scope>(client, here))
+        .assert_has::<Zooming>();
+    for _ in 0..20 {
+        world.tick();
+        assert_eq!(
+            running::<Scope>(&world["server"], there),
+            None,
+            "never sent"
+        );
+    }
+    assert!(
+        running::<Scope>(&world["client"], here).is_some(),
+        "still running"
+    );
+}
+
+#[test]
+fn a_client_cant_cancel_a_server_only_ability() {
+    let mut world = net();
+    let (there, here) = granted(&mut world, |server, there| {
+        server.grant_ability(there, Smite);
+        server.grant_ability(there, Flare);
+    });
+    // Enough for both.
+    world["server"]
+        .entity_mut(there)
+        .get_mut::<Base<Mana>>()
+        .unwrap()
+        .set(40.0);
+    world
+        .until(|world| same(mana(&world["client"], here), 40.0))
+        .describe("the client sees its mana")
+        .within_ticks(20);
+    world["client"]
+        .world_mut()
+        .activate_ability(here, Smite)
+        .unwrap();
+    let flare = world["client"]
+        .world_mut()
+        .activate_ability(here, Flare)
+        .unwrap()
+        .ability();
+    world
+        .until(|world| {
+            let server = &world["server"];
+            running::<Smite>(server, there).is_some() && running::<Flare>(server, there).is_some()
+        })
+        .describe("the server runs both")
+        .within_ticks(20);
+    let activation = running::<Smite>(&world["server"], there).unwrap();
+    world["client"]
+        .world_mut()
+        .write_message(AbilityCancelRequest {
+            actor: here,
+            activation,
+        });
+    // A cancel the server heeds, sent after: as it's heeded, the other's
+    // been heard.
+    world["client"].world_mut().cancel_ability(flare);
+    world
+        .until(|world| running::<Flare>(&world["server"], there).is_none())
+        .describe("the server cancels the flare")
+        .within_ticks(20);
+    for _ in 0..20 {
+        world.tick();
+        assert_eq!(
+            running::<Smite>(&world["server"], there),
+            Some(activation),
+            "ignored: not the client's to cancel"
+        );
+    }
+    let server = &world["server"];
+    server
+        .entity(ability::<Smite>(server, there))
+        .assert_has::<Smiting>();
 }

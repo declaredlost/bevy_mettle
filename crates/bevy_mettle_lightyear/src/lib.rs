@@ -17,6 +17,7 @@ use bevy_mettle_ability::net::end::{AbilityCancelRequest, AbilityEnd};
 use bevy_mettle_ability::net::input::AbilityInput;
 use bevy_mettle_ability::net::replica::AbilityReplica;
 use bevy_mettle_ability::net::request::{AbilityRequest, AbilityRequestWith};
+use bevy_mettle_ability::net::start::{AbilityStarted, AbilityStartedWith};
 use bevy_mettle_attribute::authority::Served;
 use bevy_mettle_attribute::modifier::ModifiersReplica;
 use bevy_mettle_attribute::{Attribute, Base};
@@ -32,8 +33,8 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use self::abilities::{
-    Answer, Held, ask, ask_cancels, ask_with, hear_cancels, hear_ends, hear_input, hear_replies,
-    hear_requests, reply, tell_ends,
+    Answer, Held, ask, ask_cancels, ask_with, hear, hear_cancels, hear_input, hear_replies,
+    hear_requests, reply, tell,
 };
 use self::attributes::{remote, serve};
 pub use self::content::{ContentFingerprint, ContentMismatch};
@@ -68,6 +69,9 @@ pub struct MettleChannel;
 /// - Endings go both ways: a client's [`AbilityCancelRequest`]s to the server,
 ///   taken only for actors it controls; the server's [`AbilityEnd`]s to the
 ///   client controlling the actor.
+/// - A server-initiated ability's [`AbilityStarted`] goes to the client
+///   controlling its actor, which runs it too; nothing goes for a local-only
+///   one.
 /// - A client holds a reply confirming its prediction until the server's
 ///   replicated state of the actor as of the reply has arrived, so what it
 ///   predicted gives way to the server's in the same frame.
@@ -122,6 +126,9 @@ impl Plugin for MettleNetPlugin {
         app.register_message::<AbilityCancelRequest>()
             .add_map_entities()
             .add_direction(NetworkDirection::ClientToServer);
+        app.register_message::<AbilityStarted>()
+            .add_map_entities()
+            .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<AbilityEnd>()
             .add_map_entities()
             .add_direction(NetworkDirection::ServerToClient);
@@ -143,7 +150,8 @@ impl Plugin for MettleNetPlugin {
             .add_systems(
                 PreUpdate,
                 (
-                    (hear_replies, hear_ends).run_if(resource_equals(NetRole::Client)),
+                    (hear_replies, hear::<AbilityEnd>, hear::<AbilityStarted>)
+                        .run_if(resource_equals(NetRole::Client)),
                     (hear_requests, hear_cancels).run_if(resource_equals(NetRole::Server)),
                 )
                     .after(MessageSystems::Receive)
@@ -161,13 +169,26 @@ impl Plugin for MettleNetPlugin {
                         compare_content,
                     )
                         .run_if(resource_equals(NetRole::Client)),
-                    (reply, tell_ends, replicate, retarget, tell_content)
+                    (
+                        reply,
+                        tell::<AbilityStarted>.in_set(Starting),
+                        tell::<AbilityEnd>.after(Starting),
+                        replicate,
+                        retarget,
+                        tell_content,
+                    )
                         .chain()
                         .run_if(resource_equals(NetRole::Server)),
                 ),
             );
     }
 }
+
+/// On a server: the systems sending the starts of what clients mirror, with
+/// input and without. Ends are sent after them, so a client never hears an
+/// end before its start.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+struct Starting;
 
 /// On a client: the systems sending requests, with input and without. Cancels
 /// are sent after them, so one never goes before what it cancels.
@@ -207,18 +228,28 @@ impl MettleNetApp for App {
         self.register_message::<AbilityInput<I>>()
             .add_map_entities()
             .add_direction(NetworkDirection::ClientToServer);
+        self.register_message::<AbilityStartedWith<I>>()
+            .add_map_entities()
+            .add_direction(NetworkDirection::ServerToClient);
         self.add_systems(
             PreUpdate,
-            hear_input::<I>
-                .run_if(resource_equals(NetRole::Server))
+            (
+                hear_input::<I>.run_if(resource_equals(NetRole::Server)),
+                hear::<AbilityStartedWith<I>>.run_if(resource_equals(NetRole::Client)),
+            )
                 .after(MessageSystems::Receive)
                 .before(AbilitySystems),
         )
         .add_systems(
             Update,
-            ask_with::<I>
-                .in_set(Asking)
-                .run_if(resource_equals(NetRole::Client)),
+            (
+                ask_with::<I>
+                    .in_set(Asking)
+                    .run_if(resource_equals(NetRole::Client)),
+                tell::<AbilityStartedWith<I>>
+                    .in_set(Starting)
+                    .run_if(resource_equals(NetRole::Server)),
+            ),
         )
     }
 }
