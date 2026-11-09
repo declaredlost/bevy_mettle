@@ -3,7 +3,9 @@
 //! What cues and abilities observe.
 
 use bevy::prelude::*;
+use bevy_mettle_attribute::registry::AnyAttribute;
 use bevy_mettle_core::Id;
+use serde::{Deserialize, Serialize};
 
 use crate::data::Effect;
 
@@ -56,15 +58,37 @@ pub enum Blocked {
     StackLimit,
 }
 
+/// What an execution changed one attribute's base by, or dealt a meta
+/// attribute.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Delta {
+    /// The attribute.
+    pub attribute: Id<AnyAttribute>,
+    /// What its base was changed by, rounded and kept within its limits:
+    /// `-30.0`, damage taken.
+    pub delta: f32,
+}
+
 /// Triggered as an effect executes on an actor, its bases changed.
 ///
-/// An instant one applied, or a periodic one's period come round.
-#[derive(EntityEvent, Debug, Clone, PartialEq, Eq)]
+/// An instant one applied, or a periodic one's period come round: what it
+/// changed, on whom, for a combat log or a reaction.
+#[derive(EntityEvent, Debug, Clone, PartialEq)]
 pub struct EffectExecuted {
     /// The actor.
     pub entity: Entity,
     /// Which effect.
     pub id: Id<Effect>,
+    /// Who applied it, if anyone.
+    pub source: Option<Entity>,
+    /// What it changed the actor's bases by, each attribute once, in the
+    /// order it first changed them.
+    pub changes: Vec<Delta>,
+    /// What it changed its source's bases by: life stolen back.
+    pub source_changes: Vec<Delta>,
+    /// What each meta attribute was dealt, before its router: a hit's damage
+    /// before shields took their share.
+    pub routed: Vec<Delta>,
 }
 
 /// An active effect taken off an actor: run out of time (`expired`), or

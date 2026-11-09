@@ -15,7 +15,7 @@ pub(crate) use self::fold::{Dirty, collect, fold};
 pub use self::sum::Breakdown;
 pub(crate) use self::sum::divisor;
 use self::sum::{Counts, Scoped, Sum};
-pub(crate) use self::systems::{publish, refresh, remove_base, sync_base};
+pub(crate) use self::systems::{follow_limits, publish, refresh, remove_base, rework, sync_base};
 use crate::modifier::Modifier;
 use crate::read::AttributeContext;
 use crate::registry::{AnyAttribute, AttributeRegistry, Limit};
@@ -89,6 +89,10 @@ pub struct AttributeState {
     #[reflect(ignore)]
     folded: HashMap<Id<AnyAttribute>, Folded>,
     current: HashMap<Id<AnyAttribute>, f32>,
+    /// Each value with nothing in play as worked out the time before: what a
+    /// limit moved from.
+    #[reflect(ignore)]
+    previous: HashMap<Id<AnyAttribute>, f32>,
     /// The values served by the authority, as synced from `Served`.
     served: HashMap<Id<AnyAttribute>, f32>,
     /// Whether the authority is another world: its values are served.
@@ -246,9 +250,28 @@ impl AttributeState {
             })
             .collect();
         let changed = current != self.current;
-        self.current = current;
+        self.previous = std::mem::replace(&mut self.current, current);
         self.stale = false;
         changed
+    }
+
+    /// What `attribute`'s value with nothing in play moved from and to, the
+    /// last time values were worked out, if it moved.
+    pub(crate) fn moved(&self, attribute: &Id<AnyAttribute>) -> Option<(f32, f32)> {
+        let was = *self.previous.get(attribute)?;
+        let is = *self.current.get(attribute)?;
+        (was.to_bits() != is.to_bits()).then_some((was, is))
+    }
+
+    /// Whether the actor's authority is another world: its bases aren't its
+    /// own to move.
+    pub(crate) fn is_remote(&self) -> bool {
+        self.remote
+    }
+
+    /// Whether something changed since values were last worked out.
+    pub(crate) fn is_stale(&self) -> bool {
+        self.stale
     }
 
     /// `attribute`'s value with nothing in play, as last worked out.

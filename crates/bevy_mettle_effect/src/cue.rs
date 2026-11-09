@@ -24,13 +24,13 @@ use bevy::ecs::query::SpawnDetails;
 use bevy::ecs::system::SystemId;
 use bevy::prelude::*;
 use bevy_mettle_attribute::Attribute;
-use bevy_mettle_attribute::registry::AnyAttribute;
 use bevy_mettle_core::Id;
 use bevy_mettle_core::net::NetRole;
 use bevy_mettle_core::tag::Tag;
 use serde::{Deserialize, Serialize};
 
 use crate::data::Effect;
+use crate::events::Delta;
 
 /// A cue to play: its tag, and what it's played with.
 #[derive(Debug, Clone, PartialEq)]
@@ -40,22 +40,13 @@ pub struct Cue {
     /// How much: what was dealt.
     pub magnitude: f32,
     /// What it changed each attribute's base by.
-    pub changes: Vec<CueChange>,
+    pub changes: Vec<Delta>,
     /// The level of what played it.
     pub level: f32,
     /// Who caused it.
     pub source: Option<Entity>,
     /// Whether it's this world's alone: a server doesn't serve it to clients.
     pub local: bool,
-}
-
-/// What a one-shot's effect changed one attribute's base by.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CueChange {
-    /// The attribute.
-    pub attribute: Id<AnyAttribute>,
-    /// What its base was changed by: `-30.0`, damage dealt.
-    pub delta: f32,
 }
 
 impl Cue {
@@ -82,7 +73,7 @@ impl Cue {
     /// Having changed `A`'s base by `delta`.
     #[must_use]
     pub fn change<A: Attribute>(mut self, delta: f32) -> Self {
-        self.changes.push(CueChange {
+        self.changes.push(Delta {
             attribute: A::ID,
             delta,
         });
@@ -210,7 +201,7 @@ pub struct Burst {
     /// How much.
     pub magnitude: f32,
     /// What it changed each attribute's base by.
-    pub changes: Vec<CueChange>,
+    pub changes: Vec<Delta>,
     /// The level of what played it.
     pub level: f32,
     /// Who caused it.
@@ -331,7 +322,7 @@ pub struct CueExecuted {
     pub magnitude: f32,
     /// What it changed each attribute's base by, in the order it first
     /// changed it.
-    pub changes: Vec<CueChange>,
+    pub changes: Vec<Delta>,
     /// The level of what played it.
     pub level: f32,
     /// Who caused it.

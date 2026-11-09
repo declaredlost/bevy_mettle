@@ -245,7 +245,7 @@ abilities to observe:
 | [`EffectApplied`] | A lasting effect was spawned on the target: `effect` is its entity |
 | [`EffectStacked`] | An effect gained or lost a stack: `stacks` is how many now |
 | [`EffectBlocked`] | An effect didn't apply: `reason` is `Requirement`, `Immunity` or `StackLimit` |
-| [`EffectExecuted`] | An effect changed bases: an instant one applied, or a period came round |
+| [`EffectExecuted`] | An effect changed bases: an instant one applied, or a period came round. `changes` says what it changed the target's bases by, `source_changes` its source's, and `routed` what it dealt each [meta attribute](effect-code.md#meta-attributes) |
 | [`EffectRemoved`] | An active effect came off: `expired` says if it ran out of time |
 
 Observe them for every actor, or for one:

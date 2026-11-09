@@ -14,7 +14,7 @@ use bevy::prelude::*;
 use bevy_mettle_core::{Id, MettleError};
 
 pub use self::events::AttributeChanged;
-pub use self::rules::{AnyAttribute, Limit, Rounding};
+pub use self::rules::{AnyAttribute, Limit, OnLimit, Rounding};
 pub use self::state::AttributeState;
 use crate::{Attribute, Base};
 
@@ -33,6 +33,8 @@ pub struct AttributeInfo {
     pub max: Option<Limit>,
     /// How it's rounded, if it's a whole number.
     pub rounding: Option<Rounding>,
+    /// What its base does as a limit that's another attribute moves.
+    pub on_limit: OnLimit,
     /// The type it is: two types can't share a name.
     pub(crate) type_id: TypeId,
     /// The type's name, for when two would share one.
@@ -49,6 +51,7 @@ impl AttributeInfo {
             min: A::MIN,
             max: A::MAX,
             rounding: A::ROUNDING,
+            on_limit: A::ON_LIMIT,
             type_id: TypeId::of::<A>(),
             type_name: std::any::type_name::<A>(),
             get_base: |world, actor| Some(world.get::<Base<A>>(actor)?.get()),
@@ -150,6 +153,20 @@ impl AttributeApp for App {
             .add::<A>();
         if !added {
             return self;
+        }
+        // Only one whose limits are attributes has a base to move as they do.
+        let follows = [&A::MIN, &A::MAX]
+            .into_iter()
+            .any(|limit| matches!(limit, Some(Limit::Attribute(_))));
+        if follows {
+            let schedule = self
+                .world()
+                .resource::<crate::plugin::AttributeSchedule>()
+                .0;
+            self.add_systems(
+                schedule,
+                crate::registry::state::follow_limits::<A>.in_set(crate::plugin::Phase::Follow),
+            );
         }
         self.register_type::<crate::Base<A>>()
             .register_type::<crate::Current<A>>()

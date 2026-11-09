@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 pub use self::magnitude::{Capture, Magnitude};
 pub use self::stacking::{Expire, Reapply, StackBy, Stacking};
-use crate::code::Execution;
+use crate::code::{Execution, MetaAttribute};
 
 /// An effect, as data: what it changes, for how long, and what it grants.
 ///
@@ -171,6 +171,13 @@ impl EffectModifier {
     #[must_use]
     pub fn new<A: Attribute>(op: Operation, value: impl Into<Magnitude>) -> Self {
         Self::of_id(A::ID, op, value)
+    }
+
+    /// `value` dealt to the meta attribute `M`, for its router: flat, as
+    /// meta attributes are dealt.
+    #[must_use]
+    pub fn meta<M: MetaAttribute>(value: impl Into<Magnitude>) -> Self {
+        Self::of_id(M::ID, Operation::Flat, value)
     }
 
     /// `op` of `value` to `attribute`.

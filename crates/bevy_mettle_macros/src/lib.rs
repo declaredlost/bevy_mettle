@@ -1,17 +1,17 @@
 //! `#[derive(IdTarget)]`, re-exported by `bevy_mettle_core`;
-//! `#[derive(Attribute)]`, by `bevy_mettle_attribute`; and
+//! `#[derive(Attribute)]`, by `bevy_mettle_attribute`;
+//! `#[derive(MetaAttribute)]`, by `bevy_mettle_effect`; and
 //! `#[derive(Behaviour)]`, by `bevy_mettle_ability`: their documentation is
 //! there.
 
+mod attribute;
+mod behaviour;
+mod id_target;
+mod meta_attribute;
+mod shared;
+
 use proc_macro::TokenStream;
-use proc_macro_crate::{FoundCrate, crate_name};
-use proc_macro2::{Literal, Span};
-use quote::{format_ident, quote, quote_spanned};
-use syn::spanned::Spanned;
-use syn::{
-    DeriveInput, Error, Expr, ExprLit, ExprUnary, Ident, Lit, LitStr, Path, Type, UnOp,
-    parse_macro_input,
-};
+use syn::{DeriveInput, Error, parse_macro_input};
 
 /// An attribute: a marker type, its settings on `#[attribute(..)]`.
 ///
@@ -23,7 +23,22 @@ use syn::{
 #[proc_macro_derive(Attribute, attributes(attribute))]
 pub fn derive_attribute(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    expand(&input)
+    attribute::expand(&input)
+        .unwrap_or_else(Error::into_compile_error)
+        .into()
+}
+
+/// A meta attribute: a marker type, its name on `#[meta_attribute(..)]`.
+///
+/// ```ignore
+/// #[derive(MetaAttribute)]
+/// #[meta_attribute(name = "incoming_damage")]
+/// pub struct IncomingDamage;
+/// ```
+#[proc_macro_derive(MetaAttribute, attributes(meta_attribute))]
+pub fn derive_meta_attribute(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    meta_attribute::expand(&input)
         .unwrap_or_else(Error::into_compile_error)
         .into()
 }
@@ -38,69 +53,9 @@ pub fn derive_attribute(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(Behaviour, attributes(behaviour))]
 pub fn derive_behaviour(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    expand_behaviour(&input)
+    behaviour::expand(&input)
         .unwrap_or_else(Error::into_compile_error)
         .into()
-}
-
-/// What `#[behaviour(..)]` says.
-#[derive(Default)]
-struct BehaviourSettings {
-    name: Option<LitStr>,
-    input: Option<Type>,
-}
-
-fn expand_behaviour(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
-    if !input.generics.params.is_empty() {
-        return Err(Error::new_spanned(
-            &input.generics,
-            "a behaviour can't be generic",
-        ));
-    }
-    let settings = behaviour_settings(input)?;
-    let krate = path("bevy_mettle_ability", "ability");
-    let ident = &input.ident;
-    let name = settings
-        .name
-        .unwrap_or_else(|| LitStr::new(&snake(&ident.to_string()), Span::call_site()));
-    let input = settings.input.map_or_else(
-        || quote!(#krate::behaviour::NoInput),
-        |input| quote!(#input),
-    );
-    Ok(quote! {
-        impl #krate::behaviour::Behaviour for #ident {
-            const NAME: &'static str = #name;
-            type Input = #input;
-        }
-    })
-}
-
-/// Reads `#[behaviour(..)]`.
-fn behaviour_settings(input: &DeriveInput) -> syn::Result<BehaviourSettings> {
-    let mut settings = BehaviourSettings::default();
-    for attr in input
-        .attrs
-        .iter()
-        .filter(|attr| attr.path().is_ident("behaviour"))
-    {
-        attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("name") {
-                if settings.name.is_some() {
-                    return Err(meta.error("`name` is given twice"));
-                }
-                settings.name = Some(meta.value()?.parse()?);
-            } else if meta.path.is_ident("input") {
-                if settings.input.is_some() {
-                    return Err(meta.error("`input` is given twice"));
-                }
-                settings.input = Some(meta.value()?.parse()?);
-            } else {
-                return Err(meta.error("expected `name` or `input`"));
-            }
-            Ok(())
-        })?;
-    }
-    Ok(settings)
 }
 
 /// Derives `IdTarget`: named as the type is in `snake_case`, unless overridden.
@@ -118,307 +73,7 @@ fn behaviour_settings(input: &DeriveInput) -> syn::Result<BehaviourSettings> {
 #[proc_macro_derive(IdTarget, attributes(id_target))]
 pub fn derive_id_target(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    expand_id(&input)
+    id_target::expand(&input)
         .unwrap_or_else(Error::into_compile_error)
         .into()
-}
-
-fn expand_id(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
-    if !input.generics.params.is_empty() {
-        return Err(Error::new_spanned(
-            &input.generics,
-            "what an id names can't be generic",
-        ));
-    }
-    let mut name = None;
-    for attr in input
-        .attrs
-        .iter()
-        .filter(|attr| attr.path().is_ident("id_target"))
-    {
-        attr.parse_nested_meta(|meta| {
-            if !meta.path.is_ident("name") {
-                return Err(meta.error("expected `name = \"..\"`"));
-            }
-            name = Some(meta.value()?.parse::<LitStr>()?);
-            Ok(())
-        })?;
-    }
-    let ident = &input.ident;
-    let name = name.unwrap_or_else(|| LitStr::new(&snake(&ident.to_string()), Span::call_site()));
-    let krate = path("bevy_mettle_core", "core");
-    Ok(quote! {
-        impl #krate::IdTarget for #ident {
-            const NAME: &'static str = #name;
-        }
-    })
-}
-
-/// What `#[attribute(..)]` says.
-#[derive(Default)]
-struct Settings {
-    name: Option<LitStr>,
-    base: Option<Literal>,
-    min: Option<Limit>,
-    max: Option<Limit>,
-    rounding: Option<Ident>,
-}
-
-/// A limit: a number, or another attribute.
-enum Limit {
-    Value(Literal),
-    Attribute(Path),
-}
-
-fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
-    if !input.generics.params.is_empty() {
-        return Err(Error::new_spanned(
-            &input.generics,
-            "an attribute can't be generic",
-        ));
-    }
-    let settings = settings(input)?;
-    let krate = path("bevy_mettle_attribute", "attribute");
-    let ident = &input.ident;
-    let name = settings
-        .name
-        .unwrap_or_else(|| LitStr::new(&snake(&ident.to_string()), Span::call_site()));
-    let base = settings.base.map(|base| quote!(const BASE: f32 = #base;));
-    let limit = |which: &str, limit: Option<Limit>| {
-        let which = format_ident!("{which}");
-        limit.map(|limit| {
-            let limit = match limit {
-                Limit::Value(value) => quote!(#krate::registry::Limit::Value(#value)),
-                Limit::Attribute(other) => {
-                    // Spanned at the path, so a type that isn't an attribute
-                    // is pointed out where it's written.
-                    let id = quote_spanned!(other.span()=> <#other as #krate::Attribute>::ID);
-                    quote!(#krate::registry::Limit::Attribute(#id))
-                }
-            };
-            quote! {
-                const #which: ::core::option::Option<#krate::registry::Limit> =
-                    ::core::option::Option::Some(#limit);
-            }
-        })
-    };
-    let min = limit("MIN", settings.min);
-    let max = limit("MAX", settings.max);
-    let rounding = settings.rounding.map(|rounding| {
-        quote! {
-            const ROUNDING: ::core::option::Option<#krate::registry::Rounding> =
-                ::core::option::Option::Some(#krate::registry::Rounding::#rounding);
-        }
-    });
-    Ok(quote! {
-        impl #krate::Attribute for #ident {
-            const NAME: &'static str = #name;
-            #base
-            #min
-            #max
-            #rounding
-        }
-    })
-}
-
-/// Reads `#[attribute(..)]`.
-fn settings(input: &DeriveInput) -> syn::Result<Settings> {
-    let mut settings = Settings::default();
-    for attr in input
-        .attrs
-        .iter()
-        .filter(|attr| attr.path().is_ident("attribute"))
-    {
-        attr.parse_nested_meta(|meta| {
-            let key = meta
-                .path
-                .get_ident()
-                .map(ToString::to_string)
-                .unwrap_or_default();
-            let value = meta.value()?;
-            let given = match key.as_str() {
-                "name" => settings.name.is_some(),
-                "base" => settings.base.is_some(),
-                "min" => settings.min.is_some(),
-                "max" => settings.max.is_some(),
-                "rounding" => settings.rounding.is_some(),
-                _ => false,
-            };
-            if given {
-                return Err(meta.error(format!("`{key}` is given twice")));
-            }
-            match key.as_str() {
-                "name" => settings.name = Some(value.parse()?),
-                "base" => settings.base = Some(number(&value.parse()?)?),
-                "min" => settings.min = Some(limit(&value.parse()?)?),
-                "max" => settings.max = Some(limit(&value.parse()?)?),
-                "rounding" => {
-                    let rounding: Ident = value.parse()?;
-                    if !["Down", "Up", "Nearest"].contains(&rounding.to_string().as_str()) {
-                        return Err(Error::new_spanned(
-                            rounding,
-                            "rounding is `Down`, `Up` or `Nearest`",
-                        ));
-                    }
-                    settings.rounding = Some(rounding);
-                }
-                _ => {
-                    return Err(meta.error("expected `name`, `base`, `min`, `max` or `rounding`"));
-                }
-            }
-            Ok(())
-        })?;
-    }
-    Ok(settings)
-}
-
-/// A limit: a number, or the path of another attribute.
-fn limit(expr: &Expr) -> syn::Result<Limit> {
-    match expr {
-        Expr::Path(path) => {
-            let path = &path.path;
-            let primitive = path.segments.len() > 1
-                && path.segments.first().is_some_and(|first| {
-                    [
-                        "f32", "f64", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64",
-                    ]
-                    .iter()
-                    .any(|primitive| first.ident == primitive)
-                });
-            if primitive {
-                return Err(Error::new_spanned(
-                    path,
-                    "a limit is a number written out, or an attribute's type",
-                ));
-            }
-            Ok(Limit::Attribute(path.clone()))
-        }
-        _ => number(expr).map(Limit::Value),
-    }
-}
-
-/// A number literal, maybe negative, as an `f32` literal.
-fn number(expr: &Expr) -> syn::Result<Literal> {
-    let (negative, lit) = match expr {
-        Expr::Lit(ExprLit { lit, .. }) => (false, lit),
-        Expr::Unary(ExprUnary {
-            op: UnOp::Neg(_),
-            expr,
-            ..
-        }) => match &**expr {
-            Expr::Lit(ExprLit { lit, .. }) => (true, lit),
-            other => return Err(Error::new(other.span(), "expected a number")),
-        },
-        other => return Err(Error::new(other.span(), "expected a number")),
-    };
-    let value: f32 = match lit {
-        Lit::Float(float) => float.base10_parse()?,
-        Lit::Int(int) => int.base10_parse()?,
-        other => return Err(Error::new(other.span(), "expected a number")),
-    };
-    Ok(Literal::f32_suffixed(if negative { -value } else { value }))
-}
-
-/// Where `krate` is, where a derive's used: itself if it's a dependency, else
-/// its `module` in the `bevy_mettle` facade.
-fn path(krate: &str, module: &str) -> proc_macro2::TokenStream {
-    let ident = |name: &str| format_ident!("{}", name.replace('-', "_"));
-    match crate_name(krate) {
-        Ok(FoundCrate::Itself) => {
-            let krate = ident(krate);
-            quote!(::#krate)
-        }
-        Ok(FoundCrate::Name(found)) => {
-            let found = ident(&found);
-            quote!(::#found)
-        }
-        Err(_) => {
-            let facade = match crate_name("bevy_mettle") {
-                Ok(FoundCrate::Name(found)) => ident(&found),
-                _ => ident("bevy_mettle"),
-            };
-            let module = ident(module);
-            quote!(::#facade::#module)
-        }
-    }
-}
-
-/// `name` in `snake_case`: `MovementSpeed` is `movement_speed`.
-fn snake(name: &str) -> String {
-    let mut snake = String::new();
-    let chars: Vec<char> = name.chars().collect();
-    for (index, &char) in chars.iter().enumerate() {
-        if char.is_uppercase() {
-            let after_lower = index > 0 && !chars[index - 1].is_uppercase();
-            let before_lower = chars.get(index + 1).is_some_and(|next| next.is_lowercase());
-            if index > 0 && (after_lower || (before_lower && chars[index - 1].is_uppercase())) {
-                snake.push('_');
-            }
-            snake.extend(char.to_lowercase());
-        } else {
-            snake.push(char);
-        }
-    }
-    snake
-}
-
-#[cfg(test)]
-mod tests {
-    use syn::parse_quote;
-
-    use super::{behaviour_settings, settings, snake};
-
-    #[test]
-    fn a_setting_given_twice_is_an_error() {
-        let input = parse_quote! {
-            #[attribute(base = 1.0, base = 2.0)]
-            struct Life;
-        };
-        let error = settings(&input).err().expect("an error");
-        assert!(error.to_string().contains("given twice"), "{error}");
-    }
-
-    #[test]
-    fn a_limit_that_names_a_constant_is_an_error() {
-        let input = parse_quote! {
-            #[attribute(min = f32::MIN)]
-            struct Life;
-        };
-        let error = settings(&input).err().expect("an error");
-        assert!(
-            error.to_string().contains("a number written out"),
-            "{error}"
-        );
-    }
-
-    #[test]
-    fn names_go_snake_case() {
-        assert_eq!(snake("Life"), "life");
-        assert_eq!(snake("MovementSpeed"), "movement_speed");
-        assert_eq!(snake("MaxHP"), "max_hp");
-        assert_eq!(snake("HPRegen"), "hp_regen");
-    }
-
-    #[test]
-    fn a_behaviour_setting_given_twice_is_an_error() {
-        let input = parse_quote! {
-            #[behaviour(name = "a", name = "b")]
-            struct Cast;
-        };
-        let error = behaviour_settings(&input).err().expect("an error");
-        assert!(error.to_string().contains("given twice"), "{error}");
-    }
-
-    #[test]
-    fn a_behaviour_setting_that_isnt_one_is_an_error() {
-        let input = parse_quote! {
-            #[behaviour(speed = 2)]
-            struct Cast;
-        };
-        let error = behaviour_settings(&input).err().expect("an error");
-        assert!(
-            error.to_string().contains("expected `name` or `input`"),
-            "{error}"
-        );
-    }
 }

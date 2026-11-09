@@ -1403,6 +1403,7 @@ dependencies = [
  "bevy",
  "bevy_mettle_attribute",
  "bevy_mettle_core",
+ "bevy_mettle_macros",
  "serde",
 ]
 

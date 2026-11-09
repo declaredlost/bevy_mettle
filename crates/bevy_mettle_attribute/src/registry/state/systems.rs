@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use bevy_mettle_core::tag::OwnedTags;
 
 use super::AttributeState;
-use crate::registry::{AttributeChanged, AttributeRegistry};
+use crate::registry::{AttributeChanged, AttributeRegistry, Limit, OnLimit};
 use crate::{Attribute, Base, Current};
 
 /// Syncs each actor's changed `Base<A>` into its state.
@@ -45,6 +45,56 @@ pub(crate) fn refresh(
             .refresh(&registry, owned.counts())
         {
             state.set_changed();
+        }
+    }
+}
+
+/// Moves each actor's `Base<A>` as a limit of it that's another attribute
+/// moved, as [`OnLimit`] says: kept within its limits, or at the same fraction
+/// of its maximum. Not on an actor whose authority is another world: what it
+/// serves moves.
+pub(crate) fn follow_limits<A: Attribute>(
+    registry: Res<AttributeRegistry>,
+    mut actors: Query<(&mut Base<A>, &mut AttributeState, &OwnedTags), Changed<AttributeState>>,
+) {
+    let moved = |state: &AttributeState, limit: &Option<Limit>| match limit {
+        Some(Limit::Attribute(other)) => state.moved(other),
+        _ => None,
+    };
+    for (mut base, mut state, owned) in &mut actors {
+        if state.is_remote() {
+            continue;
+        }
+        let max = moved(&state, &A::MAX);
+        if max.is_none() && moved(&state, &A::MIN).is_none() {
+            continue;
+        }
+        let mut value = base.get();
+        if A::ON_LIMIT == OnLimit::Ratio
+            && let Some((was, is)) = max
+            && was > 0.0
+        {
+            value *= is / was;
+        }
+        let value = state.within_limits(&registry, owned.counts(), &A::ID, value);
+        if value.to_bits() != base.get().to_bits() {
+            base.set(value);
+            state.set_base(A::ID, value);
+        }
+    }
+}
+
+/// Works out again the values of every actor whose bases followed their
+/// limits, so they're current the frame the limits moved.
+pub(crate) fn rework(
+    registry: Res<AttributeRegistry>,
+    mut actors: Query<(&mut AttributeState, &OwnedTags), Changed<AttributeState>>,
+) {
+    for (mut state, owned) in &mut actors {
+        if state.is_stale() {
+            state
+                .bypass_change_detection()
+                .refresh(&registry, owned.counts());
         }
     }
 }
