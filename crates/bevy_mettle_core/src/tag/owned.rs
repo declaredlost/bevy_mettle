@@ -7,8 +7,7 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::reflect::ReflectComponent;
 use bevy_reflect::prelude::*;
 
-use super::{Tag, TagCounts, Tags};
-use crate::Id;
+use super::{TagCounts, TagKey, Tags};
 
 /// On an actor: the tags it owns, by count, and every tag above them.
 ///
@@ -25,14 +24,15 @@ pub struct OwnedTags {
     counts: TagCounts,
     /// Tags that came to be owned (`true`) or ceased to be, not yet told.
     #[reflect(ignore)]
-    changes: Vec<(Id<Tag>, bool)>,
+    changes: Vec<(TagKey, bool)>,
 }
 
 impl OwnedTags {
     /// One more source of `tag`.
-    pub fn add(&mut self, tag: &Id<Tag>) {
+    pub fn add(&mut self, tag: impl Into<TagKey>) {
+        let tag = tag.into();
         for tag in tag.lineage() {
-            if !self.counts.contains(&tag) {
+            if !self.counts.contains(tag) {
                 self.changes.push((tag, true));
             }
         }
@@ -42,12 +42,13 @@ impl OwnedTags {
     /// One fewer source of `tag`: gone with its last.
     ///
     /// Nothing for a tag not given, even one owned under another.
-    pub fn remove(&mut self, tag: &Id<Tag>) {
+    pub fn remove(&mut self, tag: impl Into<TagKey>) {
+        let tag = tag.into();
         if !self.counts.remove(tag) {
             return;
         }
         for tag in tag.lineage() {
-            if !self.counts.contains(&tag) {
+            if !self.counts.contains(tag) {
                 self.changes.push((tag, false));
             }
         }
@@ -82,18 +83,18 @@ impl OwnedTags {
     /// What came and went since last told, settled against what it was then:
     /// `true` for a tag now owned that wasn't, `false` for one no longer owned.
     /// A tag added and taken away again isn't told at all.
-    fn take_changes(&mut self) -> Vec<(Id<Tag>, bool)> {
-        let mut seen: Vec<Id<Tag>> = Vec::new();
+    fn take_changes(&mut self) -> Vec<(TagKey, bool)> {
+        let mut seen: Vec<TagKey> = Vec::new();
         let mut settled = Vec::new();
         for (tag, came) in std::mem::take(&mut self.changes) {
             if seen.contains(&tag) {
                 continue;
             }
-            seen.push(tag.clone());
+            seen.push(tag);
             // Its first change says what it was: one that came wasn't
             // owned before.
             let was = !came;
-            let now = self.counts.contains(&tag);
+            let now = self.counts.contains(tag);
             if was != now {
                 settled.push((tag, now));
             }
@@ -116,7 +117,7 @@ pub struct TagAdded {
     /// The actor.
     pub entity: Entity,
     /// The tag.
-    pub tag: Id<Tag>,
+    pub tag: TagKey,
 }
 
 /// Triggered on an actor as it stops owning a tag, or the last one under it.
@@ -125,7 +126,7 @@ pub struct TagRemoved {
     /// The actor.
     pub entity: Entity,
     /// The tag.
-    pub tag: Id<Tag>,
+    pub tag: TagKey,
 }
 
 /// Tells each tag an actor came to own or stopped owning, as events.
@@ -155,8 +156,8 @@ pub fn publish_tags(
 /// No for an agent without owned tags. A read-only system taking an agent and a
 /// parameter, as `bevy_arbor` takes it.
 #[must_use]
-pub fn owns(In((agent, tag)): In<(Entity, Id<Tag>)>, owned: Query<&OwnedTags>) -> bool {
-    owned.get(agent).is_ok_and(|owned| owned.contains(&tag))
+pub fn owns(In((agent, tag)): In<(Entity, TagKey)>, owned: Query<&OwnedTags>) -> bool {
+    owned.get(agent).is_ok_and(|owned| owned.contains(tag))
 }
 
 #[cfg(test)]
@@ -166,12 +167,12 @@ mod tests {
     #[test]
     fn removing_a_tag_not_owned_tells_nothing() {
         let mut owned = OwnedTags::default();
-        owned.remove(&Id::from_static("state.moving"));
+        owned.remove("state.moving");
         assert!(!owned.is_pending());
-        owned.add(&Id::from_static("immune.stun"));
+        owned.add("immune.stun");
         owned.take_changes();
-        owned.remove(&Id::from_static("immune.freeze"));
+        owned.remove("immune.freeze");
         assert!(!owned.is_pending());
-        assert!(owned.contains(&Id::from_static("immune")));
+        assert!(owned.contains("immune"));
     }
 }

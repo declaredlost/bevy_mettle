@@ -8,9 +8,9 @@ pub use crate::active::{
     Abilities, AbilityOf, ActiveAbility, GrantedAbilities, GrantedAbility, GrantedBy,
 };
 #[doc(no_inline)]
-pub use crate::behaviour::{Behaviour, BehaviourApp, Behaviours, InputCheck, NoInput};
+pub use crate::behaviour::{Behaviour, BehaviourApp, BehaviourRegistry, InputCheck, NoInput};
 #[doc(no_inline)]
-pub use crate::data::{Ability, Commit, Grant, Trigger};
+pub use crate::data::{AbilityData, AnyAbility, Commit, Grant, Trigger};
 #[doc(no_inline)]
 pub use crate::events::{AbilityActivated, AbilityEnded, AbilityFailed, Failure, GameplayEvent};
 #[doc(no_inline)]
@@ -23,6 +23,6 @@ pub use crate::net::replica::AbilityReplica;
 pub use crate::net::request::{AbilityReply, AbilityRequest, AbilityRequestWith};
 #[doc(no_inline)]
 pub use crate::{
-    AbilityChecks, AbilityCommands, AbilityPlugin, AbilityReader, AbilityRegistry, AbilitySystems,
-    AbilityWorld,
+    Ability, AbilityApp, AbilityChecks, AbilityCommands, AbilityId, AbilityPlugin, AbilityReader,
+    AbilityRegistry, AbilitySpec, AbilitySystems, AbilityWorld, IntoAbilityId,
 };

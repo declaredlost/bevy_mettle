@@ -31,12 +31,12 @@ fn guards_read_attributes_and_owned_tags() {
     );
     assert!(
         world
-            .run_system_once_with(owns, (npc, Id::from_static("state")))
+            .run_system_once_with(owns, (npc, TagKey::named("state")))
             .unwrap()
     );
     assert!(
         !world
-            .run_system_once_with(owns, (npc, Id::from_static("state.moving")))
+            .run_system_once_with(owns, (npc, TagKey::named("state.moving")))
             .unwrap()
     );
 }

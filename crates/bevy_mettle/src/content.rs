@@ -1,20 +1,20 @@
 use bevy::ecs::change_detection::Tick;
 use bevy::prelude::*;
 #[cfg(feature = "ability")]
-use bevy_mettle_ability::behaviour::Behaviours;
+use bevy_mettle_ability::behaviour::BehaviourRegistry;
 #[cfg(feature = "ability")]
-use bevy_mettle_ability::data::{Ability, Grant};
+use bevy_mettle_ability::data::{AbilityData, Grant};
 #[cfg(feature = "ability")]
 use bevy_mettle_ability::{AbilityChecks, AbilityRegistry};
 #[cfg(feature = "effect")]
 use bevy_mettle_attribute::registry::AttributeRegistry;
-use bevy_mettle_core::curve::{CurveTable, LevelCurve};
-use bevy_mettle_core::tag::{Tag, TagTree};
+use bevy_mettle_core::curve::{CurveRegistry, LevelCurve};
+use bevy_mettle_core::tag::{TagKey, TagRegistry};
 use bevy_mettle_core::{MettleError, MettleErrors};
 #[cfg(feature = "effect")]
-use bevy_mettle_effect::code::EffectCode;
+use bevy_mettle_effect::code::{CalculationRegistry, ExecutionRegistry, RouteRegistry};
 #[cfg(feature = "effect")]
-use bevy_mettle_effect::data::Effect;
+use bevy_mettle_effect::data::EffectData;
 #[cfg(feature = "effect")]
 use bevy_mettle_effect::{EffectChecks, EffectRegistry};
 use serde::{Deserialize, Serialize};
@@ -32,25 +32,34 @@ use crate::MettleSystems;
 /// [`ContentLoaded`] is triggered; if not, the content before stays, each
 /// error is logged, and [`ContentRejected`] is triggered with them.
 ///
-/// ```ron
-/// (
-///     tags: [(id: "cooldown"), (id: "cooldown.fireball")],
-///     effects: [(id: "fireball.cooldown", duration: For(Value(2)), grants: ["cooldown.fireball"])],
-/// )
+/// ```
+/// # use bevy_mettle::prelude::*;
+/// let content = MettleContent {
+///     tags: vec![
+///         TagKey::named("cooldown"),
+///         TagKey::named("cooldown.fireball"),
+///     ],
+///     effects: vec![
+///         EffectData::lasting("fireball.cooldown", 2.0)
+///             .grant("cooldown.fireball"),
+///     ],
+///     ..Default::default()
+/// };
 /// ```
 #[derive(Resource, Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct MettleContent {
-    /// The gameplay tags there are.
-    pub tags: Vec<Tag>,
+    /// The gameplay tags there are, beside those code adds
+    /// ([`add_tag`](bevy_mettle_core::tag::TagApp::add_tag)).
+    pub tags: Vec<TagKey>,
     /// The curves effects scale by.
     pub curves: Vec<LevelCurve>,
     /// The effects there are.
     #[cfg(feature = "effect")]
-    pub effects: Vec<Effect>,
+    pub effects: Vec<EffectData>,
     /// The abilities there are.
     #[cfg(feature = "ability")]
-    pub abilities: Vec<Ability>,
+    pub abilities: Vec<AbilityData>,
     /// The abilities each effect grants while it lasts.
     #[cfg(feature = "ability")]
     pub grants: Vec<Grant>,
@@ -58,8 +67,8 @@ pub struct MettleContent {
 
 /// Content checked, ready to be loaded.
 struct Checked {
-    tags: TagTree,
-    curves: CurveTable,
+    tags: TagRegistry,
+    curves: CurveRegistry,
     #[cfg(feature = "effect")]
     effects: EffectRegistry,
     #[cfg(feature = "ability")]
@@ -68,8 +77,12 @@ struct Checked {
 
 impl MettleContent {
     /// Checks all of it against what `world` added: the attributes, the
-    /// behaviours and the effect code. What [`MettleContentPlugin`] checks it
-    /// by, for an answer at once: a mod before it's loaded, a test.
+    /// behaviours, the effect code, and the tags, effects and abilities code
+    /// names. What [`MettleContentPlugin`] checks it by, for an answer at
+    /// once: a mod before it's loaded, a test.
+    ///
+    /// Numbered after what `world` has loaded: tags, curves, effects and
+    /// abilities there keep their numbers.
     ///
     /// # Errors
     ///
@@ -81,49 +94,49 @@ impl MettleContent {
 
     fn checked(&self, world: &World) -> Result<Checked, MettleErrors> {
         let mut errors = Vec::new();
-        let tags = held(TagTree::build(&self.tags), &mut errors);
-        let curves = held(CurveTable::build(&self.curves), &mut errors);
+        // The content's tags, with those code adds.
+        let tags = held(
+            resource::<TagRegistry>(world).rebuild(self.tags.iter().copied()),
+            &mut errors,
+        );
+        let curves = held(
+            resource::<CurveRegistry>(world).rebuild(&self.curves),
+            &mut errors,
+        );
         #[cfg(feature = "effect")]
         let effects = match (&tags, &curves) {
-            (Some(tags), Some(curves)) => {
-                let (no_attributes, no_code) =
-                    (AttributeRegistry::default(), EffectCode::default());
-                held(
-                    EffectRegistry::check(
-                        &self.effects,
-                        EffectChecks {
-                            tags,
-                            curves,
-                            attributes: world.get_resource().unwrap_or(&no_attributes),
-                            code: world.get_resource().unwrap_or(&no_code),
-                        },
-                    ),
-                    &mut errors,
-                )
-            }
+            (Some(tags), Some(curves)) => held(
+                resource::<EffectRegistry>(world).recheck(
+                    &self.effects,
+                    EffectChecks {
+                        tags,
+                        curves,
+                        attributes: &resource::<AttributeRegistry>(world),
+                        executions: &resource::<ExecutionRegistry>(world),
+                        calculations: &resource::<CalculationRegistry>(world),
+                        routes: &resource::<RouteRegistry>(world),
+                    },
+                ),
+                &mut errors,
+            ),
             _ => None,
         };
         #[cfg(feature = "ability")]
         let abilities = match (&tags, &effects) {
-            (Some(tags), Some(effects)) => {
-                let no_behaviours = Behaviours::default();
-                held(
-                    AbilityRegistry::check(
-                        &self.abilities,
-                        &self.grants,
-                        AbilityChecks {
-                            tags,
-                            effects,
-                            behaviours: world.get_resource().unwrap_or(&no_behaviours),
-                        },
-                    ),
-                    &mut errors,
-                )
-            }
+            (Some(tags), Some(effects)) => held(
+                resource::<AbilityRegistry>(world).recheck(
+                    &self.abilities,
+                    &self.grants,
+                    AbilityChecks {
+                        tags,
+                        effects,
+                        behaviours: &resource::<BehaviourRegistry>(world),
+                    },
+                ),
+                &mut errors,
+            ),
             _ => None,
         };
-        #[cfg(not(feature = "effect"))]
-        let _ = world;
         match (errors.is_empty(), tags, curves) {
             (true, Some(tags), Some(curves)) => Ok(Checked {
                 tags,
@@ -136,6 +149,12 @@ impl MettleContent {
             _ => Err(MettleErrors(errors)),
         }
     }
+}
+
+/// `world`'s `R`, or an empty one: what content is numbered after, and checked
+/// against.
+fn resource<R: Resource + Clone + Default>(world: &World) -> R {
+    world.get_resource::<R>().cloned().unwrap_or_default()
 }
 
 /// What `result` built, its errors kept in `errors`.

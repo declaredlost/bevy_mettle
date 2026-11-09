@@ -12,8 +12,13 @@ use bevy_reflect::utility::GenericTypePathCell;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use smol_str::SmolStr;
 
+pub use self::numbering::Numbering;
+pub use self::registry::{Number, Registry};
 pub use self::target::IdTarget;
 
+mod number;
+mod numbering;
+mod registry;
 mod target;
 
 /// The id of something defined in data: its name, typed by what it names.
@@ -164,19 +169,19 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::tag::Tag;
+    use crate::curve::AnyCurve;
 
     #[test]
     fn an_id_looks_up_by_its_name() {
         let mut map = HashMap::new();
-        map.insert(Id::<Tag>::from_static("fire"), 1);
+        map.insert(Id::<AnyCurve>::from_static("fire"), 1);
         assert_eq!(map.get("fire"), Some(&1));
     }
 
     #[test]
     fn an_id_says_what_it_names() {
-        let fire: Id<Tag> = "fire".into();
-        assert_eq!(format!("{fire:?}"), r#"tag("fire")"#);
+        let fire: Id<AnyCurve> = "fire".into();
+        assert_eq!(format!("{fire:?}"), r#"curve("fire")"#);
         assert_eq!(fire.to_string(), "fire");
     }
 }

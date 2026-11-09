@@ -4,21 +4,22 @@
 use bevy::prelude::*;
 use bevy_mettle_attribute::modifier::{Modifier, Operation};
 use bevy_mettle_attribute::read::AttributeContext;
+use bevy_mettle_attribute::registry::{AttributeId, AttributeRegistry};
 use bevy_mettle_core::tag::{OwnedTags, TagCounts};
 
 use super::{Check, count, source_tags};
 use crate::active::{ActiveEffect, EffectOf};
-use crate::code::{BaseChange, EffectContext, Whose};
+use crate::code::{BaseChange, Changes, EffectContext, RouteId, Whose};
 use crate::cue::Cue;
-use crate::data::{Capture, Effect, Magnitude};
-use crate::events::{Delta, EffectExecuted};
+use crate::data::{Capture, EffectDef, MagnitudeDef};
+use crate::events::{Delta, EffectExecuted, Routed};
 use crate::{EffectRegistry, EffectSpec, net};
 
 /// How much `magnitude` is: as `captured`, if it was.
 pub(super) fn magnitude(
     context: &EffectContext,
     registry: &EffectRegistry,
-    magnitude: &Magnitude,
+    magnitude: &MagnitudeDef,
     captured: Option<f32>,
 ) -> f32 {
     captured.unwrap_or_else(|| resolve(context, registry, magnitude))
@@ -28,24 +29,24 @@ pub(super) fn magnitude(
 pub(super) fn resolve(
     context: &EffectContext,
     registry: &EffectRegistry,
-    magnitude: &Magnitude,
+    magnitude: &MagnitudeDef,
 ) -> f32 {
     match magnitude {
-        Magnitude::Value(value) => *value,
-        Magnitude::Scaled { base, curve } => {
+        MagnitudeDef::Value(value) => *value,
+        MagnitudeDef::Scaled { base, curve } => {
             base * registry
                 .curves()
-                .at(curve, context.spec.level)
+                .at(*curve, context.spec.level)
                 .unwrap_or_default()
         }
-        Magnitude::Param(param) => context.spec.param_value(param).unwrap_or_else(|| {
+        MagnitudeDef::Param(param) => context.spec.param_value(*param).unwrap_or_else(|| {
             warn!(
                 "effect `{}` reads {param:?}, which its spec doesn't set: 0",
-                context.spec.effect
+                context.def.name
             );
             0.0
         }),
-        Magnitude::Attribute {
+        MagnitudeDef::Attribute {
             attribute,
             from,
             coefficient,
@@ -55,32 +56,32 @@ pub(super) fn resolve(
                 Capture::Target => Some(context.target),
             };
             whose
-                .and_then(|entity| context.value_at(entity, attribute, &AttributeContext::new()))
+                .and_then(|entity| context.value_at(entity, *attribute, &AttributeContext::new()))
                 .unwrap_or_default()
                 * coefficient
         }
-        Magnitude::Custom(calculation) => registry
-            .calculation(calculation)
+        MagnitudeDef::Custom(calculation) => registry
+            .calculation(*calculation)
             .map_or(0.0, |calculate| calculate(context)),
     }
 }
 
 /// What executing an effect works out: the changes it makes to bases, and
-/// what each meta attribute was dealt before its router.
+/// what each route was dealt before its router.
 pub(super) struct Worked {
     pub(super) changes: Vec<BaseChange>,
-    pub(super) routed: Vec<Delta>,
+    pub(super) routed: Vec<Routed>,
 }
 
 /// What executing `def` on `target` would change, without changing it: its
 /// modifiers and executions, worked out, its attribute magnitudes as
-/// `captured` if they were, and what it dealt meta attributes routed.
+/// `captured` if they were, and what it dealt routes routed.
 pub(super) fn changes(
     world: &World,
     registry: &EffectRegistry,
     target: Entity,
     spec: &EffectSpec,
-    def: &Effect,
+    def: &EffectDef,
     stacks: u32,
     source_tags: &TagCounts,
     captured: &[Option<f32>],
@@ -99,6 +100,7 @@ pub(super) fn changes(
     let context = EffectContext {
         world,
         target,
+        def,
         spec,
         stacks,
     };
@@ -118,64 +120,64 @@ pub(super) fn changes(
         }
         if let Some(per) = &modifier.per {
             let of = context
-                .value_at(target, &per.attribute, &AttributeContext::new())
+                .value_at(target, per.attribute, &AttributeContext::new())
                 .unwrap_or_default();
             value *= per.times(of);
         }
         changes.push(BaseChange {
-            attribute: modifier.attribute.clone(),
+            changes: modifier.changes,
             op: modifier.op,
             value,
             on: Whose::Target,
         });
     }
     for execution in &def.executions {
-        if let Some(run) = registry.execution(execution) {
+        if let Some(run) = registry.execution(*execution) {
             changes.extend(run(&context));
         }
     }
     route(&context, registry, changes)
 }
 
-/// Routes what `changes` deal meta attributes: each one's amount summed, then
-/// handed to its router, its changes after the effect's own. Single-pass: what
-/// a router deals a meta attribute is dropped.
+/// Routes what `changes` deal routes: each one's amount summed, then handed to
+/// its router, its changes after the effect's own. Single-pass: what a router
+/// deals a route is dropped.
 fn route(context: &EffectContext, registry: &EffectRegistry, changes: Vec<BaseChange>) -> Worked {
+    let registered = registry.routes();
+    let name = |route: RouteId| registered.name(route).unwrap_or("?");
     let mut kept = Vec::with_capacity(changes.len());
-    let mut routed: Vec<Delta> = Vec::new();
+    let mut routed: Vec<Routed> = Vec::new();
     for change in changes {
-        if registry.router(&change.attribute).is_none() {
+        let Changes::Route(route) = change.changes else {
             kept.push(change);
             continue;
-        }
+        };
         if change.op != Operation::Flat || change.on != Whose::Target {
             warn!(
-                "effect `{}` deals meta attribute `{}` other than flat to its target: dropped",
-                context.spec.effect, change.attribute
+                "effect `{}` deals route `{}` other than flat to its target: dropped",
+                context.def.name,
+                name(route)
             );
             continue;
         }
-        match routed
-            .iter_mut()
-            .find(|dealt| dealt.attribute == change.attribute)
-        {
-            Some(dealt) => dealt.delta += change.value,
-            None => routed.push(Delta {
-                attribute: change.attribute,
-                delta: change.value,
+        match routed.iter_mut().find(|dealt| dealt.route == route) {
+            Some(dealt) => dealt.amount += change.value,
+            None => routed.push(Routed {
+                route,
+                amount: change.value,
             }),
         }
     }
     for dealt in &routed {
-        let Some(run) = registry.router(&dealt.attribute) else {
+        let Some(run) = registered.get(dealt.route) else {
             continue;
         };
-        for change in run(context, dealt.delta) {
-            if registry.router(&change.attribute).is_some() {
+        for change in run(context, dealt.amount) {
+            if let Changes::Route(other) = change.changes {
                 warn!(
-                    "the router of `{}` deals meta attribute `{}`: dropped, as routing is \
-                     single-pass",
-                    dealt.attribute, change.attribute
+                    "the router of `{}` deals route `{}`: dropped, as routing is single-pass",
+                    name(dealt.route),
+                    name(other)
                 );
                 continue;
             }
@@ -192,7 +194,7 @@ fn route(context: &EffectContext, registry: &EffectRegistry, changes: Vec<BaseCh
 /// there's such an effect: what an ability's cost is checked by.
 pub(crate) fn preview(world: &World, target: Entity, spec: &EffectSpec) -> Option<Vec<BaseChange>> {
     let registry = world.get_resource::<EffectRegistry>()?;
-    let def = registry.get(&spec.effect)?;
+    let def = registry.get(spec.effect_id(registry)?)?;
     let source_tags = source_tags(world, spec.source);
     Some(changes(world, registry, target, spec, def, 1, &source_tags, &[]).changes)
 }
@@ -205,7 +207,7 @@ pub(super) fn execute(
     registry: &EffectRegistry,
     target: Entity,
     spec: &EffectSpec,
-    def: &Effect,
+    def: &EffectDef,
     stacks: u32,
     source_tags: &TagCounts,
     captured: &[Option<f32>],
@@ -229,47 +231,54 @@ pub(super) fn execute(
     let mut dealt: Vec<Delta> = Vec::new();
     let mut stolen: Vec<Delta> = Vec::new();
     for change in &worked.changes {
+        // Routes are routed by now: what's left changes attributes.
+        let Changes::Attribute(attribute) = change.changes else {
+            continue;
+        };
         let (entity, deltas) = match change.on {
             Whose::Target => (target, &mut dealt),
             Whose::Source => {
                 let Some(source) = spec.source else {
                     warn!(
                         "effect `{}` changes its source's `{}`, but has no source: dropped",
-                        def.id, change.attribute
+                        def.name,
+                        attribute_name(world, attribute)
                     );
                     continue;
                 };
                 (source, &mut stolen)
             }
         };
-        let delta = net::change_base(world, predicted, entity, change);
-        match deltas
-            .iter_mut()
-            .find(|dealt| dealt.attribute == change.attribute)
-        {
+        let delta = net::change_base(world, predicted, entity, attribute, change.op, change.value);
+        match deltas.iter_mut().find(|dealt| dealt.attribute == attribute) {
             Some(dealt) => dealt.delta += delta,
-            None => deltas.push(Delta {
-                attribute: change.attribute.clone(),
-                delta,
-            }),
+            None => deltas.push(Delta { attribute, delta }),
         }
     }
     world.trigger(EffectExecuted {
         entity: target,
-        id: def.id.clone(),
+        id: def.id,
         source: spec.source,
         changes: dealt.clone(),
         source_changes: stolen,
         routed: worked.routed,
     });
     for tag in def.cues.written() {
-        let mut cue = Cue::new(tag.clone())
+        let mut cue = Cue::new(tag)
             .magnitude(dealt.first().map_or(0.0, |first| first.delta))
             .level(spec.level);
         cue.source = spec.source;
         cue.changes.clone_from(&dealt);
-        crate::cue::execute(world, target, &cue, spec.activation, Some(def.id.clone()));
+        crate::cue::execute(world, target, &cue, spec.activation, Some(def.id));
     }
+}
+
+/// `attribute`'s name, for a message.
+fn attribute_name(world: &World, attribute: AttributeId) -> &'static str {
+    world
+        .get_resource::<AttributeRegistry>()
+        .and_then(|registry| registry.get(attribute))
+        .map_or("?", |info| info.name)
 }
 
 /// `effect`'s modifiers, resolved: amounts counted once per stack, its
@@ -284,6 +293,7 @@ pub(super) fn modifiers(world: &World, registry: &EffectRegistry, effect: Entity
     let context = EffectContext {
         world,
         target: of.0,
+        def: &active.def,
         spec: &active.spec,
         stacks: active.stacks,
     };
@@ -292,11 +302,15 @@ pub(super) fn modifiers(world: &World, registry: &EffectRegistry, effect: Entity
         .modifiers
         .iter()
         .enumerate()
-        .map(|(index, modifier)| {
+        .filter_map(|(index, modifier)| {
+            // A route is only dealt as an effect executes: it counts for none.
+            let Changes::Attribute(attribute) = modifier.changes else {
+                return None;
+            };
             let captured = active.captured.get(index).copied().flatten();
             let value = magnitude(&context, registry, &modifier.value, captured);
-            Modifier {
-                attribute: modifier.attribute.clone(),
+            Some(Modifier {
+                attribute,
                 op: modifier.op,
                 value: if modifier.op.whole() {
                     value
@@ -308,7 +322,7 @@ pub(super) fn modifiers(world: &World, registry: &EffectRegistry, effect: Entity
                 }),
                 per: modifier.per.clone(),
                 local: false,
-            }
+            })
         })
         .collect()
 }

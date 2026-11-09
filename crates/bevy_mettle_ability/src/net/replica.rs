@@ -2,12 +2,10 @@
 //! granted.
 
 use bevy::prelude::*;
-use bevy_mettle_core::Id;
 use serde::{Deserialize, Serialize};
 
-use crate::AbilityRegistry;
 use crate::active::GrantedAbility;
-use crate::data::Ability;
+use crate::{AbilityId, AbilityRegistry};
 
 /// On a server's granted ability: what a client needs to have it too.
 ///
@@ -15,7 +13,7 @@ use crate::data::Ability;
 #[derive(Component, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AbilityReplica {
     /// The ability.
-    pub id: Id<Ability>,
+    pub id: AbilityId,
     /// Its level.
     pub level: f32,
 }
@@ -27,7 +25,7 @@ pub(crate) fn sync_replicas(
 ) {
     for (entity, granted, replica) in &granted {
         let now = AbilityReplica {
-            id: granted.def.id.clone(),
+            id: granted.def.id,
             level: granted.level,
         };
         if replica != Some(&now) {
@@ -45,8 +43,8 @@ pub(crate) fn show_replicas(
     mut changed: Query<(&AbilityReplica, &mut GrantedAbility), Changed<AbilityReplica>>,
 ) {
     for (entity, replica) in &arrived {
-        let Some(def) = registry.get(&replica.id).cloned() else {
-            warn!("there's no ability called `{}` to have", replica.id);
+        let Some(def) = registry.get(replica.id).cloned() else {
+            warn!("there's no ability {:?} to have", replica.id);
             continue;
         };
         commands
@@ -55,8 +53,8 @@ pub(crate) fn show_replicas(
     }
     for (replica, mut granted) in &mut changed {
         if granted.def.id != replica.id {
-            let Some(def) = registry.get(&replica.id).cloned() else {
-                warn!("there's no ability called `{}` to have", replica.id);
+            let Some(def) = registry.get(replica.id).cloned() else {
+                warn!("there's no ability {:?} to have", replica.id);
                 continue;
             };
             granted.def = def;

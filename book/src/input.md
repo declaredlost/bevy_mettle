@@ -46,6 +46,7 @@ with it as the ability ends. Your systems read both:
 # use bevy_mettle::prelude::*;
 # #[derive(Component, Clone, Copy, Debug, PartialEq)] struct Aim(Vec2);
 # #[derive(Component, Default, Behaviour)] #[behaviour(input = Aim)] struct CastFireball { timer: f32 }
+# #[derive(Ability)] struct Fireball;
 /// Where the player clicked this frame, if they did: kept by your input code.
 #[derive(Resource)]
 struct Clicked(Option<Vec2>);
@@ -56,7 +57,7 @@ struct Player;
 /// Casts the fireball where the player clicked.
 fn cast_at(clicked: Res<Clicked>, player: Single<Entity, With<Player>>, mut commands: Commands) {
     if let Some(at) = clicked.0 {
-        commands.entity(*player).activate_ability_with::<CastFireball>("fireball", Aim(at));
+        commands.entity(*player).activate_ability_with::<CastFireball>(Fireball, Aim(at));
     }
 }
 
@@ -87,6 +88,7 @@ ask anything a system can, a spatial query for line of sight too:
 # #[derive(Attribute)] #[attribute(base = 100.0, min = 0.0)] struct Mana;
 # #[derive(Component, Clone, Copy, Debug, PartialEq)] struct Aim(Vec2);
 # #[derive(Component, Default, Behaviour)] #[behaviour(input = Aim)] struct CastFireball { timer: f32 }
+# #[derive(Ability)] struct Fireball;
 /// Whether the aim is within 12 of the mage.
 fn in_reach(In(check): In<InputCheck<Aim>>, mages: Query<&Transform>) -> bool {
     mages
@@ -99,26 +101,27 @@ app.add_plugins((MinimalPlugins, MettlePlugins))
     .add_attribute::<Mana>()
     .add_behaviour::<CastFireball>()
     .check_input::<Aim, _>(in_reach)
+    .add_ability::<Fireball>()
     .insert_resource(MettleContent {
-        effects: vec![Effect::instant("fireball.cost")
+        effects: vec![EffectData::instant("fireball.cost")
             .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0))],
-        abilities: vec![Ability::new("fireball", "cast_fireball").cost("fireball.cost")],
+        abilities: vec![AbilityData::new("fireball", "cast_fireball").cost("fireball.cost")],
         ..default()
     });
 app.update();
 
 let world = app.world_mut();
 let mage = world.spawn((Base::<Mana>::default(), Transform::default())).id();
-world.grant_ability(mage, "fireball", 1.0).unwrap();
+world.grant_ability(mage, Fireball).unwrap();
 
 // Too far: rejected before anything's paid.
 assert_eq!(
-    world.activate_ability_with::<CastFireball>(mage, "fireball", Aim(Vec2::new(40.0, 0.0))),
+    world.activate_ability_with::<CastFireball>(mage, Fireball, Aim(Vec2::new(40.0, 0.0))),
     Err(Failure::Input)
 );
 // Within reach: cast.
 let fireball = world
-    .activate_ability_with::<CastFireball>(mage, "fireball", Aim(Vec2::new(8.0, 0.0)))
+    .activate_ability_with::<CastFireball>(mage, Fireball, Aim(Vec2::new(8.0, 0.0)))
     .unwrap();
 assert_eq!(world.get::<Aim>(fireball), Some(&Aim(Vec2::new(8.0, 0.0))));
 ```

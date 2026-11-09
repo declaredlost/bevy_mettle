@@ -1,9 +1,10 @@
 use bevy::ecs::schedule::{InternedScheduleLabel, ScheduleLabel};
 use bevy::prelude::*;
+use bevy_mettle_core::net::NetRole;
 use bevy_mettle_core::tag::{OwnedTags, publish_tags};
 
 use crate::authority::{self, Remote};
-use crate::modifier::{ModifierOf, ModifierSources, Modifiers, Provisional};
+use crate::modifier::{ModifierOf, ModifierSources, Modifiers, ModifiersReplica, Provisional};
 use crate::registry::{AttributeRegistry, AttributeState, state};
 
 /// The system set attributes are kept in, `FixedPreUpdate` by default.
@@ -65,12 +66,14 @@ impl Plugin for AttributePlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Modifiers>()
             .register_type::<ModifierOf>()
+            .register_type::<ModifiersReplica>()
             .register_type::<ModifierSources>()
             .register_type::<OwnedTags>()
             .register_type::<AttributeState>()
             .register_type::<Provisional>()
             .register_type::<Remote>()
             .init_resource::<AttributeRegistry>()
+            .init_resource::<NetRole>()
             .init_resource::<state::Dirty>()
             .insert_resource(AttributeSchedule(self.schedule))
             .configure_sets(
@@ -88,7 +91,12 @@ impl Plugin for AttributePlugin {
             .add_systems(
                 self.schedule,
                 (
-                    authority::sync_remote.in_set(Phase::Sync),
+                    (
+                        authority::sync_remote,
+                        crate::modifier::sync_replicas,
+                        crate::modifier::show_replicas,
+                    )
+                        .in_set(Phase::Sync),
                     (state::collect, state::fold).chain().in_set(Phase::Fold),
                     (publish_tags, state::refresh)
                         .chain()

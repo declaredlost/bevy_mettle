@@ -5,13 +5,12 @@ use std::sync::Arc;
 use bevy::ecs::lifecycle::HookContext;
 use bevy::ecs::world::DeferredWorld;
 use bevy::prelude::*;
-use bevy_mettle_core::Id;
 use bevy_mettle_core::tag::{OwnedTags, TagCounts, Tags};
 
 use crate::cue::CueSources;
-use crate::data::Effect;
+use crate::data::EffectDef;
 use crate::net::Proxy;
-use crate::{EffectSpec, engine};
+use crate::{EffectId, EffectSpec, engine};
 
 /// An effect on its target: an entity of its own, [`EffectOf`] the target.
 ///
@@ -24,7 +23,7 @@ use crate::{EffectSpec, engine};
 #[component(on_discard = take_back)]
 pub struct ActiveEffect {
     pub(crate) spec: EffectSpec,
-    pub(crate) def: Arc<Effect>,
+    pub(crate) def: Arc<EffectDef>,
     pub(crate) stacks: u32,
     /// How long it lasts in full, if not forever.
     pub(crate) duration: Option<f32>,
@@ -57,14 +56,14 @@ impl ActiveEffect {
 
     /// Its definition.
     #[must_use]
-    pub fn def(&self) -> &Effect {
+    pub fn def(&self) -> &EffectDef {
         &self.def
     }
 
     /// Its effect's id.
     #[must_use]
-    pub fn id(&self) -> &Id<Effect> {
-        &self.def.id
+    pub fn id(&self) -> EffectId {
+        self.def.id
     }
 
     /// How many stacks of it there are.

@@ -10,7 +10,7 @@ use super::apply::chain;
 use super::count::{deactivate, refresh};
 use super::effects_on;
 use crate::active::{ActiveEffect, EffectOf};
-use crate::data::{Effect, Expire};
+use crate::data::{EffectDef, Expire};
 use crate::events::{EffectRemoved, EffectStacked};
 use crate::{EffectRegistry, EffectSpec};
 
@@ -33,7 +33,7 @@ pub(crate) fn remove(world: &mut World, effect: Entity, expired: bool, depth: u3
     world.trigger(EffectRemoved {
         entity: target,
         effect,
-        id: def.id.clone(),
+        id: def.id,
         expired,
     });
     chain(world, target, &spec, &def.on_remove, depth);
@@ -77,7 +77,7 @@ pub(super) fn expire(
     world: &mut World,
     registry: &EffectRegistry,
     effect: Entity,
-    def: &Arc<Effect>,
+    def: &Arc<EffectDef>,
 ) {
     let policy = def.stacking.as_ref().map(|stacking| stacking.expire);
     let Some(mut active) = world.get_mut::<ActiveEffect>(effect) else {
@@ -95,7 +95,7 @@ pub(super) fn expire(
                 world.trigger(EffectStacked {
                     entity: target,
                     effect,
-                    id: def.id.clone(),
+                    id: def.id,
                     stacks,
                 });
             }
@@ -130,7 +130,7 @@ pub(crate) fn removed_unasked(
     world: &mut World,
     target: Entity,
     effect: Entity,
-    def: &Effect,
+    def: &EffectDef,
     spec: &EffectSpec,
 ) {
     if world.get_entity(target).is_err() {
@@ -139,7 +139,7 @@ pub(crate) fn removed_unasked(
     world.trigger(EffectRemoved {
         entity: target,
         effect,
-        id: def.id.clone(),
+        id: def.id,
         expired: false,
     });
     chain(world, target, spec, &def.on_remove, 0);

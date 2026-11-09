@@ -5,11 +5,11 @@ use std::sync::Arc;
 use bevy::ecs::lifecycle::HookContext;
 use bevy::ecs::world::DeferredWorld;
 use bevy::prelude::*;
-use bevy_mettle_core::Id;
 use bevy_mettle_core::tag::{OwnedTags, Tags};
 
-use crate::behaviour::AnyBehaviour;
-use crate::data::Ability;
+use crate::AbilityId;
+use crate::behaviour::BehaviourId;
+use crate::data::AbilityDef;
 use crate::events::GameplayEvent;
 
 /// An ability granted to an actor: an entity of its own, [`AbilityOf`] it.
@@ -21,7 +21,7 @@ use crate::events::GameplayEvent;
 #[derive(Component, Debug)]
 #[component(on_discard = take_back)]
 pub struct GrantedAbility {
-    pub(crate) def: Arc<Ability>,
+    pub(crate) def: Arc<AbilityDef>,
     pub(crate) level: f32,
     /// The effect that granted it, if one did: as its [`GrantedBy`] says.
     pub(crate) source: Option<Entity>,
@@ -31,7 +31,7 @@ pub struct GrantedAbility {
     pub(crate) cues: Tags,
     /// The behaviour whose component it activated with, to take off: its
     /// definition may have been replaced since.
-    pub(crate) running: Option<Id<AnyBehaviour>>,
+    pub(crate) running: Option<BehaviourId>,
     /// Whether this activation paid its cost.
     pub(crate) cost_paid: bool,
     /// Whether this activation started its cooldown.
@@ -39,7 +39,7 @@ pub struct GrantedAbility {
 }
 
 impl GrantedAbility {
-    pub(crate) fn new(def: Arc<Ability>, level: f32, source: Option<Entity>) -> Self {
+    pub(crate) fn new(def: Arc<AbilityDef>, level: f32, source: Option<Entity>) -> Self {
         Self {
             def,
             level,
@@ -54,14 +54,14 @@ impl GrantedAbility {
 
     /// Its definition.
     #[must_use]
-    pub fn def(&self) -> &Ability {
+    pub fn def(&self) -> &AbilityDef {
         &self.def
     }
 
     /// Its ability's id.
     #[must_use]
-    pub fn id(&self) -> &Id<Ability> {
-        &self.def.id
+    pub fn id(&self) -> AbilityId {
+        self.def.id
     }
 
     /// Its level: what its cost's and cooldown's curves are read at.

@@ -2,13 +2,12 @@
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy_mettle_core::Id;
 use bevy_mettle_core::tag::OwnedTags;
 
 use crate::Attribute;
 use crate::modifier::Operation;
 use crate::read::{AttributeContext, Breakdown};
-use crate::registry::{AnyAttribute, AttributeRegistry, AttributeState};
+use crate::registry::{AttributeId, AttributeRegistry, AttributeState};
 
 /// A system parameter: actors' attributes, read in a context such as a hit's.
 ///
@@ -33,7 +32,7 @@ impl AttributeReader<'_, '_> {
     /// `actor`'s `A` in `context`, if it has `A`.
     #[must_use]
     pub fn value<A: Attribute>(&self, actor: Entity, context: &AttributeContext) -> Option<f32> {
-        self.value_at(actor, &A::ID, context)
+        self.value_at(actor, self.registry.id_of::<A>()?, context)
     }
 
     /// `actor`'s `attribute` in `context`, if it has it.
@@ -41,7 +40,7 @@ impl AttributeReader<'_, '_> {
     pub fn value_at(
         &self,
         actor: Entity,
-        attribute: &Id<AnyAttribute>,
+        attribute: AttributeId,
         context: &AttributeContext,
     ) -> Option<f32> {
         let (state, owned) = self.actors.get(actor).ok()?;
@@ -58,7 +57,7 @@ impl AttributeReader<'_, '_> {
         actor: Entity,
         context: &AttributeContext,
     ) -> Option<Breakdown> {
-        self.breakdown_at(actor, &A::ID, context)
+        self.breakdown_at(actor, self.registry.id_of::<A>()?, context)
     }
 
     /// `actor`'s `attribute`'s modifiers in `context`, summed but not applied.
@@ -66,7 +65,7 @@ impl AttributeReader<'_, '_> {
     pub fn breakdown_at(
         &self,
         actor: Entity,
-        attribute: &Id<AnyAttribute>,
+        attribute: AttributeId,
         context: &AttributeContext,
     ) -> Option<Breakdown> {
         let (state, owned) = self.actors.get(actor).ok()?;
@@ -86,11 +85,15 @@ impl AttributeReader<'_, '_> {
 ///
 /// For exclusive systems, effects and tests.
 pub trait AttributeWorld {
+    /// `A`'s number in this world's app, if it's added: as
+    /// `world.component_id::<T>()` is to a component.
+    fn attribute_id<A: Attribute>(&self) -> Option<AttributeId>;
+
     /// `actor`'s `attribute` in `context`, if it has it.
     fn value_at(
         &self,
         actor: Entity,
-        attribute: &Id<AnyAttribute>,
+        attribute: AttributeId,
         context: &AttributeContext,
     ) -> Option<f32>;
 
@@ -98,7 +101,7 @@ pub trait AttributeWorld {
     fn breakdown_at(
         &self,
         actor: Entity,
-        attribute: &Id<AnyAttribute>,
+        attribute: AttributeId,
         context: &AttributeContext,
     ) -> Option<Breakdown>;
 
@@ -111,7 +114,7 @@ pub trait AttributeWorld {
     fn apply_to_base(
         &mut self,
         actor: Entity,
-        attribute: &Id<AnyAttribute>,
+        attribute: AttributeId,
         op: Operation,
         value: f32,
     ) -> bool;
@@ -123,21 +126,25 @@ pub trait AttributeWorld {
     fn base_after(
         &mut self,
         actor: Entity,
-        attribute: &Id<AnyAttribute>,
+        attribute: AttributeId,
         base: f32,
         op: Operation,
         value: f32,
     ) -> Option<f32>;
 
     /// `actor`'s `attribute`'s base, if it has it.
-    fn base_at(&self, actor: Entity, attribute: &Id<AnyAttribute>) -> Option<f32>;
+    fn base_at(&self, actor: Entity, attribute: AttributeId) -> Option<f32>;
 }
 
 impl AttributeWorld for World {
+    fn attribute_id<A: Attribute>(&self) -> Option<AttributeId> {
+        self.get_resource::<AttributeRegistry>()?.id_of::<A>()
+    }
+
     fn value_at(
         &self,
         actor: Entity,
-        attribute: &Id<AnyAttribute>,
+        attribute: AttributeId,
         context: &AttributeContext,
     ) -> Option<f32> {
         let registry = self.get_resource::<AttributeRegistry>()?;
@@ -151,7 +158,7 @@ impl AttributeWorld for World {
     fn breakdown_at(
         &self,
         actor: Entity,
-        attribute: &Id<AnyAttribute>,
+        attribute: AttributeId,
         context: &AttributeContext,
     ) -> Option<Breakdown> {
         let registry = self.get_resource::<AttributeRegistry>()?;
@@ -162,7 +169,7 @@ impl AttributeWorld for World {
             .then(|| state.breakdown(registry, owned, attribute, context))
     }
 
-    fn base_at(&self, actor: Entity, attribute: &Id<AnyAttribute>) -> Option<f32> {
+    fn base_at(&self, actor: Entity, attribute: AttributeId) -> Option<f32> {
         let registry = self.get_resource::<AttributeRegistry>()?;
         (registry.get(attribute)?.get_base)(self, actor)
     }
@@ -170,7 +177,7 @@ impl AttributeWorld for World {
     fn apply_to_base(
         &mut self,
         actor: Entity,
-        attribute: &Id<AnyAttribute>,
+        attribute: AttributeId,
         op: Operation,
         value: f32,
     ) -> bool {
@@ -188,7 +195,7 @@ impl AttributeWorld for World {
         };
         (info.set_base)(self, actor, kept);
         if let Some(mut state) = self.get_mut::<AttributeState>(actor) {
-            state.set_base(attribute.clone(), kept);
+            state.set_base(attribute, kept);
         }
         true
     }
@@ -196,7 +203,7 @@ impl AttributeWorld for World {
     fn base_after(
         &mut self,
         actor: Entity,
-        attribute: &Id<AnyAttribute>,
+        attribute: AttributeId,
         base: f32,
         op: Operation,
         value: f32,
@@ -225,11 +232,11 @@ fn sync_bases(world: &mut World, registry: &AttributeRegistry, actor: Entity) {
     let Some(state) = world.get::<AttributeState>(actor) else {
         return;
     };
-    let changed: Vec<(Id<AnyAttribute>, f32)> = registry
+    let changed: Vec<(AttributeId, f32)> = registry
         .iter()
-        .filter_map(|info| {
+        .filter_map(|(id, info)| {
             let base = (info.get_base)(world, actor)?;
-            (state.cached_base(&info.id) != Some(base)).then(|| (info.id.clone(), base))
+            (state.cached_base(id) != Some(base)).then_some((id, base))
         })
         .collect();
     if changed.is_empty() {

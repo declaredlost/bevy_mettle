@@ -10,43 +10,125 @@ What has a tag has every tag above it. A rule written for `damage.elemental`
 holds for a fire hit, and a cure for `effect.affliction` takes off burning
 and poison alike. This is how Unreal's gameplay tags work too.
 
-## The tag tree
+## Tags in code
 
-Tags are data. You define them, usually in a file, and a mod can add its
-own. Each tag is a [`Tag`] with an id, its path:
-
-```ron
-[
-    (id: "damage"),
-    (id: "damage.elemental"),
-    (id: "damage.elemental.fire"),
-    (id: "state"),
-    (id: "state.burning"),
-    (id: "state.wet"),
-]
-```
-
-In a game, the tags go in [`MettleContent`]'s `tags`, and mettle builds the
-tree as the content is loaded, keeping it as a resource, `Res<TagTree>`.
-[`TagTree::build`] is that step on its own: it checks the definitions and
-gives you the tree everything else is checked against:
+Code names a tag by its type. Derive [`Tag`] on a unit struct, under its
+parent:
 
 ```rust
 # use bevy_mettle::prelude::*;
-let file = r#"[
-    (id: "damage"),
-    (id: "damage.elemental"),
-    (id: "damage.elemental.fire"),
-    (id: "state"),
-    (id: "state.burning"),
-    (id: "state.wet"),
-]"#;
-let definitions: Vec<Tag> = ron::from_str(file).unwrap();
-let tags = TagTree::build(&definitions).unwrap();
+#[derive(Tag)]
+struct State;                    // "state"
 
-assert!(tags.contains(&Id::from_static("damage.elemental.fire")));
-assert!(!tags.contains(&Id::from_static("damage.poison")));
+#[derive(Tag)]
+#[tag(parent = State)]
+struct Burning;                  // "state.burning"
+
+#[derive(Tag)]
+#[tag(parent = State, name = "wet")]
+struct Soaked;                   // "state.wet"
+
+let mut owned = OwnedTags::default();
+owned.add(Burning);
+assert!(owned.contains(Burning));
+assert!(owned.contains(State)); // what's above it too
 ```
+
+A tag's name is its type's in `snake_case` under its parent's, unless
+`name` says otherwise. A tag with no `parent` is at the top. Its parent is
+[`Root`], which every tag hangs from and nothing ever owns.
+
+Naming a tag by type means a misspelled one doesn't compile:
+`owned.contains(Burnign)` is an error, where `"state.burnign"` would quietly
+never match. The parent is a type too, so the tree in code can't be
+misspelled either.
+
+Tags code names are added to the app, as attributes are:
+
+```rust
+# use bevy::prelude::*;
+# use bevy_mettle::prelude::*;
+# #[derive(Tag)] struct State;
+# #[derive(Tag)] #[tag(parent = State)] struct Burning;
+App::new().add_tag::<Burning>(); // and `state`, above it
+```
+
+They join the registry content is checked against, whether the content
+defines them or not, so data naming them is checked against code.
+
+## Keys
+
+Wherever mettle takes a tag, it takes anything that becomes a [`TagKey`]:
+a tag type (`Burning`), or a name (`"state.burning"`). A key is the tag
+interned: a number, cheap to copy and compare, the same whether code named
+it by type or data by name. That number is this process's alone. What's
+sent over the network is the tag's number in the registry, a [`TagId`], which
+is the same on a server and its clients: see [The tag registry](#the-tag-registry).
+
+A key knows where it sits in the tree:
+
+```rust
+# use bevy_mettle::prelude::*;
+#[derive(Tag)]
+struct Damage;
+#[derive(Tag)]
+#[tag(parent = Damage)]
+struct Elemental;
+#[derive(Tag)]
+#[tag(parent = Elemental)]
+struct Fire;
+
+let fire = TagKey::from(Fire);
+assert_eq!(fire, TagKey::named("damage.elemental.fire"));
+assert_eq!(fire.parent(), Some(TagKey::from(Elemental)));
+assert!(fire.is_within(Damage));
+
+let lineage: Vec<&str> = fire.lineage().map(TagKey::name).collect();
+assert_eq!(lineage, ["damage.elemental.fire", "damage.elemental", "damage"]);
+```
+
+## The tag registry
+
+Tags that only data names needn't be types. Content lists them by name,
+and a mod can add its own. In data, a tag is written as its name:
+`"damage.elemental.fire"`.
+
+In a game, they go in [`MettleContent`]'s `tags`, beside those code adds,
+and mettle checks them as the content is loaded, keeping them as a
+resource, `Res<TagRegistry>`. The tags code adds are kept in the registry
+too, so a reload doesn't lose them. [`TagRegistry::build`] is that step on
+its own: it checks the definitions and gives you the registry everything
+else is checked against:
+
+```rust
+# use bevy_mettle::prelude::*;
+let definitions = ["damage", "damage.elemental", "damage.elemental.fire"].map(TagKey::named);
+let tags = TagRegistry::build(definitions).unwrap();
+
+assert!(tags.contains("damage.elemental.fire"));
+assert!(!tags.contains("damage.poison"));
+```
+
+The registry numbers its tags: each gets a [`TagId`], in order of name. The
+same tags are numbered the same wherever they're checked, so a server and
+its clients agree on every number. `id` and `key` go between the two:
+
+```rust
+# use bevy_mettle::prelude::*;
+# let definitions = ["damage", "damage.elemental", "damage.elemental.fire"].map(TagKey::named);
+# let tags = TagRegistry::build(definitions).unwrap();
+let fire: TagId = tags.id("damage.elemental.fire").unwrap();
+assert_eq!(tags.key(fire), Some(TagKey::named("damage.elemental.fire")));
+
+// A reload keeps the numbers tags had, and numbers new ones after them.
+let reloaded = tags
+    .rebuild(["damage", "damage.elemental", "damage.elemental.fire", "damage.poison"].map(TagKey::named))
+    .unwrap();
+assert_eq!(reloaded.id("damage.elemental.fire"), Some(fire));
+```
+
+Mettle rebuilds the registry this way each time content is loaded again, so
+what holds a tag's number still names the same tag.
 
 `build` takes definitions from however many files at once: chain them, or
 collect them into one list. It reports every mistake together, not just the
@@ -60,11 +142,8 @@ first:
 
 ```rust
 # use bevy_mettle::prelude::*;
-let definitions = [
-    Tag { id: Id::from_static("damage") },
-    Tag { id: Id::from_static("damage.elemental.fire") },
-];
-let errors = TagTree::build(&definitions).unwrap_err();
+let definitions = [TagKey::named("damage"), TagKey::named("damage.elemental.fire")];
+let errors = TagRegistry::build(definitions).unwrap_err();
 assert_eq!(
     errors.to_string(),
     "there's no tag called `damage.elemental` (in `damage.elemental.fire`)"
@@ -72,29 +151,7 @@ assert_eq!(
 ```
 
 Mettle doesn't read files. Your game loads them however it likes, and hands
-the definitions over. [Loading data](loading-data.md) shows one way.
-
-## Naming a tag
-
-In code, a tag is an `Id<Tag>`. An [`Id`] is a name typed by what it names,
-so a tag's id can't be passed where an effect's is expected. Make one with
-`Id::from_static("state.burning")`, as a constant, or `Id::new(name)` from a
-string. Most of mettle's builders take `impl Into<Id<Tag>>`, so a plain
-`"state.burning"` works there too.
-
-An id knows where it sits in the tree:
-
-```rust
-# use bevy_mettle::prelude::*;
-let fire: Id<Tag> = Id::from_static("damage.elemental.fire");
-
-assert_eq!(fire.parent(), Some(Id::from_static("damage.elemental")));
-assert!(fire.is_within(&Id::from_static("damage")));
-assert!(!fire.is_within(&Id::from_static("damage.elem")));
-
-let lineage: Vec<String> = fire.lineage().map(|tag| tag.to_string()).collect();
-assert_eq!(lineage, ["damage.elemental.fire", "damage.elemental", "damage"]);
-```
+the definitions over: see [Loading data](loading-data.md).
 
 ## Sets of tags
 
@@ -104,17 +161,15 @@ holds every tag above the ones you give it, so asking it for `effect` finds
 
 ```rust
 # use bevy_mettle::prelude::*;
-let burning: Tags = [Id::from_static("effect.affliction.burning")]
-    .into_iter()
-    .collect();
+let burning: Tags = ["effect.affliction.burning"].into_iter().collect();
 
-assert!(burning.contains(&Id::from_static("effect.affliction")));
-assert!(burning.contains(&Id::from_static("effect")));
+assert!(burning.contains("effect.affliction"));
+assert!(burning.contains("effect"));
 // Written back as given, without what's above.
 assert_eq!(burning.written().count(), 1);
 ```
 
-In data, a set is a list of the tags as given: `["effect.affliction.burning"]`.
+In data, a set is written as a list of the tags as given, each by its name.
 
 ## Owned tags
 
@@ -129,24 +184,30 @@ are gone:
 
 ```rust
 # use bevy_mettle::prelude::*;
-let immune = Id::from_static("immune.fire");
+#[derive(Tag)]
+struct Immune;
+#[derive(Tag)]
+#[tag(parent = Immune, name = "fire")]
+struct ImmuneToFire;
+
 let mut owned = OwnedTags::default();
-owned.add(&immune); // A potion.
-owned.add(&immune); // A ring.
+owned.add(ImmuneToFire); // A potion.
+owned.add(ImmuneToFire); // A ring.
 
-owned.remove(&immune); // The potion wears off.
-assert!(owned.contains(&immune));
-assert!(owned.contains(&Id::from_static("immune")));
+owned.remove(ImmuneToFire); // The potion wears off.
+assert!(owned.contains(ImmuneToFire));
+assert!(owned.contains(Immune));
 
-owned.remove(&immune); // The ring comes off.
-assert!(!owned.contains(&immune));
+owned.remove(ImmuneToFire); // The ring comes off.
+assert!(!owned.contains(ImmuneToFire));
 ```
 
 Removing a tag only takes away what was added as that tag. Owning
-`immune.fire` means owning `immune`, but `owned.remove(&immune)` with
-`immune` does nothing: no source added `immune` itself. `OwnedTags` reads
-as a [`TagCounts`], which holds the counts: `count(&tag)` says how many
-sources hold a tag, and `iter()` lists them.
+`immune.fire` means owning `immune`, but `owned.remove(Immune)` does
+nothing: no source added `immune` itself. `OwnedTags` reads as a
+[`TagCounts`], which holds the counts: `count(tag)` says how many sources
+hold a tag, and `iter()` lists them. Counts are kept by key, so asking is an
+index, not a comparison of names.
 
 ### Told as they come and go
 
@@ -176,7 +237,7 @@ let mage = app.world_mut().spawn(OwnedTags::default()).id();
 app.world_mut()
     .get_mut::<OwnedTags>(mage)
     .unwrap()
-    .add(&Id::from_static("state.burning"));
+    .add("state.burning");
 app.update();
 
 assert_eq!(app.world().resource::<Told>().0, ["+state.burning", "+state"]);
@@ -188,33 +249,42 @@ first: a tag added and taken away again before then isn't told at all.
 
 ### Asking from a behavior tree
 
-[`owns`] is a guard: a read-only system that takes an agent and a tag, and
-says whether the agent owns the tag or one under it. It has the shape
+[`owns`] is a guard: a read-only system that takes an agent and a tag key,
+and says whether the agent owns the tag or one under it. It has the shape
 `bevy_arbor` takes for a decorator, so a tree can wait on `state.stunned`.
 
-## Checking a client has the server's tags
+## Checking a client numbers tags as its server does
 
-Tags travel as names. A client and its server have to agree on the tree.
-[`TagTree::fingerprint`] is a hash of the tags that doesn't depend on the
-order they were defined in. Send it on connecting and compare.
+A client and its server have to agree on the registry: tags travel as their
+numbers, so a tag numbered differently would be read as another.
+[`TagRegistry::fingerprint`], as every registry's, is a hash of the tags with
+their numbers. Built from the same tags, in whatever order they were defined,
+registries hash the same; a registry rebuilt by a reload keeps old numbers, so
+two hash the same only if they were loaded the same way. Over lightyear,
+mettle compares them for you as a client connects:
+[Lightyear](lightyear.md#checking-content).
 
 ## Pitfalls
 
-- **Ids aren't checked where you write them.** `Id::from_static("stat.burning")`
-  compiles. The mistake is caught when data naming it is checked against the
-  tree, as effects and abilities are when content is loaded.
+- **Names aren't checked where you write them.** `"stat.burning"` compiles
+  wherever a tag is taken. Name tags code uses by type; a name is caught only
+  when data naming it is checked against the registry.
 - **Facts are tags too.** [Conditions](conditions.md) name the numbers a read
-  supplies by tags, such as `fact.flown`. Define them in the tree, or
+  supplies by tags, such as `fact.flown`. Define them as tags, or
   conditions naming them fail their checks.
+- **A tag can't be under itself.** `#[tag(parent = ..)]` loops compile, but
+  panic with both names the first time either tag is used.
 - **No events without the attribute plugin.** `publish_tags` runs in
   `AttributeSystems`. Without `AttributePlugin`, owned tags still count, but
   nothing is told.
 
-[`Tag`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.Tag.html
+[`Tag`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/trait.Tag.html
+[`Root`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/enum.Root.html
+[`TagKey`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagKey.html
 [`MettleContent`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleContent.html
-[`TagTree::build`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagTree.html#method.build
-[`TagTree::fingerprint`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagTree.html#method.fingerprint
-[`Id`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.Id.html
+[`TagId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagId.html
+[`TagRegistry::build`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagRegistry.html#method.build
+[`TagRegistry::fingerprint`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.Registry.html#method.fingerprint
 [`Tags`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.Tags.html
 [`OwnedTags`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.OwnedTags.html
 [`TagCounts`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagCounts.html

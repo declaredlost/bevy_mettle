@@ -2,7 +2,7 @@
 
 use super::Condition;
 use crate::MettleError;
-use crate::tag::TagTree;
+use crate::tag::{TagKey, TagRegistry};
 
 impl Condition {
     /// Checks every tag in it is defined in `tags`, and its numbers can be:
@@ -11,7 +11,7 @@ impl Condition {
     /// # Errors
     ///
     /// The first tag that isn't defined, or number that can't be.
-    pub fn check(&self, tags: &TagTree, within: Option<&str>) -> Result<(), MettleError> {
+    pub fn check(&self, tags: &TagRegistry, within: Option<&str>) -> Result<(), MettleError> {
         self.walk(Some(tags), within)
     }
 
@@ -26,12 +26,12 @@ impl Condition {
     }
 
     /// Checks its numbers, and its tags against `tags` if they're given.
-    fn walk(&self, tags: Option<&TagTree>, within: Option<&str>) -> Result<(), MettleError> {
+    fn walk(&self, tags: Option<&TagRegistry>, within: Option<&str>) -> Result<(), MettleError> {
         let invalid = |what: String| MettleError::Invalid {
             what,
             within: within.map(ToOwned::to_owned),
         };
-        let known = |tag| tags.map_or(Ok(()), |tags| tags.known(tag, within));
+        let known = |tag: &TagKey| tags.map_or(Ok(()), |tags| tags.known(*tag, within));
         match self {
             Self::All(terms) | Self::Any(terms) => {
                 terms.iter().try_for_each(|term| term.walk(tags, within))

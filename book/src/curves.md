@@ -9,12 +9,30 @@ their numbers by curves, as Unreal's curve tables do.
 A curve is data, a [`LevelCurve`]: an id, how it goes between its keys, and
 its keys as `(level, value)` pairs, levels rising:
 
-```ron
-[
-    (id: "fireball.damage", interpolation: Ease(QuadraticIn), keys: [(1, 10), (10, 85), (20, 240)]),
-    (id: "burning.damage", keys: [(1, 4), (20, 40)]),
-]
+```rust
+# use bevy_mettle::prelude::*;
+fn curves() -> Vec<LevelCurve> {
+    vec![
+        LevelCurve {
+            id: "fireball.damage".into(),
+            interpolation: Interpolation::Constant,
+            keys: vec![(1.0, 10.0), (10.0, 85.0), (20.0, 240.0)],
+        },
+        LevelCurve {
+            id: "burning.damage".into(),
+            interpolation: Interpolation::Linear,
+            keys: vec![(1.0, 4.0), (20.0, 40.0)],
+        },
+    ]
+}
+# assert_eq!(curves().len(), 2);
 ```
+
+Here the fireball's damage steps up at levels 10 and 20, and burning's
+grows steadily between its keys. `LevelCurve` is a serde type: in a file, it's
+a struct with an `id` (the curve's name, a string), an `interpolation`, and
+`keys` as a list of pairs. `interpolation` can be left out: it's `Linear`
+unless it says.
 
 Between keys, a curve goes one of three ways:
 
@@ -22,32 +40,50 @@ Between keys, a curve goes one of three ways:
 |---|---|
 | `Linear` | A straight line from one to the next. The default. |
 | `Constant` | Each key's value, held until the next. |
-| `Ease(..)` | One of Bevy's easing functions, such as `Ease(SineInOut)` or `Ease(ExponentialIn)`, from one key to the next. |
+| `Ease(..)` | One of Bevy's easing functions, such as `Ease(EaseFunction::SineInOut)` or `Ease(EaseFunction::ExponentialIn)`, from one key to the next. |
 
 Before the first key and past the last, a curve stays at that key's value. A
 curve with one key is that value at every level.
 
-## The curve table
+## The curve registry
 
 In a game, the curves go in [`MettleContent`]'s `curves`, and mettle builds
-the table as the content is loaded, keeping it as a resource,
-`Res<CurveTable>`. [`CurveTable::build`] is that step on its own: it checks
-each curve and builds it as one of Bevy's curves:
+the registry as the content is loaded, keeping it as a resource,
+`Res<CurveRegistry>`. [`CurveRegistry::build`] is that step on its own: it checks
+each curve, builds it as one of Bevy's curves, and numbers it.
+
+A curve's number is a [`CurveId`], given in order of name, as Bevy gives a
+component its `ComponentId`. Effects scale by the number once content is
+checked; the name is for content and debug output. [`CurveRegistry::id`] finds
+a curve's number by its name:
 
 ```rust
 # use bevy_mettle::prelude::*;
-let file = r#"[
-    (id: "fireball.damage", interpolation: Ease(QuadraticIn), keys: [(1, 10), (10, 85), (20, 240)]),
-    (id: "burning.damage", keys: [(1, 4), (20, 40)]),
-]"#;
-let definitions: Vec<LevelCurve> = ron::from_str(file).unwrap();
-let curves = CurveTable::build(&definitions).unwrap();
+# fn curves() -> Vec<LevelCurve> {
+#     vec![
+#         LevelCurve {
+#             id: "fireball.damage".into(),
+#             interpolation: Interpolation::Constant,
+#             keys: vec![(1.0, 10.0), (10.0, 85.0), (20.0, 240.0)],
+#         },
+#         LevelCurve {
+#             id: "burning.damage".into(),
+#             interpolation: Interpolation::Linear,
+#             keys: vec![(1.0, 4.0), (20.0, 40.0)],
+#         },
+#     ]
+# }
+let curves = CurveRegistry::build(&curves()).unwrap();
 
-let burning = Id::from_static("burning.damage");
-assert_eq!(curves.at(&burning, 1.0), Some(4.0));
-assert_eq!(curves.at(&burning, 50.0), Some(40.0)); // Past the last key.
-assert_eq!(curves.at(&Id::from_static("frost.damage"), 1.0), None);
+let burning = curves.id("burning.damage").unwrap();
+assert_eq!(curves.at(burning, 1.0), Some(4.0));
+assert_eq!(curves.at(burning, 50.0), Some(40.0)); // Past the last key.
+assert_eq!(curves.id("frost.damage"), None);
 ```
+
+As content is loaded again, the registry is rebuilt with
+[`CurveRegistry::rebuild`]: curves keep the numbers they had, and new ones are
+numbered after them.
 
 `build` reports every mistake together:
 
@@ -57,25 +93,25 @@ assert_eq!(curves.at(&Id::from_static("frost.damage"), 1.0), None);
 - **Levels that don't rise.** Each key's level has to be above the one
   before it.
 
-Effects name curves by id. As content is loaded, every curve an effect names
-is checked against the table. [Defining
+Effects name curves by name. As content is loaded, every curve an effect
+names is checked against the registry, and resolved to its number. [Defining
 effects](effects.md) shows a magnitude scaled by a curve.
 
 ## As one of Bevy's curves
 
-[`CurveTable::curve`] hands back the built curve itself, as Bevy's
+[`CurveRegistry::curve`] hands back the built curve itself, as Bevy's
 [`Curve<f32>`]. Use it to draw a graph in your tooling, or with Bevy's curve
 adaptors:
 
 ```rust
 # use bevy_mettle::prelude::*;
-# let curves = CurveTable::build(&[LevelCurve {
+# let curves = CurveRegistry::build(&[LevelCurve {
 #     id: Id::from_static("burning.damage"),
 #     interpolation: Interpolation::Linear,
 #     keys: vec![(1.0, 4.0), (20.0, 40.0)],
 # }])
 # .unwrap();
-let burning = curves.curve(&Id::from_static("burning.damage")).unwrap();
+let burning = curves.curve(curves.id("burning.damage").unwrap()).unwrap();
 let graph: Vec<f32> = (1..=20).map(|level| burning.sample_clamped(level as f32)).collect();
 assert_eq!(graph.len(), 20);
 ```
@@ -89,6 +125,9 @@ assert_eq!(graph.len(), 20);
 
 [`LevelCurve`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.LevelCurve.html
 [`MettleContent`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleContent.html
-[`CurveTable::build`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveTable.html#method.build
-[`CurveTable::curve`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveTable.html#method.curve
+[`CurveRegistry::build`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveRegistry.html#method.build
+[`CurveId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveId.html
+[`CurveRegistry::id`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveRegistry.html#method.id
+[`CurveRegistry::rebuild`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveRegistry.html#method.rebuild
+[`CurveRegistry::curve`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveRegistry.html#method.curve
 [`Curve<f32>`]: https://docs.rs/bevy/latest/bevy/curve/trait.Curve.html

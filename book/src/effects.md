@@ -4,8 +4,8 @@ An effect is what changes an actor: damage, a buff, a cooldown, a stun. It
 says what it changes, for how long, and what tags it grants while it lasts.
 It's Unreal's `GameplayEffect`, as data.
 
-Effects are definitions with ids. A game writes them in data files, or
-builds them in code. Either way, it hands them to mettle in
+Effects are content: definitions, each with a name. A game builds them as
+[`EffectData`] values, from its files or in code, and hands them to mettle in
 [`MettleContent`], which checks them all before anything is applied.
 
 ## The mage's effects
@@ -18,22 +18,7 @@ The fire mage from earlier chapters needs four effects:
   `cooldown.fireball`.
 - `staff`, a staff the mage holds for as long as it's equipped.
 
-Here is `burning` as data:
-
-```ron
-(
-    id: "burning",
-    tags: ["effect.affliction.burning"],
-    duration: For(Value(4)),
-    period: (every: Value(0.5), on_apply: true),
-    modifiers: [(attribute: "life", op: Flat, value: Param("param.damage"))],
-    grants: ["state.burning"],
-    require: Not(OwnerHas("immune.fire")),
-    ongoing: Not(OwnerHas("state.wet")),
-)
-```
-
-And all four in code, with the builders on [`Effect`]:
+Here they are, with the builders on [`EffectData`]:
 
 ```rust
 # use bevy::prelude::*;
@@ -47,9 +32,9 @@ And all four in code, with the builders on [`Effect`]:
 # #[derive(Attribute)]
 # #[attribute(base = 100.0, min = 0.0)]
 # struct Mana;
-fn effects() -> Vec<Effect> {
+fn effects() -> Vec<EffectData> {
     vec![
-        Effect::lasting("burning", 4.0)
+        EffectData::lasting("burning", 4.0)
             .tag("effect.affliction.burning")
             .period(0.5, true)
             .modifier(EffectModifier::new::<Life>(
@@ -59,24 +44,55 @@ fn effects() -> Vec<Effect> {
             .grant("state.burning")
             .require(!Condition::owner_has("immune.fire"))
             .ongoing(!Condition::owner_has("state.wet")),
-        Effect::instant("fireball.cost")
+        EffectData::instant("fireball.cost")
             .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-        Effect::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
-        Effect::infinite("staff"),
+        EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
+        EffectData::infinite("staff"),
     ]
 }
-# let burning: Effect = ron::from_str(r#"(
-#     id: "burning",
-#     tags: ["effect.affliction.burning"],
-#     duration: For(Value(4)),
-#     period: (every: Value(0.5), on_apply: true),
-#     modifiers: [(attribute: "life", op: Flat, value: Param("param.damage"))],
-#     grants: ["state.burning"],
-#     require: Not(OwnerHas("immune.fire")),
-#     ongoing: Not(OwnerHas("state.wet")),
-# )"#).unwrap();
-# assert_eq!(effects()[0], burning);
+# let burning = &effects()[0];
+# assert_eq!(burning.id.as_str(), "burning");
+# assert!(burning.lasts());
 ```
+
+`EffectData` is a serde type, so the same effects can come from files in
+any serde format. It's a struct with the fields below; tags, and the
+attributes, curves, effects, executions, calculations and routes it names,
+are written as their names, strings; and fields left out take their
+defaults. [Loading data](loading-data.md) says more.
+
+## Naming effects in code
+
+Content names effects by string, since it's data: an `Id<AnyEffect>`. Code names an effect by
+its type, as it does a [tag](tags.md#tags-in-code). Derive [`Effect`] on a
+unit struct, and add it to the app:
+
+```rust
+# use bevy::prelude::*;
+# use bevy_mettle::prelude::*;
+#[derive(Effect)]
+struct Burning;                    // "burning"
+
+#[derive(Effect)]
+#[effect(name = "fireball.cooldown")]
+struct FireballCooldown;           // "fireball.cooldown"
+
+let mut app = App::new();
+app.add_plugins((MinimalPlugins, MettlePlugins))
+    .add_effect::<Burning>()
+    .add_effect::<FireballCooldown>();
+```
+
+An effect's name is its type's in `snake_case`, unless `name` says
+otherwise. The type is how code applies it: `apply_effect(Burning)`, as
+[Applying effects](applying-effects.md) shows. A misspelled type doesn't
+compile, where a misspelled string would only fail as it's applied.
+
+`add_effect` is a promise that content defines the effect. Content that
+doesn't is rejected with "code names effect `burning`, which content
+doesn't define", so the name is checked once, as content loads, not each
+time code applies it. Effects only content names, such as those chained by
+other effects, needn't be types at all.
 
 The staff does nothing yet. [Grants and triggers](grants-triggers.md) gives
 it an ability to grant.
@@ -88,7 +104,7 @@ effect says.
 
 | Field | What it does |
 |---|---|
-| `id` | Its name, what specs and other effects call it by |
+| `id` | Its name: what content and an [`Effect`] type call it by |
 | `tags` | What it is: what removal, immunity and requirements match on |
 | `duration` | `Instant`, `Infinite`, or `For(..)` so many seconds |
 | `period` | Executes every so often while it lasts, instead of its modifiers counting all along |
@@ -164,13 +180,16 @@ scales the amount. A `Base` or `Override` counts only when it holds in full.
 `.per::<A>(every)` makes a modifier count once for each whole `every` of the
 target's `A`: +1 damage per 10 spell power.
 
-A modifier can deal a [meta attribute](effect-code.md#meta-attributes)
-instead: an amount no actor has, routed into attributes they do as the
-effect executes. `EffectModifier::meta::<IncomingDamage>(40.0)`, or in data
-`(attribute: "incoming_damage", op: Flat, value: Value(40))`. A meta
-attribute is dealt flat amounts only, by an effect that executes: instant,
-or periodic. The registry rejects any other, and any magnitude or `per`
-reading one: it has no value.
+A modifier can deal a [route](effect-code.md#routes) instead: an amount no
+actor holds, routed into attributes they do as the effect executes.
+`EffectModifier::route::<IncomingDamage>(40.0)`. In data, a route modifier
+names its route by name, `"incoming_damage"`, where an attribute's names
+the attribute, and its `op` is flat unless it says. A route is dealt flat amounts only, by an effect that executes:
+instant, or periodic. The registry rejects any other.
+
+Data names attributes, routes, executions and calculations by name. Checking
+the content resolves each name to its number, which is what the effect runs
+by: see [Names and numbers](concepts.md#names-and-numbers).
 
 ## Magnitudes
 
@@ -178,23 +197,23 @@ A [`Magnitude`] is how much: a modifier's value, a duration, or a period.
 
 | Magnitude | How much |
 |---|---|
-| `Value(4)` | That number. A plain `f32` converts to it. |
-| `Scaled(base: 1.0, curve: "fireball.damage")` | `base` times the [curve](curves.md) at the spec's level |
-| `Param("param.damage")` | What the code applying it set, by a tag |
-| `Attribute(attribute: "spell_power", from: Source, coefficient: 0.5)` | The source's or the target's attribute, times the coefficient |
-| `Custom("burn_time")` | A calculation in code: see [Effects in code](effect-code.md) |
+| `Value(f32)` | That number. A plain `f32` converts to it. |
+| `Scaled { base, curve }` | `base` times the [curve](curves.md) at the spec's level |
+| `Param(tag)` | What the code applying it set, by a tag such as `param.damage` |
+| `Attribute { attribute, from, coefficient }` | The source's or the target's attribute, times the coefficient |
+| `Custom(name)` | A calculation in code, by name, such as `"burn_time"`: see [Effects in code](effect-code.md) |
 
 In code, the same come from `4.0.into()`, [`Magnitude::scaled`],
 [`Magnitude::param`], [`Magnitude::source`] or [`Magnitude::target`], and
-`Magnitude::Custom(..)`.
+`Magnitude::Custom("burn_time".into())`.
 
 `Param` is Unreal's `SetByCaller`. The applying code knows something the
 data doesn't, such as how hard the fireball hit, and passes it on the spec.
 A spec that doesn't set the param gets 0, with a warning.
 
-`Attribute` reads the source's attribute (`from: Source`, the default) or the
-target's (`from: Target`), with nothing in play, times `coefficient` (1 unless
-it says). A modifier's `Attribute` magnitude is captured as the effect
+`Attribute` reads the source's attribute (`from` is `Capture::Source`, the
+default) or the target's (`Capture::Target`), with nothing in play, times
+`coefficient` (1 unless it says). A modifier's `Attribute` magnitude is captured as the effect
 applies, and kept. New stacks and periods use the value captured, not the
 source's spell power now. With no source, it's 0.
 
@@ -223,7 +242,7 @@ potion that removes `effect.affliction` cleanses burning and poison. It's
 done before the new effect lands, so it never removes itself.
 
 `immunity` keeps effects off while it counts. A fire ward with
-`immunity: ["effect.affliction.burning"]` blocks burning, with
+`.immunity("effect.affliction.burning")` blocks burning, with
 [`EffectBlocked`]'s reason `Immunity`. An inhibited ward protects no one.
 
 Tags match by their tree: removing `effect.affliction` removes everything
@@ -245,13 +264,15 @@ and stopped with a warning.
 
 Effects reach mettle in [`MettleContent`], with the tags and curves they
 name. As it's inserted, mettle checks every effect against the [tag
-tree](tags.md), the [curves](curves.md), the attributes the app added, and
+registry](tags.md#the-tag-registry), the [curves](curves.md), the attributes the app added, and
 the [effect code](effect-code.md), and turns them into the
 [`EffectRegistry`]. It reports every error at once:
 
 - effects defined twice;
-- tags, curves, attributes, effects, executions and calculations that don't
-  exist;
+- effects code names with [`add_effect`](#naming-effects-in-code) that
+  content doesn't define;
+- tags, curves, attributes, effects, executions, calculations and routes
+  that don't exist;
 - numbers that can't be: not finite, a duration or period of 0 or less, a
   `per` of 0 or less, a stacking limit of 0;
 - instant effects with parts that need them to last;
@@ -273,22 +294,22 @@ To ask before inserting it, call [`MettleContent::check`]:
 # #[derive(Attribute)]
 # #[attribute(base = 100.0, min = 0.0)]
 # struct Mana;
-# fn effects() -> Vec<Effect> {
+# fn effects() -> Vec<EffectData> {
 #     vec![
-#         Effect::lasting("burning", 4.0)
+#         EffectData::lasting("burning", 4.0)
 #             .tag("effect.affliction.burning")
 #             .period(0.5, true)
 #             .modifier(EffectModifier::new::<Life>(Operation::Flat, Magnitude::param("param.damage")))
 #             .grant("state.burning")
 #             .require(!Condition::owner_has("immune.fire"))
 #             .ongoing(!Condition::owner_has("state.wet")),
-#         Effect::instant("fireball.cost")
+#         EffectData::instant("fireball.cost")
 #             .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-#         Effect::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
-#         Effect::infinite("staff"),
+#         EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
+#         EffectData::infinite("staff"),
 #     ]
 # }
-fn tags() -> Vec<Tag> {
+fn tags() -> Vec<TagKey> {
     [
         "cooldown", "cooldown.fireball",
         "effect", "effect.affliction", "effect.affliction.burning",
@@ -297,7 +318,7 @@ fn tags() -> Vec<Tag> {
         "state", "state.burning", "state.wet",
     ]
     .into_iter()
-    .map(|id| Tag { id: id.into() })
+    .map(TagKey::named)
     .collect()
 }
 
@@ -313,26 +334,82 @@ let content = MettleContent {
     ..default()
 };
 content.check(app.world())?;
-app.insert_resource(content);
+app.insert_resource(content.clone());
 
 // A typo is caught before anything runs.
 let typo = MettleContent {
     tags: tags(),
-    effects: vec![Effect::lasting("chill", 2.0).grant("state.chilled")],
+    effects: vec![EffectData::lasting("chill", 2.0).grant("state.chilled")],
     ..default()
 };
 let errors = typo.check(app.world()).unwrap_err();
 assert_eq!(errors.to_string(), "there's no tag called `state.chilled` (in `chill`)");
+
+// So is an effect code names that content doesn't define.
+#[derive(Effect)]
+struct Frostbite;
+app.add_effect::<Frostbite>();
+let errors = content.check(app.world()).unwrap_err();
+assert_eq!(
+    errors.to_string(),
+    "code names effect `frostbite`, which content doesn't define"
+);
 # Ok::<(), MettleErrors>(())
 ```
 
 Mettle doesn't load files. The game reads them however it likes and hands
-over the content. [Loading data](loading-data.md) shows one way.
+over the content: see [Loading data](loading-data.md).
+
+## Numbers
+
+As content is checked, each effect is numbered: an [`EffectId`], given in
+order of name, as Bevy gives a component its `ComponentId`. Active effects,
+chains, events and the network all go by the number. The name is for
+content, debug output and what a client shows. The registry goes between
+them:
+
+```rust
+# use bevy::prelude::*;
+# use bevy_mettle::prelude::*;
+# #[derive(Effect)] struct Burning;
+let mut app = App::new();
+app.add_plugins((MinimalPlugins, MettlePlugins))
+    .add_effect::<Burning>()
+    .insert_resource(MettleContent {
+        tags: ["cooldown", "cooldown.fireball"].map(TagKey::named).to_vec(),
+        effects: vec![
+            EffectData::lasting("burning", 4.0),
+            EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
+        ],
+        ..default()
+    });
+app.update();
+
+let registry = app.world().resource::<EffectRegistry>();
+let burning = registry.id("burning").unwrap();
+assert_eq!(registry.id_of::<Burning>(), Some(burning));
+assert_eq!(registry.name(burning), Some("burning"));
+assert!(registry.get(burning).is_some());
+assert_eq!(registry.iter().count(), 2);
+```
+
+[`EffectRegistry`] reads as every registry does: `get(id)` gives the
+checked effect, `id("name")` and `id_of::<E>()` its number, `name(id)` its
+name, and `iter()` every one. [`EffectRegistry::recheck`] is the check on
+its own, against an [`EffectChecks`] of the tag, curve, attribute,
+execution, calculation and route registries; it keeps the numbers effects
+had, and the effects code named with `add_effect`.
+
+Numbered in order of name, the same content is numbered the same wherever
+it's checked: a server and its clients agree on every number without
+sending names.
 
 ## Reloading
 
 Change [`MettleContent`], and it's checked and loaded again, as a whole.
-Every active effect takes its new definition on the next tick. Its
+Effects keep the numbers they had, and new ones are numbered after them, so
+what holds a number still names the same effect. Every active effect takes
+its new definition on the next tick. Its
 modifiers and granted tags are worked out again, and its `Attribute`
 magnitudes are captured again. Its time left is kept. An active effect
 whose definition is gone comes off, as if removed.
@@ -351,11 +428,15 @@ everything is checked against everything again.
   base, and the change stays. For a buff that comes and goes, leave out the
   period.
 
+[`EffectRegistry::recheck`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectRegistry.html#method.recheck
+[`EffectChecks`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectChecks.html
 [`EffectRegistry`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectRegistry.html
 [`MettleContent`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleContent.html
 [`MettleContent::check`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleContent.html#method.check
 [`ContentRejected`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.ContentRejected.html
-[`Effect`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/struct.Effect.html
+[`EffectData`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/struct.EffectData.html
+[`Effect`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/trait.Effect.html
+[`EffectId`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectId.html
 [`EffectModifier`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/struct.EffectModifier.html
 [`Magnitude`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/enum.Magnitude.html
 [`Magnitude::scaled`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/enum.Magnitude.html#method.scaled

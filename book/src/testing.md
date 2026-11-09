@@ -25,20 +25,23 @@ use bevy_harness::TestApp;
 
 # #[derive(Attribute)] #[attribute(base = 100.0, min = 0.0)] struct Mana;
 # #[derive(Component, Default, Behaviour)] struct CastFireball;
+#[derive(Ability)]
+struct Fireball;
+
 /// The mage's content: the fireball, its cost and its cooldown.
 fn content() -> MettleContent {
     MettleContent {
         tags: ["cooldown", "cooldown.fireball"]
             .into_iter()
-            .map(|id| Tag { id: Id::new(id) })
+            .map(TagKey::named)
             .collect(),
         effects: vec![
-            Effect::instant("fireball.cost")
+            EffectData::instant("fireball.cost")
                 .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-            Effect::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
+            EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
         ],
         abilities: vec![
-            Ability::new("fireball", "cast_fireball")
+            AbilityData::new("fireball", "cast_fireball")
                 .cost("fireball.cost")
                 .cooldown("fireball.cooldown"),
         ],
@@ -53,6 +56,7 @@ fn mage_app() -> (TestApp, Entity) {
         .with(|app| {
             app.add_attribute::<Mana>()
                 .add_behaviour::<CastFireball>()
+                .add_ability::<Fireball>()
                 .insert_resource(content());
         })
         .watch_triggered::<ContentRejected>()
@@ -60,7 +64,7 @@ fn mage_app() -> (TestApp, Entity) {
         .build();
     app.assert_triggered_none::<ContentRejected>(|_| true);
     let mage = app.spawn(Base::<Mana>::default());
-    app.world_mut().grant_ability(mage, "fireball", 1.0).unwrap();
+    app.world_mut().grant_ability(mage, Fireball).unwrap();
     app.tick();
     (app, mage)
 }
@@ -71,7 +75,7 @@ fn mage_app() -> (TestApp, Entity) {
 let (mut app, mage) = mage_app();
 
 // Cast: 20 mana paid.
-let fireball = app.world_mut().activate_ability(mage, "fireball").unwrap();
+let fireball = app.world_mut().activate_ability(mage, Fireball).unwrap();
 app.tick();
 app.entity(mage).assert::<Current<Mana>>(|mana| mana.get() == 80.0);
 
@@ -80,12 +84,12 @@ app.entity(fireball).assert_has::<CastFireball>();
 
 // End it, and cast again: still cooling down.
 app.world_mut().end_ability(fireball);
-app.world_mut().activate_ability(mage, "fireball").unwrap_err();
+app.world_mut().activate_ability(mage, Fireball).unwrap_err();
 app.assert_triggered::<AbilityFailed>(|failed| failed.reason == Failure::Cooldown);
 
 // Two seconds on, it can be cast again.
 app.secs(2.0);
-app.world_mut().activate_ability(mage, "fireball").unwrap();
+app.world_mut().activate_ability(mage, Fireball).unwrap();
 app.tick();
 app.entity(mage).assert::<Current<Mana>>(|mana| mana.get() == 60.0);
 // }
@@ -98,10 +102,11 @@ behaviour's component is on that entity while it's active.
 
 ## What helps
 
-- **Content in code.** The definitions' builders (`Effect::instant`,
-  `Ability::new`) make a test's content short. Check the game's real files
-  in a test of their own: read them into `MettleContent`, and assert
-  `check` holds against an app with the game's code added.
+- **Content in code.** The definitions' builders (`EffectData::instant`,
+  `AbilityData::new`) make a test's content short. Check the game's real
+  content in a test of its own: load it into `MettleContent` as the game
+  does, and assert `check` holds against an app with the game's code added,
+  its `add_effect` and `add_ability` types too.
 - **Watch what's told.** `watch_triggered::<AbilityFailed>()` records every
   failure, so `assert_triggered` can say why a cast didn't happen. The same
   works for `AttributeChanged<A>`, `EffectApplied` and the rest.

@@ -3,11 +3,11 @@
 //! What cues and abilities observe.
 
 use bevy::prelude::*;
-use bevy_mettle_attribute::registry::AnyAttribute;
-use bevy_mettle_core::Id;
+use bevy_mettle_attribute::registry::AttributeId;
 use serde::{Deserialize, Serialize};
 
-use crate::data::Effect;
+use crate::EffectId;
+use crate::code::RouteId;
 
 /// An effect applied to an actor, lasting: its active effect spawned.
 #[derive(EntityEvent, Debug, Clone, PartialEq, Eq)]
@@ -17,7 +17,7 @@ pub struct EffectApplied {
     /// The active effect.
     pub effect: Entity,
     /// Which effect.
-    pub id: Id<Effect>,
+    pub id: EffectId,
 }
 
 /// Triggered as an effect on an actor gains a stack, or loses one.
@@ -31,7 +31,7 @@ pub struct EffectStacked {
     /// The active effect.
     pub effect: Entity,
     /// Which effect.
-    pub id: Id<Effect>,
+    pub id: EffectId,
     /// How many stacks it has now.
     pub stacks: u32,
 }
@@ -42,7 +42,7 @@ pub struct EffectBlocked {
     /// The actor.
     pub entity: Entity,
     /// Which effect.
-    pub id: Id<Effect>,
+    pub id: EffectId,
     /// Why.
     pub reason: Blocked,
 }
@@ -58,15 +58,23 @@ pub enum Blocked {
     StackLimit,
 }
 
-/// What an execution changed one attribute's base by, or dealt a meta
-/// attribute.
+/// What an execution changed one attribute's base by.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Delta {
     /// The attribute.
-    pub attribute: Id<AnyAttribute>,
+    pub attribute: AttributeId,
     /// What its base was changed by, rounded and kept within its limits:
     /// `-30.0`, damage taken.
     pub delta: f32,
+}
+
+/// What an execution dealt one route, before its router.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Routed {
+    /// The route.
+    pub route: RouteId,
+    /// All the execution dealt it.
+    pub amount: f32,
 }
 
 /// Triggered as an effect executes on an actor, its bases changed.
@@ -78,7 +86,7 @@ pub struct EffectExecuted {
     /// The actor.
     pub entity: Entity,
     /// Which effect.
-    pub id: Id<Effect>,
+    pub id: EffectId,
     /// Who applied it, if anyone.
     pub source: Option<Entity>,
     /// What it changed the actor's bases by, each attribute once, in the
@@ -86,9 +94,9 @@ pub struct EffectExecuted {
     pub changes: Vec<Delta>,
     /// What it changed its source's bases by: life stolen back.
     pub source_changes: Vec<Delta>,
-    /// What each meta attribute was dealt, before its router: a hit's damage
-    /// before shields took their share.
-    pub routed: Vec<Delta>,
+    /// What each route was dealt, before its router: a hit's damage before
+    /// shields took their share.
+    pub routed: Vec<Routed>,
 }
 
 /// An active effect taken off an actor: run out of time (`expired`), or
@@ -100,7 +108,7 @@ pub struct EffectRemoved {
     /// The active effect, now despawned.
     pub effect: Entity,
     /// Which effect.
-    pub id: Id<Effect>,
+    pub id: EffectId,
     /// Whether it ran out of time.
     pub expired: bool,
 }

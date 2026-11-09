@@ -76,36 +76,46 @@ struct CastFireball {
     timer: f32,
 }
 
+/// The fireball, as code names it: content defines it as `"fireball"`.
+#[derive(Ability)]
+struct Fireball;
+
 fn load(
     mut commands: Commands,
     attributes: Res<AttributeRegistry>,
-    code: Res<EffectCode>,
-    behaviours: Res<Behaviours>,
+    executions: Res<ExecutionRegistry>,
+    calculations: Res<CalculationRegistry>,
+    routes: Res<RouteRegistry>,
+    behaviours: Res<BehaviourRegistry>,
+    abilities: Res<AbilityRegistry>,
 ) {
-    let tags: Vec<Tag> = ["cooldown", "cooldown.fireball"]
+    let tags: Vec<TagKey> = ["cooldown", "cooldown.fireball"]
         .into_iter()
-        .map(|id| Tag { id: Id::new(id) })
+        .map(TagKey::named)
         .collect();
-    let tags = TagTree::build(&tags).unwrap();
+    let tags = TagRegistry::build(tags).unwrap();
     let effects = [
-        Effect::instant("fireball.cost")
+        EffectData::instant("fireball.cost")
             .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-        Effect::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
+        EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
     ];
     let effects = EffectRegistry::check(
         &effects,
         EffectChecks {
             tags: &tags,
-            curves: &CurveTable::default(),
+            curves: &CurveRegistry::default(),
             attributes: &attributes,
-            code: &code,
+            executions: &executions,
+            calculations: &calculations,
+            routes: &routes,
         },
     )
     .unwrap();
-    let fireball = Ability::new("fireball", "cast_fireball")
+    let fireball = AbilityData::new("fireball", "cast_fireball")
         .cost("fireball.cost")
         .cooldown("fireball.cooldown");
-    let abilities = AbilityRegistry::check(
+    // Checked from the app's registry, which knows `Fireball` is code's.
+    let abilities = abilities.recheck(
         &[fireball],
         &[],
         AbilityChecks {
@@ -122,8 +132,8 @@ fn load(
 fn spawn(mut commands: Commands) {
     commands
         .spawn(Base::<Mana>::default())
-        .grant_ability("fireball", 1.0)
-        .activate_ability("fireball");
+        .grant_ability(Fireball)
+        .activate_ability(Fireball);
 }
 
 /// Runs each cast until it ends.
@@ -141,6 +151,7 @@ fn main() {
         .add_plugins((MinimalPlugins, EffectPlugin::default(), AbilityPlugin))
         .add_attribute::<Mana>()
         .add_behaviour::<CastFireball>()
+        .add_ability::<Fireball>()
         .add_systems(Startup, (load, spawn).chain())
         .add_systems(Update, cast)
         .run();

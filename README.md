@@ -89,12 +89,16 @@ struct Mana;
 #[derive(Component, Default, Behaviour)]
 struct CastFireball;
 
+/// The fireball, as code names it: content defines it as `"fireball"`.
+#[derive(Ability)]
+struct Fireball;
+
 /// The game's content: in a game, read from its files.
 fn content() -> MettleContent {
     MettleContent {
-        effects: vec![Effect::instant("fireball.cost")
+        effects: vec![EffectData::instant("fireball.cost")
             .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0))],
-        abilities: vec![Ability::new("fireball", "cast_fireball").cost("fireball.cost")],
+        abilities: vec![AbilityData::new("fireball", "cast_fireball").cost("fireball.cost")],
         ..default()
     }
 }
@@ -102,8 +106,8 @@ fn content() -> MettleContent {
 fn spawn(mut commands: Commands) {
     commands
         .spawn(Base::<Mana>::default())
-        .grant_ability("fireball", 1.0)
-        .activate_ability("fireball");
+        .grant_ability(Fireball)
+        .activate_ability(Fireball);
 }
 
 /// Runs each cast: here, it ends at once.
@@ -118,6 +122,7 @@ fn main() {
         .add_plugins((DefaultPlugins, MettlePlugins))
         .add_attribute::<Mana>()
         .add_behaviour::<CastFireball>()
+        .add_ability::<Fireball>()
         .insert_resource(content())
         .add_systems(Startup, spawn)
         .add_systems(Update, cast)

@@ -1,5 +1,5 @@
-//! Effect and ability replicas over lightyear: sent with their actor, to its
-//! owner alone or to everyone who sees it.
+//! Effect and ability replicas over lightyear: sent with their actor, to
+//! its owner alone or to everyone who sees it.
 
 use bevy::prelude::*;
 use bevy_mettle_ability::active::{Abilities, AbilityOf};

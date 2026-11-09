@@ -1,9 +1,51 @@
-//! What the derives share: where the crate they implement for is, and names
-//! in `snake_case`.
+//! What the derives share: where the crate they implement for is, names in
+//! `snake_case`, and marker types known by name.
 
 use proc_macro_crate::{FoundCrate, crate_name};
-use proc_macro2::TokenStream;
+use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
+use syn::{DeriveInput, Error, LitStr};
+
+/// A marker type known by name: `impl #trait for #ident { const NAME }`, its
+/// name on `#[#attr(name = "..")]`, else the type's in `snake_case`. `what` is
+/// what it is, for errors: "a route".
+pub(crate) fn named(
+    input: &DeriveInput,
+    attr: &str,
+    what: &str,
+    trait_path: &TokenStream,
+) -> syn::Result<TokenStream> {
+    if !input.generics.params.is_empty() {
+        return Err(Error::new_spanned(
+            &input.generics,
+            format!("{what} can't be generic"),
+        ));
+    }
+    let mut name: Option<LitStr> = None;
+    for attr in input
+        .attrs
+        .iter()
+        .filter(|found| found.path().is_ident(attr))
+    {
+        attr.parse_nested_meta(|meta| {
+            if !meta.path.is_ident("name") {
+                return Err(meta.error(format!("expected `name`: {what} has only a name")));
+            }
+            if name.is_some() {
+                return Err(meta.error("`name` is given twice"));
+            }
+            name = Some(meta.value()?.parse()?);
+            Ok(())
+        })?;
+    }
+    let ident = &input.ident;
+    let name = name.unwrap_or_else(|| LitStr::new(&snake(&ident.to_string()), Span::call_site()));
+    Ok(quote! {
+        impl #trait_path for #ident {
+            const NAME: &'static str = #name;
+        }
+    })
+}
 
 /// Where `krate` is, where a derive's used: itself if it's a dependency, else
 /// its `module` in the `bevy_mettle` facade.

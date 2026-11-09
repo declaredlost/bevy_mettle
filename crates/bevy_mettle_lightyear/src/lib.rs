@@ -5,6 +5,7 @@ pub mod prelude;
 
 mod abilities;
 mod attributes;
+mod content;
 mod replicas;
 
 use bevy::ecs::entity::MapEntities;
@@ -17,6 +18,7 @@ use bevy_mettle_ability::net::input::AbilityInput;
 use bevy_mettle_ability::net::replica::AbilityReplica;
 use bevy_mettle_ability::net::request::{AbilityRequest, AbilityRequestWith};
 use bevy_mettle_attribute::authority::Served;
+use bevy_mettle_attribute::modifier::ModifiersReplica;
 use bevy_mettle_attribute::{Attribute, Base};
 use bevy_mettle_core::net::NetRole;
 use bevy_mettle_effect::active::EffectOf;
@@ -34,6 +36,8 @@ use self::abilities::{
     hear_requests, reply, tell_ends,
 };
 use self::attributes::{remote, serve};
+pub use self::content::{ContentFingerprint, ContentMismatch};
+use self::content::{compare_content, tell_content};
 use self::replicas::{ReplicaOwner, replicate, retarget};
 
 /// The channel mettle's messages go on: reliable and ordered.
@@ -48,7 +52,9 @@ pub struct MettleChannel;
 ///
 /// What to replicate registered, and requests and replies sent. Add it after
 /// lightyear's plugins and mettle's, with mettle's [`NetRole`] set; it does
-/// what that role needs.
+/// what that role needs. It needs Bevy's `Time`, as any app with
+/// `MinimalPlugins` or `DefaultPlugins` has: a server times out the cancels it
+/// holds by it.
 ///
 /// - The server replicates every active effect's replica and every granted
 ///   ability's as their actor is replicated ([`ReplicateLike`] it), with what
@@ -68,6 +74,16 @@ pub struct MettleChannel;
 /// - Each actor's cues, lasting ([`ServedCues`]) and one-shot ([`CueBursts`]),
 ///   are replicated with it, to whoever sees it: what other clients see of its
 ///   effects and abilities, even where their replicas aren't sent.
+/// - Modifier sources the game replicates (an item, a passive) carry their
+///   modifiers by number, and the actor they count for, in a
+///   [`ModifiersReplica`]: the game puts it on the sources it replicates.
+///   [`ModifierOf`](bevy_mettle_attribute::modifier::ModifierOf) itself isn't
+///   replicated, so a client's own, on the effects it shows, stays its own.
+/// - Everything sent names content by number: effects, abilities and tags. So a
+///   server tells each client how it numbers its content
+///   ([`ContentFingerprint`]) as it connects, and again as its content changes;
+///   a client numbering it otherwise logs an error and triggers
+///   [`ContentMismatch`].
 #[derive(Default)]
 pub struct MettleNetPlugin {
     /// Who an actor's effect and ability replicas are sent to: its owner
@@ -98,6 +114,8 @@ impl Plugin for MettleNetPlugin {
         app.register_message::<AbilityRequest>()
             .add_map_entities()
             .add_direction(NetworkDirection::ClientToServer);
+        app.register_message::<ContentFingerprint>()
+            .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<Answer>()
             .add_map_entities()
             .add_direction(NetworkDirection::ServerToClient);
@@ -120,6 +138,7 @@ impl Plugin for MettleNetPlugin {
         app.component::<EffectOf>().replicate();
         app.component::<AbilityReplica>().replicate();
         app.component::<AbilityOf>().replicate();
+        app.component::<ModifiersReplica>().replicate();
         app.init_resource::<Held>()
             .add_systems(
                 PreUpdate,
@@ -135,9 +154,14 @@ impl Plugin for MettleNetPlugin {
             .add_systems(
                 Update,
                 (
-                    (ask.in_set(Asking), ask_cancels.after(Asking), remote)
+                    (
+                        ask.in_set(Asking),
+                        ask_cancels.after(Asking),
+                        remote,
+                        compare_content,
+                    )
                         .run_if(resource_equals(NetRole::Client)),
-                    (reply, tell_ends, replicate, retarget)
+                    (reply, tell_ends, replicate, retarget, tell_content)
                         .chain()
                         .run_if(resource_equals(NetRole::Server)),
                 ),

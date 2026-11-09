@@ -2,7 +2,7 @@ use bevy::ecs::schedule::{InternedScheduleLabel, ScheduleLabel};
 use bevy::prelude::*;
 use bevy_mettle_core::net::NetRole;
 
-use crate::code::EffectCode;
+use crate::code::{CalculationRegistry, ExecutionRegistry, RouteRegistry};
 use crate::cue::{self, CueSystems};
 use crate::{EffectRegistry, net, systems};
 
@@ -44,7 +44,9 @@ impl Default for EffectPlugin {
 impl Plugin for EffectPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<EffectRegistry>()
-            .init_resource::<EffectCode>()
+            .init_resource::<ExecutionRegistry>()
+            .init_resource::<CalculationRegistry>()
+            .init_resource::<RouteRegistry>()
             .init_resource::<NetRole>()
             .init_resource::<net::Predictions>()
             .init_resource::<systems::DueEffects>()

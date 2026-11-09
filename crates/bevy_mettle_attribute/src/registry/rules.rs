@@ -1,34 +1,58 @@
 //! What attributes are named by, and what their rules are made of.
 
-use bevy_mettle_core::{Id, IdTarget};
+use std::any::TypeId;
+
+use bevy_mettle_core::IdTarget;
 use serde::{Deserialize, Serialize};
 
 use crate::Attribute;
 
-/// Any attribute: what an `Id<AnyAttribute>` names, in data and in modifiers.
-///
-/// Each attribute is a type of its own; this is what they share.
+/// An attribute's name in data: what an `Id<AnyAttribute>` is, before it's
+/// resolved to an [`AttributeId`].
 #[derive(IdTarget)]
 #[id_target(name = "attribute")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnyAttribute {}
 
-/// What an attribute is kept within: a value, or another attribute's value.
-#[derive(Debug, Clone, PartialEq)]
+bevy_mettle_core::number! {
+    /// An attribute's number in an app: dense, given as it's added, and what
+    /// state, modifiers and the network know it by.
+    ///
+    /// As Bevy's `ComponentId` is to a component: look one up from its type
+    /// with [`AttributeRegistry::id`](super::AttributeRegistry::id) or
+    /// [`AttributeWorld::attribute_id`](crate::read::AttributeWorld::attribute_id),
+    /// and its name and rules with
+    /// [`AttributeRegistry::get`](super::AttributeRegistry::get).
+    pub struct AttributeId;
+}
+
+/// What an attribute is kept within, as its type says: a value, or another
+/// attribute's value.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Limit {
     /// This value.
     Value(f32),
-    /// This attribute's current value, as the actor has it, read in the same
-    /// context.
-    Attribute(Id<AnyAttribute>),
+    /// The current value of the attribute of this type, as the actor has it,
+    /// read in the same context.
+    Attribute(TypeId),
 }
 
 impl Limit {
     /// `A`'s current value.
     #[must_use]
     pub const fn attribute<A: Attribute>() -> Self {
-        Self::Attribute(A::ID)
+        Self::Attribute(TypeId::of::<A>())
     }
+}
+
+/// A [`Limit`] as an app has it: its attribute resolved to its number.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Bound {
+    /// This value.
+    Value(f32),
+    /// This attribute's current value, as the actor has it, read in the same
+    /// context.
+    Attribute(AttributeId),
 }
 
 /// What an attribute's base does as a limit that's another attribute moves:

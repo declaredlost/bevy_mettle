@@ -25,6 +25,15 @@ pub enum MettleError {
         /// Where it was named, if in a definition: its id.
         within: Option<String>,
     },
+    /// Something code names by type that content doesn't define: an effect
+    /// or ability added with `add_effect` or `add_ability`.
+    #[error("code names {kind} `{id}`, which content doesn't define")]
+    NotInContent {
+        /// What kind of thing: `effect`, `ability`.
+        kind: &'static str,
+        /// The name code gives it.
+        id: String,
+    },
     /// Something that can't be: a number that isn't finite, a `per` of 0 or
     /// less, a ramp from a value to itself.
     #[error("{what}{}", context(.within.as_deref()))]

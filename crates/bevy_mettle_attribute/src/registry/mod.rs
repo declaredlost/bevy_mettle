@@ -1,4 +1,5 @@
-//! The untyped layer: attributes by id, their rules, and each actor's state.
+//! The untyped layer: attributes by number, their rules, and each actor's
+//! state.
 //!
 //! What data names them by, and what's told as values change.
 
@@ -6,54 +7,51 @@ mod events;
 mod rules;
 pub(crate) mod state;
 
-use std::any::TypeId;
-use std::collections::HashMap;
-use std::sync::Arc;
-
 use bevy::prelude::*;
-use bevy_mettle_core::{Id, MettleError};
+use bevy_mettle_core::{Id, MettleError, Registry};
 
 pub use self::events::AttributeChanged;
-pub use self::rules::{AnyAttribute, Limit, OnLimit, Rounding};
+pub use self::rules::{AnyAttribute, AttributeId, Bound, Limit, OnLimit, Rounding};
 pub use self::state::AttributeState;
 use crate::{Attribute, Base};
 
-/// What an app knows of one attribute: its rules, and access to its base.
+/// What an app knows of one attribute: its number, its name, its rules, and
+/// access to its base.
 ///
 /// It reaches the attribute's [`Base`] on an actor without its type.
 #[derive(Clone)]
 pub struct AttributeInfo {
-    /// Its id.
-    pub id: Id<AnyAttribute>,
+    /// Its number.
+    pub id: AttributeId,
+    /// The name data names it by, and what's shown for it.
+    pub name: &'static str,
     /// What its base starts at.
     pub base: f32,
-    /// The least it can be.
-    pub min: Option<Limit>,
-    /// The most it can be.
-    pub max: Option<Limit>,
+    /// The least it can be, once the attribute it names, if any, is added.
+    pub min: Option<Bound>,
+    /// The most it can be, as `min`.
+    pub max: Option<Bound>,
     /// How it's rounded, if it's a whole number.
     pub rounding: Option<Rounding>,
     /// What its base does as a limit that's another attribute moves.
     pub on_limit: OnLimit,
-    /// The type it is: two types can't share a name.
-    pub(crate) type_id: TypeId,
-    /// The type's name, for when two would share one.
-    pub(crate) type_name: &'static str,
+    /// Its limits as its type says them, to be resolved.
+    limits: [Option<Limit>; 2],
     pub(crate) get_base: fn(&World, Entity) -> Option<f32>,
     pub(crate) set_base: fn(&mut World, Entity, f32) -> bool,
 }
 
 impl AttributeInfo {
-    fn of<A: Attribute>() -> Self {
+    fn of<A: Attribute>(id: AttributeId) -> Self {
         Self {
-            id: A::ID,
+            id,
+            name: A::NAME,
             base: A::BASE,
-            min: A::MIN,
-            max: A::MAX,
+            min: None,
+            max: None,
             rounding: A::ROUNDING,
             on_limit: A::ON_LIMIT,
-            type_id: TypeId::of::<A>(),
-            type_name: std::any::type_name::<A>(),
+            limits: [A::MIN, A::MAX],
             get_base: |world, actor| Some(world.get::<Base<A>>(actor)?.get()),
             set_base: |world, actor, value| {
                 let Some(mut base) = world.get_mut::<Base<A>>(actor) else {
@@ -64,68 +62,69 @@ impl AttributeInfo {
             },
         }
     }
+
+    /// Whether a limit of it is another attribute: its base can follow it.
+    #[must_use]
+    pub fn follows(&self) -> bool {
+        self.limits
+            .iter()
+            .any(|limit| matches!(limit, Some(Limit::Attribute(_))))
+    }
 }
 
-/// The attributes an app has, by id: what data naming them is checked against.
+/// The attributes an app has: each one's info by its number, and its number by
+/// its type and by its name.
 ///
-/// Added with [`add_attribute`](AttributeApp::add_attribute).
-#[derive(Resource, Clone, Default)]
-pub struct AttributeRegistry {
-    attributes: Arc<HashMap<Id<AnyAttribute>, AttributeInfo>>,
-}
+/// Added to with [`add_attribute`](AttributeApp::add_attribute), which gives
+/// each the next number, as Bevy numbers components: the same app adds them in
+/// the same order, on a server and its clients alike. Read as a [`Registry`]:
+/// `get(id)`, `id(name)`, `id_of::<A>()`, `name(id)`, `iter()`.
+#[derive(Resource, Deref, Clone, Default)]
+pub struct AttributeRegistry(Registry<AttributeId, AttributeInfo>);
 
 impl AttributeRegistry {
-    /// The attribute `id`, if there is one.
-    #[must_use]
-    pub fn get(&self, id: &Id<AnyAttribute>) -> Option<&AttributeInfo> {
-        self.attributes.get(id)
-    }
-
-    /// Every attribute.
-    pub fn iter(&self) -> impl Iterator<Item = &AttributeInfo> {
-        self.attributes.values()
-    }
-
-    /// Checks `attribute` is one there is, named within `within` if it's named
-    /// in something.
+    /// The number of the attribute data names `name`, named within `within` if
+    /// it's named in something.
     ///
     /// # Errors
     ///
-    /// If it isn't.
-    pub fn check(
+    /// If there's no such attribute.
+    pub fn resolve(
         &self,
-        attribute: &Id<AnyAttribute>,
+        name: &Id<AnyAttribute>,
         within: Option<&str>,
-    ) -> Result<(), MettleError> {
-        if self.get(attribute).is_some() {
-            Ok(())
-        } else {
-            Err(MettleError::unknown::<AnyAttribute>(
-                attribute.as_str(),
-                within,
-            ))
-        }
+    ) -> Result<AttributeId, MettleError> {
+        self.id(name.as_str())
+            .ok_or_else(|| MettleError::unknown::<AnyAttribute>(name.as_str(), within))
     }
 
-    /// Adds `A`: whether it's new.
+    /// Adds `A`: its number, and whether it's new.
     ///
     /// # Panics
     ///
     /// If another type has its name: data couldn't tell them apart.
-    pub(crate) fn add<A: Attribute>(&mut self) -> bool {
-        let attributes = Arc::make_mut(&mut self.attributes);
-        if let Some(known) = attributes.get(&A::ID) {
-            assert!(
-                known.type_id == TypeId::of::<A>(),
-                "attributes `{}` and `{}` are both named `{}`",
-                known.type_name,
-                std::any::type_name::<A>(),
-                A::NAME,
-            );
-            return false;
+    pub(crate) fn add<A: Attribute>(&mut self) -> (AttributeId, bool) {
+        if let Some(id) = self.id_of::<A>() {
+            return (id, false);
         }
-        attributes.insert(A::ID, AttributeInfo::of::<A>());
-        true
+        let next = AttributeId::new(u32::try_from(self.len()).expect("fewer than 2^32 attributes"));
+        let id = self.0.add::<A>(A::NAME, AttributeInfo::of::<A>(next));
+        self.bind();
+        (id, true)
+    }
+
+    /// Resolves every attribute's limits that name an attribute added since.
+    fn bind(&mut self) {
+        let numbers = self.0.clone();
+        let bound = |limit: Option<Limit>| match limit? {
+            Limit::Value(value) => Some(Bound::Value(value)),
+            Limit::Attribute(type_id) => numbers.id_of_type(type_id).map(Bound::Attribute),
+        };
+        for (_, info) in self.0.iter_mut() {
+            let [min, max] = info.limits;
+            info.min = bound(min);
+            info.max = bound(max);
+        }
     }
 }
 
@@ -147,7 +146,7 @@ impl AttributeApp for App {
         if !self.is_plugin_added::<crate::AttributePlugin>() {
             self.add_plugins(crate::AttributePlugin::default());
         }
-        let added = self
+        let (id, added) = self
             .world_mut()
             .resource_mut::<AttributeRegistry>()
             .add::<A>();
@@ -155,9 +154,11 @@ impl AttributeApp for App {
             return self;
         }
         // Only one whose limits are attributes has a base to move as they do.
-        let follows = [&A::MIN, &A::MAX]
-            .into_iter()
-            .any(|limit| matches!(limit, Some(Limit::Attribute(_))));
+        let follows = self
+            .world()
+            .resource::<AttributeRegistry>()
+            .get(id)
+            .is_some_and(AttributeInfo::follows);
         if follows {
             let schedule = self
                 .world()

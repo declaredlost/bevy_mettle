@@ -17,4 +17,11 @@ pub mod tag;
 pub use bevy_mettle_macros::IdTarget;
 
 pub use self::error::{MettleError, MettleErrors};
-pub use self::id::{Id, IdTarget};
+pub use self::id::{Id, IdTarget, Number, Numbering, Registry};
+
+/// What [`number!`] expands to needs, wherever it's used.
+#[doc(hidden)]
+pub mod __private {
+    pub use bevy_reflect::Reflect;
+    pub use serde;
+}

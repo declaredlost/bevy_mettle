@@ -3,18 +3,20 @@
 //! Transport-agnostic: the game (or an adapter) ships [`EffectReplica`]s from
 //! the server to its clients.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
 
 use bevy::ecs::entity::{EntityMapper, MapEntities};
+use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 use bevy_mettle_attribute::modifier::{Modifier, ModifierOf, Modifiers, Operation, Provisional};
 use bevy_mettle_attribute::read::AttributeWorld;
+use bevy_mettle_attribute::registry::AttributeId;
 use bevy_mettle_core::net::NetRole;
-use bevy_mettle_core::tag::Tags;
+use bevy_mettle_core::tag::{TagCounts, TagId, TagRegistry};
 use serde::{Deserialize, Serialize};
 
 use crate::active::{ActiveEffect, EffectOf};
-use crate::{EffectRegistry, EffectSpec, engine};
+use crate::{EffectId, EffectRegistry, EffectSpec, engine};
 
 /// On a client's active effect: predicted under an activation, until settled.
 ///
@@ -33,13 +35,22 @@ pub struct Proxy;
 /// On a server's active effect: what a client needs to show it.
 ///
 /// For the game to replicate with its [`EffectOf`], mapping its entities. Its
-/// definition is data both sides have, so it's named, not sent. Sent again as
-/// it changes, but not as its time runs down: a client runs that down itself.
+/// definition is data both sides have, so it's numbered, not sent; so are its
+/// tags, by their place in the [`TagRegistry`]. Sent again as it changes, but
+/// not as its time runs down: a client runs that down itself.
 #[derive(Component, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EffectReplica {
-    /// What was applied: its source mapped as it arrives.
+    /// The effect applied.
+    pub effect: EffectId,
+    /// The level it was applied at.
+    pub level: f32,
+    /// What the applying code set, those the tree has.
+    pub params: Vec<(TagId, f32)>,
+    /// Who applied it: mapped as it arrives.
     #[entities]
-    pub spec: EffectSpec,
+    pub source: Option<Entity>,
+    /// The activation it was applied under, if any.
+    pub activation: Option<u64>,
     /// How many stacks it has.
     pub stacks: u32,
     /// How long it lasts in full, if not forever.
@@ -48,21 +59,81 @@ pub struct EffectReplica {
     pub remaining: Option<f32>,
     /// Whether it's inhibited.
     pub inhibited: bool,
-    /// What its source owned as it applied: what source terms are settled by.
-    pub source_tags: Tags,
+    /// What its source owned as it applied, those the tree has: what source
+    /// terms are settled by.
+    pub source_tags: Vec<TagId>,
     /// Its modifiers' attribute magnitudes, as captured as it applied.
     pub captured: Vec<Option<f32>>,
 }
 
 impl EffectReplica {
+    /// What a client needs to show `active`, its tags numbered in `tags`. A tag
+    /// the tree hasn't is left out: neither code nor conditions can read it.
+    fn of(active: &ActiveEffect, tags: &TagRegistry) -> Self {
+        let spec = &active.spec;
+        Self {
+            effect: active.def.id,
+            level: spec.level,
+            params: spec
+                .params
+                .iter()
+                .filter_map(|&(param, value)| Some((tags.id(param)?, value)))
+                .collect(),
+            source: spec.source,
+            activation: spec.activation,
+            stacks: active.stacks,
+            duration: active.duration,
+            remaining: active.remaining,
+            inhibited: active.inhibited,
+            source_tags: active
+                .source_tags
+                .iter()
+                .filter_map(|(tag, _)| tags.id(tag))
+                .collect(),
+            captured: active.captured.clone(),
+        }
+    }
+
+    /// What was applied, its params' tags as `tags` numbers them.
+    pub(crate) fn spec(&self, tags: &TagRegistry) -> EffectSpec {
+        let mut spec = EffectSpec::from_id(self.effect).level(self.level);
+        for &(param, value) in &self.params {
+            if let Some(param) = tags.key(param) {
+                spec = spec.param(param, value);
+            }
+        }
+        spec.source = self.source;
+        spec.activation = self.activation;
+        spec
+    }
+
+    /// What its source owned, held once each, its tags as `tags` numbers them.
+    pub(crate) fn source_tags(&self, tags: &TagRegistry) -> TagCounts {
+        let mut counts = TagCounts::default();
+        for &tag in &self.source_tags {
+            if let Some(tag) = tags.key(tag) {
+                counts.add(tag);
+            }
+        }
+        counts
+    }
+
     /// Whether `self`, sent before, says all `now` says but for time run down.
+    #[expect(
+        clippy::float_cmp,
+        reason = "a level sent again only if it's changed at all"
+    )]
     fn stands_as(&self, now: &Self) -> bool {
         let ran_down = match (self.remaining, now.remaining) {
             (Some(sent), Some(left)) => left <= sent,
             (sent, left) => sent == left,
         };
         ran_down
-            && self.spec == now.spec
+            && self.effect == now.effect
+            && self.level == now.level
+            && self.params == now.params
+            && self.source == now.source
+            && self.activation == now.activation
             && self.stacks == now.stacks
             && self.duration == now.duration
             && self.inhibited == now.inhibited
@@ -72,9 +143,11 @@ impl EffectReplica {
 }
 
 impl MapEntities for EffectReplica {
-    /// Maps its spec's source, as it arrives from another world.
+    /// Maps its source, as it arrives from another world.
     fn map_entities<M: EntityMapper>(&mut self, mapper: &mut M) {
-        self.spec.map_entities(mapper);
+        if let Some(source) = &mut self.source {
+            *source = mapper.get_mapped(*source);
+        }
     }
 }
 
@@ -82,7 +155,7 @@ impl MapEntities for EffectReplica {
 #[derive(Debug, Clone)]
 enum Undo {
     /// An effect spawned.
-    Effect(Entity),
+    EffectData(Entity),
     /// A stack added to an effect.
     Stack(Entity),
     /// Instant changes to `actor`'s bases, shown as modifiers on this entity
@@ -156,7 +229,7 @@ pub(crate) fn spawned(world: &mut World, activation: u64, effect: Entity) {
     world
         .entity_mut(effect)
         .insert((PredictedUnder(activation), Provisional));
-    log(world, activation, Undo::Effect(effect));
+    log(world, activation, Undo::EffectData(effect));
 }
 
 /// Notes a stack added to `effect` under `activation`.
@@ -186,12 +259,12 @@ fn overlays(world: &World, actor: Entity) -> Vec<(u64, Entity)> {
 }
 
 /// How much `overlays` add to `attribute`'s base.
-fn overlaid(world: &World, overlays: &[(u64, Entity)], change: &crate::code::BaseChange) -> f32 {
+fn overlaid(world: &World, overlays: &[(u64, Entity)], attribute: AttributeId) -> f32 {
     overlays
         .iter()
         .filter_map(|(_, overlay)| world.get::<Modifiers>(*overlay))
         .flat_map(|modifiers| &modifiers.0)
-        .filter(|modifier| modifier.attribute == change.attribute)
+        .filter(|modifier| modifier.attribute == attribute)
         .map(|modifier| modifier.value)
         .sum()
 }
@@ -209,23 +282,24 @@ pub(crate) fn change_base(
     world: &mut World,
     activation: Option<u64>,
     actor: Entity,
-    change: &crate::code::BaseChange,
+    attribute: AttributeId,
+    op: Operation,
+    value: f32,
 ) -> f32 {
     let Some(activation) = activation else {
-        let before = world.base_at(actor, &change.attribute);
-        world.apply_to_base(actor, &change.attribute, change.op, change.value);
-        let after = world.base_at(actor, &change.attribute);
+        let before = world.base_at(actor, attribute);
+        world.apply_to_base(actor, attribute, op, value);
+        let after = world.base_at(actor, attribute);
         return after
             .zip(before)
             .map_or(0.0, |(after, before)| after - before);
     };
-    let Some(base) = world.base_at(actor, &change.attribute) else {
+    let Some(base) = world.base_at(actor, attribute) else {
         return 0.0;
     };
     let overlays = overlays(world, actor);
-    let shown = base + overlaid(world, &overlays, change);
-    let Some(after) = world.base_after(actor, &change.attribute, shown, change.op, change.value)
-    else {
+    let shown = base + overlaid(world, &overlays, attribute);
+    let Some(after) = world.base_after(actor, attribute, shown, op, value) else {
         return 0.0;
     };
     let difference = after - shown;
@@ -237,15 +311,15 @@ pub(crate) fn change_base(
         match modifiers
             .0
             .iter_mut()
-            .find(|modifier| modifier.attribute == change.attribute)
+            .find(|modifier| modifier.attribute == attribute)
         {
             Some(modifier) => modifier.value += difference,
-            None => modifiers.0.push(flat(change, difference)),
+            None => modifiers.0.push(Modifier::flat(attribute, difference)),
         }
     } else {
         let overlay = world
             .spawn((
-                Modifiers(vec![flat(change, difference)]),
+                Modifiers(vec![Modifier::flat(attribute, difference)]),
                 ModifierOf(actor),
                 PredictedUnder(activation),
                 Provisional,
@@ -254,11 +328,6 @@ pub(crate) fn change_base(
         log(world, activation, Undo::Overlay { actor, overlay });
     }
     difference
-}
-
-/// A flat modifier of `change`'s attribute by `value`.
-fn flat(change: &crate::code::BaseChange, value: f32) -> Modifier {
-    Modifier::new(change.attribute.clone(), Operation::Flat, value)
 }
 
 /// The server confirmed `activation`: the effects predicted under it stay,
@@ -278,7 +347,7 @@ pub(crate) fn confirm(world: &mut World, activation: u64) {
             Undo::Stack(effect) if world.get::<Proxy>(effect).is_some() => {
                 engine::unstack(world, &registry, effect);
             }
-            Undo::Stack(_) | Undo::Effect(_) => {}
+            Undo::Stack(_) | Undo::EffectData(_) => {}
         }
     }
 }
@@ -304,27 +373,10 @@ pub(crate) fn rollback(world: &mut World, activation: u64) {
         .unwrap_or_default();
     for undo in undo.into_iter().rev() {
         match undo {
-            Undo::Effect(effect) => engine::remove_quietly(world, effect),
+            Undo::EffectData(effect) => engine::remove_quietly(world, effect),
             Undo::Stack(effect) => engine::unstack(world, &registry, effect),
             Undo::Overlay { overlay, .. } => despawn(world, overlay),
         }
-    }
-}
-
-/// What a client needs to show `active`.
-fn replica(active: &ActiveEffect) -> EffectReplica {
-    EffectReplica {
-        spec: active.spec.clone(),
-        stacks: active.stacks,
-        duration: active.duration,
-        remaining: active.remaining,
-        inhibited: active.inhibited,
-        source_tags: active
-            .source_tags
-            .iter()
-            .map(|(tag, _)| tag.clone())
-            .collect(),
-        captured: active.captured.clone(),
     }
 }
 
@@ -332,10 +384,12 @@ fn replica(active: &ActiveEffect) -> EffectReplica {
 /// time running down.
 pub(crate) fn sync_replicas(
     mut commands: Commands,
+    tags: Option<Res<TagRegistry>>,
     effects: Query<(Entity, &ActiveEffect, Option<&EffectReplica>), Changed<ActiveEffect>>,
 ) {
+    let tags = tags.as_deref().cloned().unwrap_or_default();
     for (entity, active, sent) in &effects {
-        let now = replica(active);
+        let now = EffectReplica::of(active, &tags);
         if !sent.is_some_and(|sent| sent.stands_as(&now)) {
             commands.entity(entity).insert(now);
         }
@@ -367,12 +421,16 @@ pub(crate) fn show_replicas(
         .get_resource::<EffectRegistry>()
         .cloned()
         .unwrap_or_default();
+    let tags = world
+        .get_resource::<TagRegistry>()
+        .cloned()
+        .unwrap_or_default();
     let new: Vec<(Entity, EffectReplica, Entity)> = arrived
         .iter(world)
         .map(|(entity, replica, of)| (entity, replica.clone(), of.0))
         .collect();
     for (entity, replica, target) in new {
-        engine::show(world, &registry, entity, target, &replica);
+        engine::show(world, &registry, &tags, entity, target, &replica);
     }
     let updated: Vec<(Entity, EffectReplica)> = changed
         .iter(world)

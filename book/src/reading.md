@@ -24,20 +24,34 @@ type:
 #     .world_mut()
 #     .spawn((Base::<Resistance>::default(), Base::<MaxResistance>::default()))
 #     .id();
+#[derive(Tag)]
+struct Damage;
+#[derive(Tag)]
+#[tag(parent = Damage)]
+struct Elemental;
+#[derive(Tag)]
+#[tag(parent = Elemental)]
+struct Fire;
+#[derive(Tag)]
+#[tag(parent = Elemental)]
+struct Cold;
+
+let resistance = app.world().attribute_id::<Resistance>().unwrap();
+let max = app.world().attribute_id::<MaxResistance>().unwrap();
 // A ring: +90% elemental resistance, +5% maximum fire resistance.
 app.world_mut().spawn((
     ModifierOf(mage),
     Modifiers(vec![
-        Modifier::flat::<Resistance>(0.9).read_tagged("damage.elemental"),
-        Modifier::flat::<MaxResistance>(0.05).read_tagged("damage.elemental.fire"),
+        Modifier::flat(resistance, 0.9).read_tagged(Elemental),
+        Modifier::flat(max, 0.05).read_tagged(Fire),
     ]),
 ));
 app.update();
 
 let world = app.world();
-let fire = AttributeContext::new().tag("damage.elemental.fire");
-let cold = AttributeContext::new().tag("damage.elemental.cold");
-let resists = |context: &AttributeContext| world.value_at(mage, &Resistance::ID, context).unwrap();
+let fire = AttributeContext::new().tag(Fire);
+let cold = AttributeContext::new().tag(Cold);
+let resists = |context: &AttributeContext| world.value_at(mage, resistance, context).unwrap();
 assert!((resists(&fire) - 0.8).abs() < 1e-4); // capped at 75% + 5%
 assert!((resists(&cold) - 0.75).abs() < 1e-4); // capped at 75%
 assert_eq!(resists(&AttributeContext::new()), 0.0); // nothing in play
@@ -103,12 +117,13 @@ fn fireball_damage(
 #     .add_attribute::<SpellPower>()
 #     .init_resource::<Dealt>()
 #     .add_systems(Update, fireball_damage.after(AttributeSystems));
+# let power = app.world().attribute_id::<SpellPower>().unwrap();
 # app.world_mut().spawn((
 #     Mage,
 #     Base::<SpellPower>::default(),
 #     Modifiers(vec![
-#         Modifier::additive::<SpellPower>(0.5).read_tagged("ability.spell.fire"),
-#         Modifier::flat::<SpellPower>(10.0).condition(Condition::fact_ramp("fact.flown", 2.0, 12.0)),
+#         Modifier::additive(power, 0.5).read_tagged("ability.spell.fire"),
+#         Modifier::flat(power, 10.0).condition(Condition::fact_ramp("fact.flown", 2.0, 12.0)),
 #     ]),
 # ));
 # app.update();
@@ -149,13 +164,14 @@ anything:
 #     .id();
 # app.update();
 let world = app.world_mut();
+let life = world.attribute_id::<Life>().unwrap();
 // A fireball for 130: life stops at its minimum, 0.
 assert_eq!(
-    world.base_after(mage, &Life::ID, 100.0, Operation::Flat, -130.0),
+    world.base_after(mage, life, 100.0, Operation::Flat, -130.0),
     Some(0.0)
 );
-world.apply_to_base(mage, &Life::ID, Operation::Flat, -30.0);
-assert_eq!(world.base_at(mage, &Life::ID), Some(70.0));
+world.apply_to_base(mage, life, Operation::Flat, -30.0);
+assert_eq!(world.base_at(mage, life), Some(70.0));
 ```
 
 Limits are read as the bases are now, even if they changed since attributes
@@ -178,20 +194,21 @@ into one hit:
 # let mut app = App::new();
 # app.add_plugins(MettlePlugins.set(AttributePlugin::new(Update)))
 #     .add_attribute::<SpellPower>();
+# let power = app.world().attribute_id::<SpellPower>().unwrap();
 # let mage = app
 #     .world_mut()
 #     .spawn((
 #         Base::<SpellPower>::default(),
 #         Modifiers(vec![
-#             Modifier::flat::<SpellPower>(5.0),
-#             Modifier::additive::<SpellPower>(0.2),
+#             Modifier::flat(power, 5.0),
+#             Modifier::additive(power, 0.2),
 #         ]),
 #     ))
 #     .id();
 # app.update();
 let parts = app
     .world()
-    .breakdown_at(mage, &SpellPower::ID, &AttributeContext::new())
+    .breakdown_at(mage, power, &AttributeContext::new())
     .unwrap();
 assert_eq!((parts.base, parts.flat), (10.0, 5.0));
 assert!((parts.total() - 18.0).abs() < 1e-4);
@@ -211,17 +228,18 @@ spells, not to every spell:
 # app.add_plugins(MettlePlugins.set(AttributePlugin::new(Update)))
 #     .add_attribute::<SpellPower>();
 # let mage = app.world_mut().spawn(Base::<SpellPower>::default()).id();
+let power = app.world().attribute_id::<SpellPower>().unwrap();
 let staff = app
     .world_mut()
     .spawn((
         ModifierOf(mage),
-        Modifiers(vec![Modifier::flat::<SpellPower>(100.0).local()]),
+        Modifiers(vec![Modifier::flat(power, 100.0).local()]),
     ))
     .id();
 app.update();
 let world = app.world();
 let with_staff = AttributeContext::new().source(staff);
-assert_eq!(world.value_at(mage, &SpellPower::ID, &with_staff), Some(110.0));
+assert_eq!(world.value_at(mage, power, &with_staff), Some(110.0));
 assert_eq!(world.get::<Current<SpellPower>>(mage).unwrap().get(), 10.0);
 ```
 

@@ -75,7 +75,7 @@ fn serve_with<I: Component + Clone>(
                 engine::activate_id_with(
                     world,
                     request.actor,
-                    &request.ability,
+                    request.ability,
                     Some(request.activation),
                     None,
                     Some(request.input),
@@ -83,7 +83,7 @@ fn serve_with<I: Component + Clone>(
                 .err()
             } else {
                 warn!(
-                    "a client asked to activate `{}` under the server's activation {}: rejected",
+                    "a client asked to activate {:?} under the server's activation {}: rejected",
                     request.ability, request.activation
                 );
                 Some(Failure::NotGranted)

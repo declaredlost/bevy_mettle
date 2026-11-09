@@ -1,12 +1,12 @@
 //! Behaviours: what runs an ability, in code, and the input it takes.
 
 use std::any::{Any, TypeId};
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use bevy::ecs::system::IntoSystem;
+use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
-use bevy_mettle_core::{Id, IdTarget};
+use bevy_mettle_core::{IdTarget, Registry};
 pub use bevy_mettle_macros::Behaviour;
 
 /// A behaviour: the component in code that runs an ability.
@@ -32,11 +32,9 @@ pub use bevy_mettle_macros::Behaviour;
     note = "derive it: `#[derive(Component, Default, Behaviour)]`"
 )]
 pub trait Behaviour: Component + Default {
-    /// The name data names it by: `"cast_fireball"`.
+    /// The name data names it by, and what's shown for it: `"cast_fireball"`.
+    /// Its number is the app's: [`BehaviourRegistry`].
     const NAME: &'static str;
-
-    /// Its id: its name.
-    const ID: Id<AnyBehaviour> = Id::from_static(Self::NAME);
 
     /// The input its abilities are activated with, put on the ability next to
     /// it: what the client chose (an aim, a target). [`NoInput`] if none.
@@ -47,11 +45,18 @@ pub trait Behaviour: Component + Default {
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NoInput;
 
-/// Any behaviour, by name: what an `Id<AnyBehaviour>` names.
+/// A behaviour's name in data: what an `Id<AnyBehaviour>` is, before it's
+/// resolved to a [`BehaviourId`].
 #[derive(IdTarget)]
 #[id_target(name = "behaviour")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnyBehaviour {}
+
+bevy_mettle_core::number! {
+    /// A behaviour's number in an app, given as it's added: what abilities and
+    /// their requests know it by.
+    pub struct BehaviourId;
+}
 
 /// What an input check is given: the input, and whose it is.
 ///
@@ -75,32 +80,34 @@ pub(crate) struct InputInfo {
 }
 
 /// How a behaviour's component, and its input, are put on an ability entity
-/// and taken off.
+/// and taken off: what [`BehaviourRegistry`] holds for each.
 #[derive(Clone, Copy)]
-pub(crate) struct BehaviourFns {
+pub struct BehaviourFns {
     pub(crate) insert: fn(&mut EntityWorldMut),
     pub(crate) remove: fn(&mut EntityWorldMut),
     /// Its input, if it takes one.
     pub(crate) input: Option<InputInfo>,
 }
 
-/// The behaviours there are, by name: what abilities' data is checked against.
+/// The behaviours there are: each one by its number, and its number by its
+/// type and its name. What abilities' data is checked against.
 ///
-/// Added with [`add_behaviour`](BehaviourApp::add_behaviour).
-#[derive(Resource, Clone, Default)]
-pub struct Behaviours(pub(crate) Arc<HashMap<Id<AnyBehaviour>, BehaviourFns>>);
+/// Added to with [`add_behaviour`](BehaviourApp::add_behaviour), which gives
+/// each the next number, as Bevy numbers components. Read as a [`Registry`]:
+/// `id(name)`, `id_of::<B>()`, `name(id)`.
+#[derive(Resource, Deref, Clone, Default, Debug)]
+pub struct BehaviourRegistry(Registry<BehaviourId, BehaviourFns>);
 
-impl Behaviours {
-    /// Whether `behaviour` is there.
-    #[must_use]
-    pub fn contains(&self, behaviour: &Id<AnyBehaviour>) -> bool {
-        self.0.contains_key(behaviour)
-    }
-
+impl BehaviourRegistry {
     /// The name of the input `behaviour` takes, if it takes one.
     #[must_use]
-    pub fn input(&self, behaviour: &Id<AnyBehaviour>) -> Option<&'static str> {
+    pub fn input(&self, behaviour: BehaviourId) -> Option<&'static str> {
         self.0.get(behaviour)?.input.map(|input| input.name)
+    }
+
+    /// Adds `B`, made by `fns`, or replaces what's there: its number.
+    fn add<B: Behaviour>(&mut self, fns: BehaviourFns) -> BehaviourId {
+        self.0.add::<B>(B::NAME, fns)
     }
 }
 
@@ -139,19 +146,16 @@ impl BehaviourApp for App {
         if input.is_some() {
             crate::net::add_input::<B::Input>(self);
         }
-        let mut behaviours = self.world_mut().get_resource_or_init::<Behaviours>();
-        Arc::make_mut(&mut behaviours.0).insert(
-            B::ID,
-            BehaviourFns {
-                insert: |entity| {
-                    entity.insert(B::default());
-                },
-                remove: |entity| {
-                    entity.remove::<(B, B::Input)>();
-                },
-                input,
+        let mut behaviours = self.world_mut().get_resource_or_init::<BehaviourRegistry>();
+        behaviours.add::<B>(BehaviourFns {
+            insert: |entity| {
+                entity.insert(B::default());
             },
-        );
+            remove: |entity| {
+                entity.remove::<(B, B::Input)>();
+            },
+            input,
+        });
         self
     }
 

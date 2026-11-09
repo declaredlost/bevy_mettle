@@ -1,8 +1,6 @@
 //! What an attribute is: a marker type, its rules on it.
 
-use bevy_mettle_core::Id;
-
-use crate::registry::{AnyAttribute, Limit, OnLimit, Rounding};
+use crate::registry::{Limit, OnLimit, Rounding};
 
 /// An attribute: a number an actor has, as a marker type its rules are on.
 ///
@@ -25,7 +23,7 @@ use crate::registry::{AnyAttribute, Limit, OnLimit, Rounding};
 ///
 /// An attribute that differs by kind (a resistance per damage type) is one
 /// attribute, its modifiers counting for reads tagged so:
-/// `Modifier::flat::<Resistance>(0.2).read_tagged("damage.elemental")`.
+/// `Modifier::flat(resistance, 0.2).read_tagged("damage.elemental")`.
 ///
 /// Or implement it, for rules the derive can't say: its rules are constants.
 ///
@@ -47,7 +45,7 @@ use crate::registry::{AnyAttribute, Limit, OnLimit, Rounding};
 ///     const NAME: &'static str = "life";
 /// }
 ///
-/// assert_eq!(Life::ID.as_str(), "life");
+/// assert_eq!(Life::NAME, "life");
 /// ```
 #[diagnostic::on_unimplemented(
     message = "`{Self}` isn't an attribute",
@@ -55,11 +53,10 @@ use crate::registry::{AnyAttribute, Limit, OnLimit, Rounding};
     note = "a limit is a number written out, or a type with `#[derive(Attribute)]`"
 )]
 pub trait Attribute: Send + Sync + 'static {
-    /// The name data names it by: `"life"`.
+    /// The name data names it by, and what's shown for it: `"life"`. Its
+    /// number is the app's:
+    /// [`AttributeRegistry`](crate::registry::AttributeRegistry)`::id_of`.
     const NAME: &'static str;
-
-    /// Its id: its name.
-    const ID: Id<AnyAttribute> = Id::from_static(Self::NAME);
 
     /// What its base starts at.
     const BASE: f32 = 0.0;

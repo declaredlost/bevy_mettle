@@ -90,11 +90,37 @@ every actor a client receives.
   stacks, how long it lasts and has left, whether it's inhibited, what its
   source owned as it applied, and the attribute values it captured.
   Replicate it with its [`EffectOf`], mapping the spec's source. The
-  effect's definition is data both sides have, so it's named, not sent.
-  The replica is sent again as it changes, but not as its time runs down.
+  effect's definition is data both sides have, so it isn't sent: the
+  replica carries the effect's number, an [`EffectId`], and its params and
+  its source's tags as tag numbers, [`TagId`]s. The replica is sent again as
+  it changes, but not as its time runs down.
 - **On a client**, an effect whose replica arrives is shown as a [`Proxy`]: it
   counts, grants its tags, and its time runs down, but it isn't ticked
   otherwise. Its replica says how it stands. Its despawn takes it off.
+
+## Modifier sources from the server
+
+An effect's modifiers come with its replica. A source the game makes in
+code, an item or a passive, has nothing like it unless the game opts in:
+put a [`ModifiersReplica`] on the source and replicate it. The server keeps
+it in step with the source's `Modifiers`, each modifier's condition naming
+its tags by number, as a `Modifier<TagId>`, and the actor it's `ModifierOf`;
+a client gives the source its `Modifiers` and `ModifierOf` from it.
+[Modifiers](modifiers.md#over-a-network) shows it at work.
+
+## Numbers on the wire
+
+Everything mettle sends names what it's about by number, never by name:
+effects by [`EffectId`], abilities by [`AbilityId`], tags by [`TagId`].
+That's effect replicas (the effect, its params and its source's tags),
+ability requests, replies and replicas, served cues and cue bursts, and
+modifier replicas (each condition's tags). A
+number is a few bytes where a name is a string, and both sides know it
+already: content is numbered in order of name as it's checked, so a server
+and its clients that load the same content number it the same. A reload
+keeps the numbers things had and numbers new ones after them, so a reload
+on both sides keeps them agreeing. Names stay for content, debug output and
+what a client shows.
 
 ## Predicting an ability
 
@@ -103,8 +129,8 @@ On a client, `activate_ability` predicts:
 1. The fireball activates at once, under a new activation number. Its
    behaviour runs, and its cost and cooldown are applied as predictions.
 2. An [`AbilityRequest`] is written, as a message, for your transport to send
-   to the server: the actor, the ability, and the activation. One activated
-   with [input](input.md) is an [`AbilityRequestWith`], the input too; new
+   to the server: the actor, the ability by its number, and the activation.
+   One activated with [input](input.md) is an [`AbilityRequestWith`], the input too; new
    input as it runs is an [`AbilityInput`].
 
 What's applied under a predicted activation is marked:
@@ -118,9 +144,8 @@ What's applied under a predicted activation is marked:
   owns bases, and replicates them. The change is worked out on the base as
   shown, kept within its limits, and the difference shown as a flat
   modifier until the server answers. A cost dealt to a
-  [meta attribute](effect-code.md#meta-attributes) is routed first, as the
-  server routes it, and what's routed to the source is shown on the source
-  the same way.
+  [route](effect-code.md#routes) is routed first, as the server routes it,
+  and what's routed to the source is shown on the source the same way.
 
 ## The server decides
 
@@ -166,41 +191,46 @@ Here's a client predicting the fireball, and the server saying no:
 # struct Mana;
 # #[derive(Component, Default, Behaviour)]
 # struct CastFireball;
+# #[derive(Ability)] struct Fireball;
 # let mut client = App::new();
 # client
 #     .add_plugins((MinimalPlugins, MettlePlugins))
 #     .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(50)))
 #     .insert_resource(NetRole::Client)
 #     .add_attribute::<Mana>()
-#     .add_behaviour::<CastFireball>();
-# let tags: Vec<Tag> = ["cooldown", "cooldown.fireball"]
-#     .into_iter()
-#     .map(|id| Tag { id: Id::from_static(id) })
-#     .collect();
-# let tags = TagTree::build(&tags).unwrap();
-# let effects = EffectRegistry::check(&[ Effect::instant("fireball.cost") .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)), Effect::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"), ], EffectChecks { tags: &tags, curves: &CurveTable::default(), attributes: client.world().resource::<AttributeRegistry>(), code: &EffectCode::new() })
-# .unwrap();
-# let abilities = AbilityRegistry::check(&[Ability::new("fireball", "cast_fireball") .cost("fireball.cost") .cooldown("fireball.cooldown")], &[], AbilityChecks { tags: &tags, effects: &effects, behaviours: client.world().resource::<Behaviours>() })
-# .unwrap();
-# client.insert_resource(effects).insert_resource(abilities);
+#     .add_behaviour::<CastFireball>()
+#     .add_ability::<Fireball>();
+# client.insert_resource(MettleContent {
+#     tags: ["cooldown", "cooldown.fireball"].map(TagKey::named).to_vec(),
+#     effects: vec![
+#         EffectData::instant("fireball.cost").modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
+#         EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
+#     ],
+#     abilities: vec![AbilityData::new("fireball", "cast_fireball").cost("fireball.cost").cooldown("fireball.cooldown")],
+#     ..default()
+# });
+# client.update();
 # let mana = |app: &App, mage| app.world().get::<Current<Mana>>(mage).unwrap().get();
 // The client's mage, as the server serves it.
 let mage = client
     .world_mut()
     .spawn((Base::<Mana>::default(), Served::<Mana>::new(100.0), Remote))
     .id();
-client.world_mut().grant_ability(mage, "fireball", 1.0);
+client.world_mut().grant_ability(mage, Fireball);
 client.update();
 client.update();
 
 // Cast at once: paid, as a prediction, and asked of the server.
-client.world_mut().activate_ability(mage, "fireball").unwrap();
+client.world_mut().activate_ability(mage, Fireball).unwrap();
 let request = client
     .world_mut()
     .resource_mut::<Messages<AbilityRequest>>()
     .drain()
     .next()
     .unwrap();
+// The request names the fireball by its number.
+let fireball = client.world().resource::<AbilityRegistry>().id_of::<Fireball>();
+assert_eq!(Some(request.ability), fireball);
 client.update();
 client.update();
 assert_eq!(mana(&client, mage), 80.0);
@@ -244,8 +274,7 @@ A predicted ability runs on both sides, and the server decides how it ends:
 
 Either side ignores an end of what isn't running any more. A cancel that
 gets to the server before the request it cancels is held for it, up to a
-second, and up to 16 for one actor. An
-end isn't a rejection: the cost stays paid and the cooldown runs, on both
+second, and up to 16 for one actor. An end isn't a rejection: the cost stays paid and the cooldown runs, on both
 sides. A server's own activations aren't told: a client never runs them.
 
 ## Cues
@@ -258,9 +287,9 @@ one-shot played under the client's own activation isn't played again.
 
 ## Granted abilities
 
-On the server, each granted ability keeps an [`AbilityReplica`], its id and
-level. Replicate it with its [`AbilityOf`]. On a client, an ability whose
-replica arrives is granted from the client's own registry, and kept as its
+On the server, each granted ability keeps an [`AbilityReplica`], its
+number, an [`AbilityId`], and its level. Replicate it with its
+[`AbilityOf`]. On a client, an ability whose replica arrives is granted from the client's own registry, and kept as its
 replica changes, a level gained, say.
 
 A client leaves triggers, and abilities effects grant, to the server. They
@@ -273,8 +302,11 @@ Ability requests, replies and replicas are handled in [`AbilitySystems`], in
 
 ## Pitfalls
 
-- **One registry, both sides.** Effects and abilities are named, not sent.
-  The server and its clients need the same definitions.
+- **One content, both sides.** Effects, abilities and tags are sent as
+  numbers, not definitions. The server and its clients need the same
+  content, loaded the same way, or the same number names different things.
+  Over lightyear, a client that doesn't is told: see
+  [Checking content](lightyear.md#checking-content).
 - **Confirm late, not early.** A confirmed prediction gives way to the
   server's state at once. Confirm before that state arrives and the cost
   flickers back for a moment.
@@ -282,6 +314,9 @@ Ability requests, replies and replicas are handled in [`AbilitySystems`], in
   else comes from the server, so don't trigger abilities on a client and
   expect them to run.
 
+[`EffectId`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectId.html
+[`AbilityId`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilityId.html
+[`TagId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagId.html
 [`AbilityOf`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.AbilityOf.html
 [`AbilityFailed`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityFailed.html
 [`AbilityReplica`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/replica/struct.AbilityReplica.html
@@ -297,6 +332,7 @@ Ability requests, replies and replicas are handled in [`AbilitySystems`], in
 [`EffectOf`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/active/struct.EffectOf.html
 [`EffectReplica`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/net/struct.EffectReplica.html
 [`Failure`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/enum.Failure.html
+[`ModifiersReplica`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.ModifiersReplica.html
 [`NetRole`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/net/enum.NetRole.html
 [`PredictedUnder`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/net/struct.PredictedUnder.html
 [`Provisional`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.Provisional.html
