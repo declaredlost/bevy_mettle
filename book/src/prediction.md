@@ -364,13 +364,13 @@ Ability requests, replies and replicas are handled in [`AbilitySystems`], in
 [`TagId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.TagId.html
 [`AbilityOf`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.AbilityOf.html
 [`AbilityFailed`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityFailed.html
-[`AbilityReplica`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/replica/struct.AbilityReplica.html
-[`AbilityReply`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/request/struct.AbilityReply.html
-[`AbilityEnd`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/end/struct.AbilityEnd.html
-[`AbilityCancelRequest`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/end/struct.AbilityCancelRequest.html
-[`AbilityRequest`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/request/struct.AbilityRequest.html
-[`AbilityRequestWith`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/request/struct.AbilityRequestWith.html
-[`AbilityInput`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/input/struct.AbilityInput.html
+[`AbilityReplica`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityReplica.html
+[`AbilityReply`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityReply.html
+[`AbilityEnd`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityEnd.html
+[`AbilityCancelRequest`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityCancelRequest.html
+[`AbilityRequest`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityRequest.html
+[`AbilityRequestWith`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityRequestWith.html
+[`AbilityInput`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityInput.html
 [`AbilitySystems`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilitySystems.html
 [`AttributeChanged`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/registry/struct.AttributeChanged.html
 [`confirm_prediction`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/trait.EffectWorld.html#tymethod.confirm_prediction
@@ -386,5 +386,5 @@ Ability requests, replies and replicas are handled in [`AbilitySystems`], in
 [`Remote`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/authority/struct.Remote.html
 [`Served<A>`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/authority/struct.Served.html
 [`NetExecution`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/data/enum.NetExecution.html
-[`AbilityStarted`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/start/struct.AbilityStarted.html
+[`AbilityStarted`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityStarted.html
 [`Activated::Asked`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/enum.Activated.html#variant.Asked

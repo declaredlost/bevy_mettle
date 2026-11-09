@@ -82,7 +82,7 @@ pub struct AbilityFailed {
 ///
 /// [`ServerOnly`]: crate::data::NetExecution::ServerOnly
 /// [`ServerInitiated`]: crate::data::NetExecution::ServerInitiated
-/// [`AbilityStarted`]: crate::net::start::AbilityStarted
+/// [`AbilityStarted`]: crate::net::AbilityStarted
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Activated {
     /// Running here: the granted ability, active.

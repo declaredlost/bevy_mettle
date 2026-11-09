@@ -102,8 +102,8 @@ Executions and calculations read it from their [view](effect-code.md#what-code-s
 `effect.context().causer`, `effect.context().hit`, `effect.get::<Shot>()`. An effect it
 chains carries it too, and the cues it plays are told it. It goes with an
 effect's replica to clients, and with a one-shot cue's, entities mapped,
-those in a game's type too: a type is added in the same order on a server
-and its clients, so each numbers it the same. A type that isn't added stays
+those in a game's type too: a type goes by its number, in order of name, so
+a server and its clients number it the same. A type that isn't added stays
 in the world that applied it. A game type is serialized compactly, as
 lightyear's messages are, so serde's `skip_serializing_if`, `flatten` and
 `untagged` don't round-trip in it.

@@ -26,8 +26,8 @@ use serde::de::DeserializeOwned;
 ///
 /// Unreal's context subclassed. Replicated with what carries the context
 /// (an effect's replica, a cue's burst): serialized, its entities mapped as
-/// it arrives. Added in the same order on a server and its clients, so each
-/// numbers it the same.
+/// it arrives. Numbered by its name, so a server and its clients add it in
+/// whatever order.
 ///
 /// Serialized compactly, as lightyear sends messages: not self-describing, so
 /// serde's `skip_serializing_if`, `flatten` and `untagged` don't round-trip.
@@ -51,7 +51,7 @@ pub use bevy_mettle_macros::ContextData;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnyContextData {}
 
-/// A context data type's number in an app, given as it's added to it.
+/// A context data type's number in an app, in order of name.
 ///
 /// What it's replicated by.
 pub type ContextDataId = Key<AnyContextData>;
@@ -154,22 +154,25 @@ fn decode<C: ContextData>(bytes: &[u8], entities: &[Entity]) -> Option<Data> {
 
 /// The types a game adds to effects' contexts: what they're replicated by.
 ///
-/// Each numbered as it's added, as Bevy numbers components: added in the same
-/// order on a server and its clients, each numbers them the same. Added to
-/// with [`add_context_data`](crate::code::EffectApp::add_context_data). Read
+/// Numbered in order of name, as content is: a server and its clients adding
+/// the same types number them the same, in whatever order they add them.
+/// Added to with
+/// [`add_context_data`](crate::code::EffectApp::add_context_data). Read
 /// as a [`Registry`]: `id(name)`, `id_of::<C>()`, `name(id)`.
 #[derive(Resource, Deref, Clone, Default, Debug)]
 pub struct ContextDataRegistry(Registry<AnyContextData, ContextDataFns>);
 
 impl ContextDataRegistry {
-    /// Adds `C`, or replaces what's there: its number.
-    pub(crate) fn add<C: ContextData>(&mut self) -> ContextDataId {
+    /// Adds `C`, or replaces what's there, every type numbered again in
+    /// order of name.
+    pub(crate) fn add<C: ContextData>(&mut self) {
         self.0.add::<C>(
             C::NAME,
             ContextDataFns {
                 decode: decode::<C>,
             },
-        )
+        );
+        self.0 = self.0.sorted();
     }
 
     /// Decodes what's numbered `id` from `bytes` and `entities`, if it's

@@ -21,13 +21,13 @@ pub use crate::events::{
     AbilityActivated, AbilityEnded, AbilityFailed, Activated, Failure, GameplayEvent,
 };
 #[doc(no_inline)]
-pub use crate::net::end::{AbilityCancelRequest, AbilityEnd};
+pub use crate::net::AbilityInput;
 #[doc(no_inline)]
-pub use crate::net::input::AbilityInput;
+pub use crate::net::AbilityReplica;
 #[doc(no_inline)]
-pub use crate::net::replica::AbilityReplica;
+pub use crate::net::{AbilityCancelRequest, AbilityEnd};
 #[doc(no_inline)]
-pub use crate::net::request::{AbilityReply, AbilityRequest, AbilityRequestWith};
+pub use crate::net::{AbilityReply, AbilityRequest, AbilityRequestWith};
 #[doc(no_inline)]
 pub use crate::{
     Ability, AbilityApp, AbilityChecks, AbilityCommands, AbilityPlugin, AbilityReader,

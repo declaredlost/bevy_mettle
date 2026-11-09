@@ -473,7 +473,7 @@ pub trait EffectApp {
     fn add_effect<E: Effect>(&mut self) -> &mut Self;
 
     /// Adds `C`, what the game puts on effects' contexts: replicated with
-    /// them. Added in the same order on a server and its clients.
+    /// them, numbered by its name.
     fn add_context_data<C: ContextData>(&mut self) -> &mut Self;
 }
 

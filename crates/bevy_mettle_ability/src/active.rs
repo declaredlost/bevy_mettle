@@ -159,11 +159,13 @@ pub struct ActiveAbility {
 
 impl ActiveAbility {
     /// A spec of `effect`, as this activation applies it: from its actor,
-    /// under this activation, at its level, its context told this ability.
+    /// struck by it, under this activation, at its level, its context told
+    /// this ability.
     ///
     /// Unreal's `MakeOutgoingGameplayEffectSpec`. What a behaviour applies,
     /// so a rejected prediction takes it back, and what it applies says which
-    /// ability did. Set more on it after: another level, params, what struck.
+    /// ability did. Set more on it after: another level, params, what struck
+    /// in its actor's place (a projectile).
     /// An effect applied on another's behalf (a summon's, a reflected
     /// projectile's) is theirs: make its spec yourself.
     #[must_use]
@@ -178,8 +180,8 @@ impl ActiveAbility {
     }
 }
 
-/// `spec`, as an ability applies it: from `actor`, at `level`, under
-/// `activation` if it's given, its context told `ability` at `level`.
+/// `spec`, as an ability applies it: from `actor`, struck by it, at `level`,
+/// under `activation` if it's given, its context told `ability` at `level`.
 pub(crate) fn outgoing(
     spec: EffectSpec,
     actor: Entity,
@@ -190,6 +192,7 @@ pub(crate) fn outgoing(
     let spec = spec
         .level(level)
         .source(actor)
+        .causer(actor)
         .ability(AbilityRef { id: ability, level });
     match activation {
         Some(activation) => spec.activation(activation),

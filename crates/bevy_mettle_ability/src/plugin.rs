@@ -5,10 +5,9 @@ use bevy_mettle_effect::events::EffectApplied;
 
 use crate::active::GrantedBy;
 use crate::behaviour::BehaviourRegistry;
-use crate::net::end::{AbilityCancelRequest, AbilityEnd};
-use crate::net::request::{AbilityReply, AbilityRequest};
-use crate::net::start::AbilityStarted;
-use crate::net::{self};
+use crate::net::{
+    AbilityCancelRequest, AbilityEnd, AbilityReply, AbilityRequest, AbilityStarted, {self},
+};
 use crate::{AbilityRegistry, engine};
 
 /// The system set granted abilities are kept in, in `PreUpdate`.

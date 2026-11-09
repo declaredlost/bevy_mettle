@@ -18,7 +18,7 @@ use crate::MettleChannel;
 ///
 /// The same on a client and its server when they number content the same, so
 /// what one sends by number names the same thing to the other. With the types
-/// effects' contexts carry, numbered as code adds them. A server sends
+/// effects' contexts carry, numbered in order of name. A server sends
 /// its own to each client as it connects, and again as its content changes.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContentFingerprint {

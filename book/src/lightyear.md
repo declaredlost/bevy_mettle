@@ -237,8 +237,8 @@ Effects, abilities and tags go as their numbers, so a client has to number
 content as its server does. The server tells each client how it numbers its
 content, a [`ContentFingerprint`] of every registry, as it connects, and again
 whenever its content changes (a hot reload). The game's context data types
-are in it too: they go by number, as code adds them, so add them in the same
-order on both. A client numbering anything otherwise logs an error and
+are in it too: they go by number, in order of name, so add the same ones on
+both. A client numbering anything otherwise logs an error and
 triggers [`ContentMismatch`]: load the server's content the way the server
 did, or leave.
 
@@ -277,9 +277,9 @@ tells every client it no longer matches; reloaded alike, they match again.
   cast for: every request is rejected.
 
 [`AbilityOf`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.AbilityOf.html
-[`AbilityReplica`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/replica/struct.AbilityReplica.html
-[`AbilityReply`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/request/struct.AbilityReply.html
-[`AbilityRequest`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/request/struct.AbilityRequest.html
+[`AbilityReplica`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityReplica.html
+[`AbilityReply`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityReply.html
+[`AbilityRequest`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityRequest.html
 [`AbilitySystems`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilitySystems.html
 [`ControlledBy`]: https://docs.rs/lightyear_replication/latest/lightyear_replication/control/struct.ControlledBy.html
 [`EffectOf`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/active/struct.EffectOf.html

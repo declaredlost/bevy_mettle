@@ -71,9 +71,11 @@ did.
 by, the one the effect is about: a fireball's hit for 15 is `-15.0`. Every
 attribute it changed is in `changes`, in the order it first changed each,
 for a drain that shows the life it took and the mana it gave. Where it hit
-is carried if the applying code said, in the context's `hit`. Otherwise,
-read positions from the actor and the source in the world showing the cue,
-so the spark lands where that world shows the target.
+is carried if the applying code said, in the context's `hit`:
+`location()` and `normal()` read it, for where the spark goes and which way
+it faces. Otherwise, read positions from the actor and the source in the
+world showing the cue, so the spark lands where that world shows the
+target.
 
 ## Handlers
 

@@ -1215,18 +1215,29 @@ fn a_client_with_other_content_is_told_as_it_connects() {
 }
 
 #[test]
-fn context_data_added_in_another_order_is_told_as_a_mismatch() {
+fn context_data_is_numbered_by_name_whatever_order_its_added_in() {
     let mut world = net();
     watch_mismatches(&mut world["client"]);
     world.ticks(20);
     assert_eq!(world["client"].resource::<Mismatches>().0, [], "alike");
-    // The client adds the same types, the other way round.
+    // The client adds the same types, the other way round: numbered alike.
     let mut reversed = App::new();
     reversed
         .add_context_data::<Wound>()
         .add_context_data::<Impact>();
     let reversed = reversed.world().resource::<ContextDataRegistry>().clone();
     world["client"].insert_resource(reversed);
+    world.ticks(20);
+    assert_eq!(
+        world["client"].resource::<Mismatches>().0,
+        [],
+        "the same types, numbered alike"
+    );
+    // The client lacks one the server adds: told.
+    let mut fewer = App::new();
+    fewer.add_context_data::<Impact>();
+    let fewer = fewer.world().resource::<ContextDataRegistry>().clone();
+    world["client"].insert_resource(fewer);
     world.ticks(20);
     let seen = world["client"].resource::<Mismatches>().0.clone();
     assert_eq!(seen.len(), 1, "told once: {seen:?}");

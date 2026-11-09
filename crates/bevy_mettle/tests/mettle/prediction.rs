@@ -563,6 +563,7 @@ fn what_a_behaviour_applies_through_its_activation_is_its_and_undone_with_it() {
         .spec()
         .clone();
     assert_eq!(spec.context.source, Some(game.here), "from its caster");
+    assert_eq!(spec.context.causer, Some(game.here), "struck by it");
     assert_eq!(
         spec.context.ability,
         Some(AbilityRef {

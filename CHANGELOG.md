@@ -17,17 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   type (`#[derive(ContextData)]`, `add_context_data`, `.with(..)`,
   `get::<C>()`). Executions and calculations read it; chained effects carry
   it; `EffectExecuted` and `CueExecuted` are told it, and a `Cue` plays with
-  it. It's replicated with an effect's replica and a one-shot cue's burst
+  it (`CueExecuted::location` and `normal` read its hit). It's replicated
+  with an effect's replica and a one-shot cue's burst
   (`ContextReplica`), entities mapped, those in a game's types too.
   Abilities' costs and cooldowns carry their ability.
 - `ActiveAbility::effect_spec`, Unreal's `MakeOutgoingGameplayEffectSpec`:
   a spec of an effect (an `IntoEffectId`: its type or number) as a behaviour
-  applies it, from its actor, at its level, under its activation (so a
-  rejected prediction takes it back), its context told the ability.
-  `ActiveAbility::ability` says which ability it is.
+  applies it, from its actor, struck by it, at its level, under its
+  activation (so a rejected prediction takes it back), its context told the
+  ability. `ActiveAbility::ability` says which ability it is.
 
-- `ContentFingerprint::context_data`: a client adding context data types in
-  another order than its server is told, by `ContentMismatch`.
+- `ContentFingerprint::context_data`: a client adding other context data
+  types than its server is told, by `ContentMismatch`.
 - Network execution policies per ability, as Unreal's: `AbilityData::net`, a
   `NetExecution`. `Predicted` (the default) is as before; `ServerOnly` is
   asked of the server and run there alone; `ServerInitiated` is run by the
@@ -136,6 +137,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `bevy_mettle_ability::net` is one module: its messages and replica are at
+  `net::` (`net::AbilityRequest`, `net::AbilityEnd`, …), its parts private.
 - Every content kind and its id (`AnyTag`/`TagId`, `AnyCurve`/`CurveId`,
   `AnyAttribute`/`AttributeId`, `AnyEffect`/`EffectId`,
   `AnyAbility`/`AbilityId`) is in `bevy_mettle_core::registry`, its one

@@ -342,6 +342,8 @@ fn events_and_cues_are_told_the_context() {
     assert_eq!(played.context, spec.context);
     assert_eq!(played.context.causer, Some(arrow));
     assert_eq!(played.context.hit, Some(hit()));
+    assert_eq!(played.location(), Some(hit().point), "where it hit");
+    assert_eq!(played.normal(), Some(hit().normal), "which way it faces");
     assert_eq!(
         played.context.get::<Tracer>(),
         Some(&Tracer { marked: npc })

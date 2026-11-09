@@ -187,9 +187,10 @@ at what level, under which activation, and the gameplay event that triggered
 it, if one did.
 
 A behaviour applies effects through it, with `effect_spec`, Unreal's
-`MakeOutgoingGameplayEffectSpec`. The spec it makes is from the actor, at
-the ability's level, under this activation, its
-[context](applying-effects.md#context) told the ability:
+`MakeOutgoingGameplayEffectSpec`. The spec it makes is from the actor,
+struck by it, at the ability's level, under this activation, its
+[context](applying-effects.md#context) told the ability. A projectile says
+it struck instead, with `.causer(..)`:
 
 ```rust
 # use bevy::prelude::*;

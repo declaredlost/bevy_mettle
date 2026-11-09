@@ -341,6 +341,21 @@ pub struct CueExecuted {
     pub effect: Option<EffectId>,
 }
 
+impl CueExecuted {
+    /// Where it hit, if what played it said: where its spark goes.
+    #[must_use]
+    pub fn location(&self) -> Option<Vec3> {
+        self.context.hit.map(|hit| hit.point)
+    }
+
+    /// The surface's normal where it hit, if what played it said: which way
+    /// its spark faces.
+    #[must_use]
+    pub fn normal(&self) -> Option<Vec3> {
+        self.context.hit.map(|hit| hit.normal)
+    }
+}
+
 /// What a cue handler is run with: a cue started, ended, or played.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CueEvent {

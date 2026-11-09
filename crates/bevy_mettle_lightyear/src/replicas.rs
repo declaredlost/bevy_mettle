@@ -3,7 +3,7 @@
 
 use bevy::prelude::*;
 use bevy_mettle_ability::active::{Abilities, AbilityOf};
-use bevy_mettle_ability::net::replica::AbilityReplica;
+use bevy_mettle_ability::net::AbilityReplica;
 use bevy_mettle_effect::active::{ActiveEffects, EffectOf};
 use bevy_mettle_effect::net::EffectReplica;
 use bevy_replicon::prelude::VisibilityFilter;
