@@ -1,5 +1,6 @@
-//! An ability's input over a network: activated with it, and new input sent
-//! while it runs.
+//! An ability's input over a network: given as it activates, and while it runs.
+//!
+//! Activated with it, and new input sent while it runs.
 
 use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::prelude::*;
@@ -11,8 +12,9 @@ use super::{SERVERS, Serving, running};
 use crate::engine;
 use crate::events::Failure;
 
-/// A client's new input to an ability it's running, which it already
-/// predicts: for the server to check and take.
+/// A client's new input to an ability it's running, for the server to check.
+///
+/// Input it already predicts with: for the server to check and take.
 #[derive(Message, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AbilityInput<I> {
     /// The actor.
@@ -75,7 +77,7 @@ fn serve_with<I: Component + Clone>(
                 engine::activate_id_with(
                     world,
                     request.actor,
-                    &request.ability,
+                    request.ability,
                     Some(request.activation),
                     None,
                     Some(request.input),
@@ -83,7 +85,7 @@ fn serve_with<I: Component + Clone>(
                 .err()
             } else {
                 warn!(
-                    "a client asked to activate `{}` under the server's activation {}: rejected",
+                    "a client asked to activate {:?} under the server's activation {}: rejected",
                     request.ability, request.activation
                 );
                 Some(Failure::NotGranted)

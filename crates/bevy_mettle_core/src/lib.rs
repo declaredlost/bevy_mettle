@@ -7,14 +7,11 @@ extern crate self as bevy_mettle_core;
 pub mod condition;
 pub mod curve;
 mod error;
-mod id;
 pub mod net;
 #[doc(hidden)]
 pub mod optional;
 pub mod prelude;
+pub mod registry;
 pub mod tag;
 
-pub use bevy_mettle_macros::IdTarget;
-
-pub use self::error::{MettleError, MettleErrors};
-pub use self::id::{Id, IdTarget};
+pub use self::error::{Error, Errors};

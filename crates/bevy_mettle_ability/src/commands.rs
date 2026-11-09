@@ -1,29 +1,31 @@
 //! Granting, activating and ending abilities: as commands, or on the world.
 
 use bevy::prelude::*;
-use bevy_mettle_core::Id;
 use bevy_mettle_core::tag::Tags;
 
-use crate::behaviour::Behaviour;
-use crate::data::Ability;
+use crate::ability::{AbilitySpec, IntoAbilityId};
+use crate::behaviour::{Behaviour, BehaviourId, BehaviourRegistry};
 use crate::engine::{self, Commitment};
 use crate::events::{Failure, GameplayEvent};
+use crate::{AbilityId, AbilityRegistry};
 
 /// Granting, activating, committing and ending abilities, as commands.
 pub trait AbilityCommands {
-    /// Grants `ability` to this actor, at `level`.
-    fn grant_ability(&mut self, ability: impl Into<Id<Ability>>, level: f32) -> &mut Self;
+    /// Grants `spec`'s ability to this actor, at its level: an
+    /// [`Ability`](crate::Ability) type (`Fireball`, `Fireball.level(2.0)`),
+    /// or a spec of one by number.
+    fn grant_ability(&mut self, spec: impl Into<AbilitySpec>) -> &mut Self;
 
     /// Activates this actor's `ability`: on a client, predicted, and asked of
     /// the server.
-    fn activate_ability(&mut self, ability: impl Into<Id<Ability>>) -> &mut Self;
+    fn activate_ability(&mut self, ability: impl IntoAbilityId) -> &mut Self;
 
     /// Activates this actor's `ability`, run by `B`, with `input`, what `B`
     /// takes: checked, then put on the ability next to `B`. On a client,
     /// predicted, and asked of the server with the input.
     fn activate_ability_with<B: Behaviour>(
         &mut self,
-        ability: impl Into<Id<Ability>>,
+        ability: impl IntoAbilityId,
         input: B::Input,
     ) -> &mut Self;
 
@@ -70,38 +72,47 @@ pub trait AbilityCommands {
 }
 
 impl AbilityCommands for EntityCommands<'_> {
-    fn grant_ability(&mut self, ability: impl Into<Id<Ability>>, level: f32) -> &mut Self {
-        let ability = ability.into();
+    fn grant_ability(&mut self, spec: impl Into<AbilitySpec>) -> &mut Self {
+        let spec = spec.into();
         self.queue(move |entity: EntityWorldMut| {
             let actor = entity.id();
-            engine::grant(entity.into_world_mut(), actor, &ability, level, None);
+            let world = entity.into_world_mut();
+            if let Some(ability) = resolve_spec(world, &spec) {
+                engine::grant(world, actor, ability, spec.level, None);
+            }
         })
     }
 
-    fn activate_ability(&mut self, ability: impl Into<Id<Ability>>) -> &mut Self {
-        let ability = ability.into();
+    fn activate_ability(&mut self, ability: impl IntoAbilityId) -> &mut Self {
         self.queue(move |entity: EntityWorldMut| {
             let actor = entity.id();
-            let _ = crate::net::predict(entity.into_world_mut(), actor, &ability);
+            let world = entity.into_world_mut();
+            if let Some(ability) = resolve(world, &ability) {
+                let _ = crate::net::predict(world, actor, ability);
+            }
         })
     }
 
     fn activate_ability_with<B: Behaviour>(
         &mut self,
-        ability: impl Into<Id<Ability>>,
+        ability: impl IntoAbilityId,
         input: B::Input,
     ) -> &mut Self {
-        let ability = ability.into();
         self.queue(move |entity: EntityWorldMut| {
             let actor = entity.id();
-            let _ = crate::net::predict_with::<B>(entity.into_world_mut(), actor, &ability, input);
+            let world = entity.into_world_mut();
+            if let Some(ability) = resolve(world, &ability) {
+                let _ = crate::net::predict_with::<B>(world, actor, ability, input);
+            }
         })
     }
 
     fn set_input<B: Behaviour>(&mut self, input: B::Input) -> &mut Self {
         self.queue(move |entity: EntityWorldMut| {
             let ability = entity.id();
-            let _ = engine::set_input(entity.into_world_mut(), ability, Some(&B::ID), input);
+            let world = entity.into_world_mut();
+            let behaviour = behaviour_id::<B>(world);
+            let _ = engine::set_input(world, ability, behaviour, input);
         })
     }
 
@@ -193,14 +204,9 @@ impl AbilityCommands for EntityCommands<'_> {
 ///
 /// In an exclusive system, or a test.
 pub trait AbilityWorld {
-    /// Grants `ability` to `actor` at `level`: the granted ability, if there's
-    /// such an ability.
-    fn grant_ability(
-        &mut self,
-        actor: Entity,
-        ability: impl Into<Id<Ability>>,
-        level: f32,
-    ) -> Option<Entity>;
+    /// Grants `spec`'s ability to `actor` at its level: the granted ability,
+    /// if there's such an ability.
+    fn grant_ability(&mut self, actor: Entity, spec: impl Into<AbilitySpec>) -> Option<Entity>;
 
     /// Activates `actor`'s `ability` (on a client, predicted, and asked of the
     /// server): the granted ability, or why it didn't.
@@ -211,7 +217,7 @@ pub trait AbilityWorld {
     fn activate_ability(
         &mut self,
         actor: Entity,
-        ability: impl Into<Id<Ability>>,
+        ability: impl IntoAbilityId,
     ) -> Result<Entity, Failure>;
 
     /// Activates `actor`'s `ability`, run by `B`, with `input`, what `B` takes
@@ -225,7 +231,7 @@ pub trait AbilityWorld {
     fn activate_ability_with<B: Behaviour>(
         &mut self,
         actor: Entity,
-        ability: impl Into<Id<Ability>>,
+        ability: impl IntoAbilityId,
         input: B::Input,
     ) -> Result<Entity, Failure>;
 
@@ -291,34 +297,34 @@ pub trait AbilityWorld {
 }
 
 impl AbilityWorld for World {
-    fn grant_ability(
-        &mut self,
-        actor: Entity,
-        ability: impl Into<Id<Ability>>,
-        level: f32,
-    ) -> Option<Entity> {
-        engine::grant(self, actor, &ability.into(), level, None)
+    fn grant_ability(&mut self, actor: Entity, spec: impl Into<AbilitySpec>) -> Option<Entity> {
+        let spec = spec.into();
+        let ability = resolve_spec(self, &spec)?;
+        engine::grant(self, actor, ability, spec.level, None)
     }
 
     fn activate_ability(
         &mut self,
         actor: Entity,
-        ability: impl Into<Id<Ability>>,
+        ability: impl IntoAbilityId,
     ) -> Result<Entity, Failure> {
-        crate::net::predict(self, actor, &ability.into())
+        let ability = resolve(self, &ability).ok_or(Failure::NotGranted)?;
+        crate::net::predict(self, actor, ability)
     }
 
     fn activate_ability_with<B: Behaviour>(
         &mut self,
         actor: Entity,
-        ability: impl Into<Id<Ability>>,
+        ability: impl IntoAbilityId,
         input: B::Input,
     ) -> Result<Entity, Failure> {
-        crate::net::predict_with::<B>(self, actor, &ability.into(), input)
+        let ability = resolve(self, &ability).ok_or(Failure::NotGranted)?;
+        crate::net::predict_with::<B>(self, actor, ability, input)
     }
 
     fn set_input<B: Behaviour>(&mut self, ability: Entity, input: B::Input) -> Result<(), Failure> {
-        engine::set_input(self, ability, Some(&B::ID), input)
+        let behaviour = behaviour_id::<B>(self).ok_or(Failure::Input)?;
+        engine::set_input(self, ability, Some(behaviour), input)
     }
 
     fn cancel_abilities(&mut self, actor: Entity, tags: &Tags) -> Vec<Entity> {
@@ -368,4 +374,39 @@ impl AbilityWorld for World {
     fn send_event(&mut self, event: GameplayEvent) {
         engine::send(self, event);
     }
+}
+
+/// `B`'s number in `world`'s app, if it's added.
+fn behaviour_id<B: Behaviour>(world: &World) -> Option<BehaviourId> {
+    world.get_resource::<BehaviourRegistry>()?.id_of::<B>()
+}
+
+/// `ability`'s number in `world`'s registry; `None`, warned, if there's no such
+/// ability.
+fn resolve(world: &World, ability: &impl IntoAbilityId) -> Option<AbilityId> {
+    let id = world
+        .get_resource::<AbilityRegistry>()
+        .and_then(|registry| ability.ability_id(registry));
+    if id.is_none() {
+        warn!(
+            "ability `{}` isn't added, or content hasn't it",
+            ability.label()
+        );
+    }
+    id
+}
+
+/// `spec`'s ability's number in `world`'s registry; `None`, warned, if there's
+/// no such ability.
+fn resolve_spec(world: &World, spec: &AbilitySpec) -> Option<AbilityId> {
+    let id = world
+        .get_resource::<AbilityRegistry>()
+        .and_then(|registry| spec.ability_id(registry));
+    if id.is_none() {
+        warn!(
+            "ability `{}` isn't added, or content hasn't it",
+            spec.label()
+        );
+    }
+    id
 }

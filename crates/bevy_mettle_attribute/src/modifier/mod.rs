@@ -1,18 +1,22 @@
-//! Modifiers: what sources hold, and attributes fold.
+//! Modifiers: what sources hold, and attributes fold into their current values.
 
 mod operation;
+mod replica;
 mod sources;
+mod spec;
 
 use bevy::prelude::*;
-use bevy_mettle_core::condition::Condition;
-use bevy_mettle_core::tag::{Tag, TagTree};
-use bevy_mettle_core::{Id, MettleError};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use bevy_mettle_core::Error;
+use bevy_mettle_core::condition::{Condition, ConditionOver};
+use bevy_mettle_core::tag::{TagKey, TagRegistry};
+use serde::{Deserialize, Serialize};
 
 pub use self::operation::Operation;
+pub use self::replica::ModifiersReplica;
+pub(crate) use self::replica::{show_replicas, sync_replicas};
 pub use self::sources::{ModifierOf, ModifierSources, Modifiers, Provisional};
-use crate::Attribute;
-use crate::registry::{AnyAttribute, AttributeRegistry};
+pub use self::spec::{ModifierCommands, ModifierSpec};
+use crate::registry::{AttributeId, AttributeRegistry};
 
 /// A modifier: one line on an item, a passive or an effect.
 ///
@@ -20,24 +24,28 @@ use crate::registry::{AnyAttribute, AttributeRegistry};
 /// [`Condition`] holds and as much as it does, once for each whole so much of
 /// another attribute if it's [`per`](Self::per) one.
 ///
-/// ```ron
-/// (attribute: "damage", op: Additive, value: 0.2, condition: ReadTagged("damage.elemental.fire"))
-/// (attribute: "resistance", op: Flat, value: 0.1, condition: ReadTagged("damage.elemental"))
-/// ```
+/// It names its attribute by number, as an app has it, as Bevy names a
+/// component by its `ComponentId`. Code writes one by type, as a
+/// [`ModifierSpec`], which [`modifiers`](ModifierCommands::modifiers) makes a
+/// `Modifier` as it's put on an entity; with a number in hand (from
+/// [`AttributeRegistry`]), make one directly. What's written in data, an item's
+/// stats, is an effect's modifier, which names its attribute by name.
 ///
-/// Reflected as a value, as data writes it.
-#[derive(Debug, Clone, PartialEq, Reflect)]
+/// Its condition's tags are [`TagKey`]s, `T`; sent over a network, a
+/// `Modifier<TagId>` ([`map_tags`](Self::map_tags), [`ModifiersReplica`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Reflect)]
 #[reflect(opaque, Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Modifier {
+#[reflect(where T: Clone + PartialEq + std::fmt::Debug + Serialize + for<'de> Deserialize<'de>)]
+pub struct Modifier<T = TagKey> {
     /// The attribute it changes.
-    pub attribute: Id<AnyAttribute>,
+    pub attribute: AttributeId,
     /// How.
     pub op: Operation,
     /// By how much: an amount for `Base`, `Flat`, `Unscaled` and `Override`, a
     /// fraction (`0.2` for +20%) for the rest. Negative for less.
     pub value: f32,
     /// When it counts, and how much. Always, if `None`.
-    pub condition: Option<Condition>,
+    pub condition: Option<ConditionOver<T>>,
     /// That it counts once for each whole `every` of an attribute, read in the
     /// same context. Only an amount can: not a `Base` or an `Override`.
     pub per: Option<Per>,
@@ -46,103 +54,13 @@ pub struct Modifier {
     pub local: bool,
 }
 
-/// A modifier as data is written: what isn't there left out, what is written
-/// bare (`condition: ReadTagged("fire")`).
-#[derive(Serialize, Deserialize)]
-#[serde(rename = "Modifier", deny_unknown_fields)]
-struct Readable {
-    attribute: Id<AnyAttribute>,
-    op: Operation,
-    value: f32,
-    #[serde(
-        default,
-        with = "bevy_mettle_core::optional",
-        skip_serializing_if = "Option::is_none"
-    )]
-    condition: Option<Condition>,
-    #[serde(
-        default,
-        with = "bevy_mettle_core::optional",
-        skip_serializing_if = "Option::is_none"
-    )]
-    per: Option<Per>,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    local: bool,
-}
-
-/// A modifier as a binary format writes it: every field, in order.
-#[derive(Serialize, Deserialize)]
-#[serde(rename = "Modifier")]
-struct Packed {
-    attribute: Id<AnyAttribute>,
-    op: Operation,
-    value: f32,
-    condition: Option<Condition>,
-    per: Option<Per>,
-    local: bool,
-}
-
-macro_rules! convert {
-    ($($shape:ident),*) => {$(
-        impl From<Modifier> for $shape {
-            fn from(modifier: Modifier) -> Self {
-                Self {
-                    attribute: modifier.attribute,
-                    op: modifier.op,
-                    value: modifier.value,
-                    condition: modifier.condition,
-                    per: modifier.per,
-                    local: modifier.local,
-                }
-            }
-        }
-
-        impl From<$shape> for Modifier {
-            fn from(shape: $shape) -> Self {
-                Self {
-                    attribute: shape.attribute,
-                    op: shape.op,
-                    value: shape.value,
-                    condition: shape.condition,
-                    per: shape.per,
-                    local: shape.local,
-                }
-            }
-        }
-    )*};
-}
-
-convert!(Readable, Packed);
-
-/// As data (RON, JSON), leaving out what isn't there; in a binary format (what
-/// networking uses), every field.
-impl Serialize for Modifier {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        if serializer.is_human_readable() {
-            Readable::from(self.clone()).serialize(serializer)
-        } else {
-            Packed::from(self.clone()).serialize(serializer)
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for Modifier {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        if deserializer.is_human_readable() {
-            Readable::deserialize(deserializer).map(Self::from)
-        } else {
-            Packed::deserialize(deserializer).map(Self::from)
-        }
-    }
-}
-
 /// That a modifier counts once for each whole `every` of `attribute`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Reflect)]
 #[reflect(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Per {
     /// The attribute it scales with.
-    pub attribute: Id<AnyAttribute>,
+    pub attribute: AttributeId,
     /// How much of it makes one: more than 0.
     pub every: f32,
 }
@@ -158,10 +76,29 @@ impl Per {
     }
 }
 
+impl<T: Copy> Modifier<T> {
+    /// The same modifier, its condition's tags mapped by `map`: `None` if one
+    /// doesn't map. What sends it by number, and reads it back.
+    pub fn map_tags<U>(&self, map: impl FnMut(T) -> Option<U>) -> Option<Modifier<U>> {
+        let condition = match &self.condition {
+            Some(condition) => Some(condition.map_tags(map)?),
+            None => None,
+        };
+        Some(Modifier {
+            attribute: self.attribute,
+            op: self.op,
+            value: self.value,
+            condition,
+            per: self.per.clone(),
+            local: self.local,
+        })
+    }
+}
+
 impl Modifier {
     /// `op` of `value` to `attribute`, everywhere and always.
     #[must_use]
-    pub fn new(attribute: Id<AnyAttribute>, op: Operation, value: f32) -> Self {
+    pub fn new(attribute: AttributeId, op: Operation, value: f32) -> Self {
         Self {
             attribute,
             op,
@@ -172,47 +109,48 @@ impl Modifier {
         }
     }
 
-    /// Replaces `A`'s base.
+    /// Replaces `attribute`'s base.
     #[must_use]
-    pub fn base<A: Attribute>(value: f32) -> Self {
-        Self::new(A::ID, Operation::Base, value)
+    pub fn base(attribute: AttributeId, value: f32) -> Self {
+        Self::new(attribute, Operation::Base, value)
     }
 
-    /// Adds `value` to `A`'s base.
+    /// Adds `value` to `attribute`'s base.
     #[must_use]
-    pub fn flat<A: Attribute>(value: f32) -> Self {
-        Self::new(A::ID, Operation::Flat, value)
+    pub fn flat(attribute: AttributeId, value: f32) -> Self {
+        Self::new(attribute, Operation::Flat, value)
     }
 
-    /// `A` by a fraction (`0.2` for +20%), summed with the other additive ones.
+    /// `attribute` by a fraction (`0.2` for +20%), summed with the other
+    /// additive ones.
     #[must_use]
-    pub fn additive<A: Attribute>(value: f32) -> Self {
-        Self::new(A::ID, Operation::Additive, value)
+    pub fn additive(attribute: AttributeId, value: f32) -> Self {
+        Self::new(attribute, Operation::Additive, value)
     }
 
-    /// `A` by a fraction (`0.2` for +20%), multiplied in on its own.
+    /// `attribute` by a fraction (`0.2` for +20%), multiplied in on its own.
     #[must_use]
-    pub fn multiplicative<A: Attribute>(value: f32) -> Self {
-        Self::new(A::ID, Operation::Multiplicative, value)
+    pub fn multiplicative(attribute: AttributeId, value: f32) -> Self {
+        Self::new(attribute, Operation::Multiplicative, value)
     }
 
-    /// `A` divided by one more than a fraction, summed with the other dividing
-    /// ones.
+    /// `attribute` divided by one more than a fraction, summed with the other
+    /// dividing ones.
     #[must_use]
-    pub fn divide<A: Attribute>(value: f32) -> Self {
-        Self::new(A::ID, Operation::Divide, value)
+    pub fn divide(attribute: AttributeId, value: f32) -> Self {
+        Self::new(attribute, Operation::Divide, value)
     }
 
-    /// Adds `value` to `A` after everything else.
+    /// Adds `value` to `attribute` after everything else.
     #[must_use]
-    pub fn unscaled<A: Attribute>(value: f32) -> Self {
-        Self::new(A::ID, Operation::Unscaled, value)
+    pub fn unscaled(attribute: AttributeId, value: f32) -> Self {
+        Self::new(attribute, Operation::Unscaled, value)
     }
 
-    /// `A` is `value`, whatever else there is.
+    /// `attribute` is `value`, whatever else there is.
     #[must_use]
-    pub fn overriding<A: Attribute>(value: f32) -> Self {
-        Self::new(A::ID, Operation::Override, value)
+    pub fn overriding(attribute: AttributeId, value: f32) -> Self {
+        Self::new(attribute, Operation::Override, value)
     }
 
     /// Only counting as `condition` says, and as much: added to any other
@@ -228,26 +166,23 @@ impl Modifier {
 
     /// Only counting where the read has `tag`, or one under it.
     #[must_use]
-    pub fn read_tagged(self, tag: impl Into<Id<Tag>>) -> Self {
+    pub fn read_tagged(self, tag: impl Into<TagKey>) -> Self {
         self.condition(Condition::read_tagged(tag))
     }
 
     /// Only counting while the owner owns `tag`, or one under it.
     #[must_use]
-    pub fn owner_has(self, tag: impl Into<Id<Tag>>) -> Self {
+    pub fn owner_has(self, tag: impl Into<TagKey>) -> Self {
         self.condition(Condition::owner_has(tag))
     }
 
-    /// Counting once for each whole `every` of `A` (more than 0).
+    /// Counting once for each whole `every` of `attribute` (more than 0).
     ///
     /// Not for a `Base` or an `Override`, which count only in full: such a
     /// modifier is skipped.
     #[must_use]
-    pub fn per<A: Attribute>(mut self, every: f32) -> Self {
-        self.per = Some(Per {
-            attribute: A::ID,
-            every,
-        });
+    pub fn per(mut self, attribute: AttributeId, every: f32) -> Self {
+        self.per = Some(Per { attribute, every });
         self
     }
 
@@ -270,7 +205,7 @@ impl Modifier {
     /// # Errors
     ///
     /// The first that isn't.
-    pub fn check(&self, attributes: &AttributeRegistry, tags: &TagTree) -> Result<(), MettleError> {
+    pub fn check(&self, attributes: &AttributeRegistry, tags: &TagRegistry) -> Result<(), Error> {
         self.check_values(attributes)?;
         match &self.condition {
             Some(condition) => condition.check(tags, None),
@@ -280,30 +215,41 @@ impl Modifier {
 
     /// Checks its attributes and numbers, its condition's too, not its tags:
     /// what folding needs, without the tag tree.
-    pub(crate) fn check_values(&self, attributes: &AttributeRegistry) -> Result<(), MettleError> {
-        let invalid = |what: String| MettleError::Invalid { what, within: None };
-        attributes.check(&self.attribute, None)?;
+    pub(crate) fn check_values(&self, attributes: &AttributeRegistry) -> Result<(), Error> {
+        let invalid = |what: String| Error::Invalid { what, within: None };
+        let name = |attribute: AttributeId| {
+            attributes
+                .get(attribute)
+                .map(|info| info.name)
+                .ok_or_else(|| {
+                    invalid(format!(
+                        "a modifier of attribute {}, which there isn't",
+                        attribute.index()
+                    ))
+                })
+        };
+        let changed = name(self.attribute)?;
         if !self.value.is_finite() {
             return Err(invalid(format!(
-                "a modifier of `{}` by {}",
-                self.attribute, self.value
+                "a modifier of `{changed}` by {}",
+                self.value
             )));
         }
         if let Some(condition) = &self.condition {
             condition.check_values(None)?;
         }
         if let Some(per) = &self.per {
-            attributes.check(&per.attribute, None)?;
+            let of = name(per.attribute)?;
             if self.op.whole() {
                 return Err(invalid(format!(
-                    "a {:?} of `{}` per {}: only an amount can count per something",
-                    self.op, self.attribute, per.attribute
+                    "a {:?} of `{changed}` per `{of}`: only an amount can count per something",
+                    self.op
                 )));
             }
             if !(per.every.is_finite() && per.every > 0.0) {
                 return Err(invalid(format!(
-                    "a modifier of `{}` per {} {}",
-                    self.attribute, per.every, per.attribute
+                    "a modifier of `{changed}` per {} `{of}`",
+                    per.every
                 )));
             }
         }
@@ -318,7 +264,7 @@ mod tests {
     #[test]
     fn per_counts_whole_steps_despite_float_error() {
         let per = Per {
-            attribute: Id::from_static("resistance"),
+            attribute: AttributeId::new(0),
             every: 0.1,
         };
         assert_eq!(per.times(0.3), 3.0);

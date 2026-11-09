@@ -38,7 +38,7 @@ impl MapEntities for ModifierOf {
     }
 }
 
-/// On an actor: the sources whose modifiers count for it.
+/// On an actor: the sources whose modifiers count for it, such as its items.
 ///
 /// Kept by [`ModifierOf`]; not for setting by hand.
 #[derive(Component, Debug, Default, Reflect)]

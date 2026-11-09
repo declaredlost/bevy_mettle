@@ -96,7 +96,7 @@ pub(super) fn hear_input<I: Component + Clone + Serialize + DeserializeOwned + M
                 requests.write(request);
             } else {
                 warn!(
-                    "a client asked to activate `{}` for {}, which it doesn't control: rejected",
+                    "a client asked to activate {:?} for {}, which it doesn't control: rejected",
                     request.ability, request.actor
                 );
                 sender.send::<MettleChannel>(Answer {
@@ -228,7 +228,7 @@ pub(super) fn hear_requests(
                 requests.write(request);
             } else {
                 warn!(
-                    "a client asked to activate `{}` for {}, which it doesn't control: rejected",
+                    "a client asked to activate {:?} for {}, which it doesn't control: rejected",
                     request.ability, request.actor
                 );
                 sender.send::<MettleChannel>(Answer {

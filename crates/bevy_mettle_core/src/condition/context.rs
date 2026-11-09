@@ -1,7 +1,6 @@
 //! What an expression is weighed in.
 
-use crate::Id;
-use crate::tag::Tag;
+use crate::tag::TagKey;
 
 /// What a [`Condition`](super::Condition) is weighed in: tags, who owns what,
 /// facts.
@@ -11,17 +10,17 @@ use crate::tag::Tag;
 /// one under it: tag sets and counts have every tag above what they hold.
 pub trait Context {
     /// Whether the read has `tag`: `delivery.attack`.
-    fn tag(&self, tag: &Id<Tag>) -> bool;
+    fn tag(&self, tag: TagKey) -> bool;
 
     /// Whether the owner owns `tag`: `state.low_life`.
-    fn has(&self, tag: &Id<Tag>) -> bool;
+    fn has(&self, tag: TagKey) -> bool;
 
     /// Whether the target owns `tag`: `creature.undead`.
-    fn target(&self, tag: &Id<Tag>) -> bool;
+    fn target(&self, tag: TagKey) -> bool;
 
     /// Whether the source (the caster, the attacker) owns `tag`.
-    fn source(&self, tag: &Id<Tag>) -> bool;
+    fn source(&self, tag: TagKey) -> bool;
 
     /// What `fact` (a tag: `fact.flown`) is, if the read supplied it.
-    fn fact(&self, fact: &Id<Tag>) -> Option<f32>;
+    fn fact(&self, fact: TagKey) -> Option<f32>;
 }

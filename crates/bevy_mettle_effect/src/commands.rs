@@ -7,8 +7,9 @@ use crate::{EffectSpec, engine};
 
 /// Applying and removing effects on an entity, as commands.
 pub trait EffectCommands {
-    /// Applies `spec` to this actor.
-    fn apply_effect(&mut self, spec: EffectSpec) -> &mut Self;
+    /// Applies `spec` to this actor: an [`Effect`](crate::Effect) type
+    /// (`Burning`, `Burning.level(3.0)`), or a spec of one by number.
+    fn apply_effect(&mut self, spec: impl Into<EffectSpec>) -> &mut Self;
 
     /// Takes every effect tagged any of `tags` off this actor.
     fn remove_effects(&mut self, tags: Tags) -> &mut Self;
@@ -22,10 +23,11 @@ pub trait EffectCommands {
 }
 
 impl EffectCommands for EntityCommands<'_> {
-    fn apply_effect(&mut self, spec: EffectSpec) -> &mut Self {
+    fn apply_effect(&mut self, spec: impl Into<EffectSpec>) -> &mut Self {
+        let spec = spec.into();
         self.queue(move |entity: EntityWorldMut| {
             let target = entity.id();
-            engine::apply(entity.into_world_mut(), target, spec);
+            engine::apply(entity.into_world_mut(), target, &spec);
         })
     }
 
@@ -51,12 +53,13 @@ impl EffectCommands for EntityCommands<'_> {
     }
 }
 
-/// Applying and removing effects on the world, at once.
+/// Applying and removing effects on the world at once, not as commands.
 ///
 /// In an exclusive system, or a test.
 pub trait EffectWorld {
-    /// Applies `spec` to `target`.
-    fn apply_effect(&mut self, target: Entity, spec: EffectSpec);
+    /// Applies `spec` to `target`: an [`Effect`](crate::Effect) type, or a
+    /// spec of one.
+    fn apply_effect(&mut self, target: Entity, spec: impl Into<EffectSpec>);
 
     /// Takes every effect tagged any of `tags` off `target`.
     fn remove_effects(&mut self, target: Entity, tags: &Tags);
@@ -87,8 +90,8 @@ pub trait EffectWorld {
 }
 
 impl EffectWorld for World {
-    fn apply_effect(&mut self, target: Entity, spec: EffectSpec) {
-        engine::apply(self, target, spec);
+    fn apply_effect(&mut self, target: Entity, spec: impl Into<EffectSpec>) {
+        engine::apply(self, target, &spec.into());
     }
 
     fn remove_effects(&mut self, target: Entity, tags: &Tags) {

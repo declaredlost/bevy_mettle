@@ -47,8 +47,7 @@ pub(crate) fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
                 Limit::Attribute(other) => {
                     // Spanned at the path, so a type that isn't an attribute
                     // is pointed out where it's written.
-                    let id = quote_spanned!(other.span()=> <#other as #krate::Attribute>::ID);
-                    quote!(#krate::registry::Limit::Attribute(#id))
+                    quote_spanned!(other.span()=> #krate::registry::Limit::attribute::<#other>())
                 }
             };
             quote! {

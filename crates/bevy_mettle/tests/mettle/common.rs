@@ -1,5 +1,7 @@
 //! What the tests share: a game's attributes, and an app keeping them.
 
+use std::sync::OnceLock;
+
 use bevy::app::PluginGroupBuilder;
 use bevy::prelude::*;
 use bevy_harness::TestApp;
@@ -53,9 +55,8 @@ pub struct MaxResistance;
 pub const PHYSICAL: &str = "damage.physical";
 pub const FIRE: &str = "damage.elemental.fire";
 
-/// The facts the tests' reads supply.
+/// The fact the tests' reads supply.
 pub const FLOWN: &str = "fact.flown";
-pub const BEHIND: &str = "fact.behind";
 
 /// Adds every attribute the tests name.
 pub fn attributes(app: &mut App) {
@@ -70,6 +71,21 @@ pub fn attributes(app: &mut App) {
         .add_attribute::<Charges>()
         .add_attribute::<Resistance>()
         .add_attribute::<MaxResistance>();
+}
+
+/// `A`'s number, as every app adding the tests' attributes with
+/// [`attributes`] numbers it: the same code adds them in the same order, so
+/// the same number, in every app here, as on a server and its clients.
+pub fn id<A: Attribute>() -> AttributeId {
+    static REGISTRY: OnceLock<AttributeRegistry> = OnceLock::new();
+    REGISTRY
+        .get_or_init(|| {
+            let mut app = App::new();
+            attributes(&mut app);
+            app.world().resource::<AttributeRegistry>().clone()
+        })
+        .id_of::<A>()
+        .expect("one of the tests' attributes")
 }
 
 /// An app keeping the tests' attributes.
@@ -109,7 +125,11 @@ pub fn get<A: Attribute>(app: &TestApp, actor: Entity) -> f32 {
 /// `actor`'s `A` for `query`, read now.
 pub fn value<A: Attribute>(app: &TestApp, actor: Entity, query: &AttributeContext<'_>) -> f32 {
     app.world()
-        .value_at(actor, &A::ID, query)
+        .value_at(
+            actor,
+            app.world().attribute_id::<A>().expect("an attribute"),
+            query,
+        )
         .expect("the actor has it")
 }
 
@@ -128,9 +148,9 @@ pub fn own(app: &mut TestApp, actor: Entity, tag: &'static str, on: bool) {
         .get_mut::<OwnedTags>(actor)
         .expect("an actor");
     if on {
-        owned.add(&Id::from_static(tag));
+        owned.add(tag);
     } else {
-        owned.remove(&Id::from_static(tag));
+        owned.remove(tag);
     }
 }
 

@@ -8,18 +8,9 @@ That's stacking.
 ## Stacks of burning
 
 Burning stacks up to three times. A fourth application ignites the mage
-instead:
-
-```ron
-(
-    id: "burning",
-    tags: ["effect.affliction.burning"],
-    duration: For(Value(4)),
-    period: (every: Value(0.5)),
-    modifiers: [(attribute: "life", op: Flat, value: Param("param.damage"))],
-    stacking: (limit: 3, expire: RemoveOne, overflow: ["ignited"]),
-)
-```
+instead. Its `stacking` sets a limit of 3, has a stack run out one at a
+time, and applies `ignited` on overflow. In data, a stacking can say just
+those three, and the rest take their defaults.
 
 A stacking effect applied to a target that already has it doesn't spawn a
 second active effect. The one there gains a stack, and its amounts count once
@@ -32,16 +23,14 @@ per stack:
 # #[derive(Attribute)]
 # #[attribute(base = 100.0, min = 0.0)]
 # struct Life;
-# fn tags() -> TagTree {
-#     let tags: Vec<Tag> = ["effect", "effect.affliction", "effect.affliction.burning", "param", "param.damage"]
-#         .into_iter()
-#         .map(|id| Tag { id: id.into() })
-#         .collect();
-#     TagTree::build(&tags).unwrap()
+# fn tags() -> Vec<TagKey> {
+#     ["effect", "effect.affliction", "effect.affliction.burning", "param", "param.damage"]
+#         .map(TagKey::named)
+#         .to_vec()
 # }
-fn effects() -> Vec<Effect> {
+fn effects() -> Vec<EffectData> {
     vec![
-        Effect::lasting("burning", 4.0)
+        EffectData::lasting("burning", 4.0)
             .tag("effect.affliction.burning")
             .period(0.5, false)
             .modifier(EffectModifier::new::<Life>(
@@ -56,26 +45,17 @@ fn effects() -> Vec<Effect> {
                 expire: Expire::RemoveOne,
                 overflow: vec!["ignited".into()],
             }),
-        Effect::instant("ignited")
+        EffectData::instant("ignited")
             .modifier(EffectModifier::new::<Life>(Operation::Flat, -20.0)),
     ]
 }
-# let burning: Effect = ron::from_str(r#"(
-#     id: "burning",
-#     tags: ["effect.affliction.burning"],
-#     duration: For(Value(4)),
-#     period: (every: Value(0.5)),
-#     modifiers: [(attribute: "life", op: Flat, value: Param("param.damage"))],
-#     stacking: (limit: 3, expire: RemoveOne, overflow: ["ignited"]),
-# )"#).unwrap();
-# assert_eq!(effects()[0], burning);
+# #[derive(Effect)] struct Burning;
 # let mut app = App::new();
 # app.add_plugins((MinimalPlugins, MettlePlugins))
 #     .add_attribute::<Life>()
+#     .add_effect::<Burning>()
+#     .insert_resource(MettleContent { tags: tags(), effects: effects(), ..default() })
 #     .insert_resource(TimeUpdateStrategy::FixedTimesteps(1));
-# let registry = EffectRegistry::check(&effects(), EffectChecks { tags: &tags(), curves: &CurveTable::default(), attributes: app.world().resource::<AttributeRegistry>(), code: &EffectCode::new() })
-# .unwrap();
-# app.insert_resource(registry);
 # app.finish();
 # app.cleanup();
 # app.update();
@@ -86,7 +66,7 @@ fn effects() -> Vec<Effect> {
 # }
 # let mage = app.world_mut().spawn(Base::<Life>::default()).id();
 # let life = |app: &App| app.world().get::<Base<Life>>(mage).unwrap().get();
-let burn = EffectSpec::new("burning").param("param.damage", -2.0);
+let burn = Burning.param("param.damage", -2.0);
 for _ in 0..4 {
     app.world_mut().apply_effect(mage, burn.clone());
 }
@@ -120,8 +100,8 @@ a default:
 | `expire` | What running out of time does: `ClearAll`, `RemoveOne`, or `Refresh` | `ClearAll` |
 | `overflow` | Effects applied in its place when it's at its limit | none |
 
-With `by: Source`, two mages burning the same target each have their own
-stacks, each its own active effect. With `by: Target`, they share one.
+With `by` set to `Source`, two mages burning the same target each have their own
+stacks, each its own active effect. Set to `Target`, they share one.
 
 ## A new stack
 

@@ -2,7 +2,7 @@
 
 [package]
 name = "bevy_mettle_macros"
-description = "bevy_mettle's derives: what ids name, attributes, meta attributes and behaviours"
+description = "bevy_mettle's derives: what ids name, attributes, routes and behaviours"
 readme = "./README.md"
 keywords = ["bevy", "attributes", "macro"]
 categories = ["game-development"]

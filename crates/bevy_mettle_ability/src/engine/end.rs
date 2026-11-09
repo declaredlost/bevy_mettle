@@ -8,7 +8,7 @@ use bevy_mettle_effect::cue::{Cue, CueWorld};
 
 use super::interrupts;
 use crate::active::{Abilities, ActiveAbility, GrantedAbility};
-use crate::behaviour::Behaviours;
+use crate::behaviour::BehaviourRegistry;
 use crate::events::AbilityEnded;
 
 /// How an ability's ending goes.
@@ -58,7 +58,7 @@ fn end_as(world: &mut World, ability: Entity, cancelled: bool, ending: Ending) {
     };
     let actor = active.actor;
     let activation = active.activation;
-    let id = granted.def.id.clone();
+    let id = granted.def.id;
     // What it activated with, not what its definition says now: it may have
     // been replaced since.
     let (granted_tags, cues, running) = world
@@ -73,14 +73,14 @@ fn end_as(world: &mut World, ability: Entity, cancelled: bool, ending: Ending) {
         .unwrap_or_default();
     let behaviour = running.and_then(|running| {
         world
-            .get_resource::<Behaviours>()
-            .and_then(|behaviours| behaviours.0.get(&running).copied())
+            .get_resource::<BehaviourRegistry>()
+            .and_then(|behaviours| behaviours.get(running).copied())
     });
     if let Some(mut owned) = world.get_mut::<OwnedTags>(actor) {
         owned.remove_all(&granted_tags);
     }
     for cue in cues.written() {
-        world.remove_cue(actor, &Cue::new(cue.clone()));
+        world.remove_cue(actor, &Cue::new(cue));
     }
     let mut entity = world.entity_mut(ability);
     entity.remove::<ActiveAbility>();

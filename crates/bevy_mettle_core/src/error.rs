@@ -1,29 +1,39 @@
-//! What can be wrong with definitions, or a name looked up.
+//! What can be wrong with content, or a name looked up: `Error`, and every
+//! error found at once, `Errors`.
 
 use std::fmt;
 
-use crate::IdTarget;
+use crate::registry::Kind;
 
-/// What can be wrong with data: a tag tree, an effect, a modifier.
+/// What can be wrong with content: a tag, an effect, a modifier.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub enum MettleError {
-    /// Two definitions of one kind share an id.
-    #[error("there are two {kind}s called `{id}`")]
+pub enum Error {
+    /// Two definitions of one kind share a name.
+    #[error("there are two {kind}s called `{name}`")]
     Duplicate {
         /// What kind of thing: `tag`, `item`.
         kind: &'static str,
-        /// The id they share.
-        id: String,
+        /// The name they share.
+        name: String,
     },
     /// A name that isn't defined.
-    #[error("there's no {kind} called `{id}`{}", context(.within.as_deref()))]
+    #[error("there's no {kind} called `{name}`{}", context(.within.as_deref()))]
     Unknown {
         /// What kind of thing: `tag`, `item`.
         kind: &'static str,
         /// The name.
-        id: String,
-        /// Where it was named, if in a definition: its id.
+        name: String,
+        /// Where it was named, if in a definition: its name.
         within: Option<String>,
+    },
+    /// Something code names by type that content doesn't define: an effect
+    /// or ability added with `add_effect` or `add_ability`.
+    #[error("code names {kind} `{name}`, which content doesn't define")]
+    NotInContent {
+        /// What kind of thing: `effect`, `ability`.
+        kind: &'static str,
+        /// The name code gives it.
+        name: String,
     },
     /// Something that can't be: a number that isn't finite, a `per` of 0 or
     /// less, a ramp from a value to itself.
@@ -31,19 +41,19 @@ pub enum MettleError {
     Invalid {
         /// What's wrong, in words.
         what: String,
-        /// Where, if in a definition: its id.
+        /// Where, if in a definition: its name.
         within: Option<String>,
     },
 }
 
-impl MettleError {
-    /// That there's no `T` called `name`, named within `within` if in a
+impl Error {
+    /// That there's no `K` called `name`, named within `within` if in a
     /// definition.
     #[must_use]
-    pub fn unknown<T: IdTarget>(name: &str, within: Option<&str>) -> Self {
+    pub fn unknown<K: Kind>(name: &str, within: Option<&str>) -> Self {
         Self::Unknown {
-            kind: T::NAME,
-            id: name.to_owned(),
+            kind: K::NAME,
+            name: name.to_owned(),
             within: within.map(ToOwned::to_owned),
         }
     }
@@ -55,11 +65,11 @@ fn context(within: Option<&str>) -> String {
         .unwrap_or_default()
 }
 
-/// Everything wrong with definitions, found at once.
+/// Everything wrong with content, found at once: each [`Error`] checking found.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub struct MettleErrors(pub Vec<MettleError>);
+pub struct Errors(pub Vec<Error>);
 
-impl fmt::Display for MettleErrors {
+impl fmt::Display for Errors {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (index, error) in self.0.iter().enumerate() {
             if index > 0 {

@@ -23,7 +23,9 @@ Both sides add the same plugins, in the same order:
 2. [`MettlePlugins`], with [`NetRole`] set to `Server` or `Client`;
 3. your attributes, and [`replicate_attribute`] for each one clients should
    see;
-4. your behaviours, and [`replicate_input`] for each input they take.
+4. your behaviours, and [`replicate_input`] for each input they take;
+5. the effects and abilities code names, and the same content, as
+   [Loading data](loading-data.md) shows.
 
 ```rust
 # use core::time::Duration;
@@ -52,6 +54,9 @@ struct Aim(Vec2);
 #[behaviour(input = Aim)]
 struct CastFireball;
 
+#[derive(Ability)]
+struct Fireball;
+
 const TICK: Duration = Duration::from_millis(16);
 
 /// What both sides add, after lightyear's plugins.
@@ -65,7 +70,8 @@ fn mettle(app: &mut App, role: NetRole) {
         .replicate_attribute::<MaxLife>()
         .replicate_attribute::<Mana>()
         .add_behaviour::<CastFireball>()
-        .replicate_input::<Aim>();
+        .replicate_input::<Aim>()
+        .add_ability::<Fireball>();
 }
 
 let mut server = App::new();
@@ -103,6 +109,7 @@ server, the mage its player controls:
 # use lightyear::prelude::*;
 # #[derive(Attribute)] #[attribute(base = 100.0, min = 0.0)] struct Life;
 # #[derive(Attribute)] #[attribute(base = 100.0, min = 0.0)] struct Mana;
+# #[derive(Ability)] struct Fireball;
 fn spawn_mage(commands: &mut Commands, player: Entity) -> Entity {
     commands
         .spawn((
@@ -114,7 +121,7 @@ fn spawn_mage(commands: &mut Commands, player: Entity) -> Entity {
                 lifetime: Lifetime::default(),
             },
         ))
-        .grant_ability("fireball", 1.0)
+        .grant_ability(Fireball)
         .id()
 }
 # let _ = spawn_mage;
@@ -143,7 +150,12 @@ From the server to its clients:
   [`replicate_attribute`]. `Base<A>` is what the client works predictions out
   on. `Served<A>` is what it shows. On the server, every actor with `Base<A>`
   serves `A`;
-- an effect's source, mapped to the client's entity.
+- an effect's source, mapped to the client's entity;
+- each modifier source's [`ModifiersReplica`], carrying the actor it's
+  [`ModifierOf`], for the sources your game replicates and opts in (below).
+
+All of it names content by number: effects by [`EffectId`], abilities by
+[`AbilityId`], tags by [`TagId`]. Nothing carries a name.
 
 On a client, every actor replicated from the server is marked [`Remote`], so
 it shows the server's values rather than its own fold, except while it
@@ -151,18 +163,34 @@ predicts. A client shows all this. It never decides it.
 
 Mettle's own state on an actor, its folded modifiers, isn't replicated. It's
 worked out on each side. If clients read an actor's owned tags that your game
-sets, replicate those yourself. So too an item's modifiers, if clients should
-fold them:
+sets, replicate those yourself.
+
+An item's or a passive's modifiers reach clients through a
+[`ModifiersReplica`]: the adapter registers it for replication, and the game
+opts each source in by putting an empty one on it, and replicating the source.
+The server keeps the replica in step with the source's `Modifiers`, its
+conditions' tags by number, and the actor it's `ModifierOf`; each client gives
+the source its `Modifiers` and its `ModifierOf` from it
+([Modifiers](modifiers.md#over-a-network)). `ModifierOf` itself isn't
+replicated: a client keeps its own on the effects it shows.
 
 ```rust
 # use bevy::prelude::*;
 # use bevy_mettle::prelude::*;
 # use lightyear::prelude::*;
-fn replicate_items(app: &mut App) {
-    app.component::<Modifiers>().replicate();
-    app.component::<ModifierOf>().replicate();
+# #[derive(Attribute)] #[attribute(base = 10.0)] struct SpellPower;
+/// The mage's ring, on the server: its modifiers reach every client.
+fn equip_ring(commands: &mut Commands, mage: Entity) -> Entity {
+    commands
+        .spawn((
+            ModifierOf(mage),
+            ModifiersReplica::default(),
+            Replicate::to_clients(NetworkTarget::All),
+        ))
+        .modifiers([ModifierSpec::flat::<SpellPower>(5.0).owner_has("state.casting")])
+        .id()
 }
-# let _ = replicate_items;
+# let _ = equip_ring;
 ```
 
 A client's reads in context, a hit's tags say, are its own, worked out from
@@ -199,14 +227,46 @@ changed on the server.
 Replies and requests are heard in `PreUpdate`, after lightyear receives its
 messages and replication, and before [`AbilitySystems`].
 
+## Checking content
+
+Effects, abilities and tags go as their numbers, so a client has to number
+content as its server does. The server tells each client how it numbers its
+content, a [`ContentFingerprint`] of every registry, as it connects, and again
+whenever its content changes (a hot reload). A client numbering it otherwise
+logs an error and triggers [`ContentMismatch`]: load the server's content the
+way the server did, or leave.
+
+```rust
+# use bevy::prelude::*;
+# use bevy_mettle::prelude::*;
+/// Leaves a server whose content isn't this client's.
+fn leave(mismatch: On<ContentMismatch>, mut exit: MessageWriter<AppExit>) {
+    warn!("the server's content isn't ours: {:?}", mismatch.server);
+    exit.write(AppExit::error());
+}
+
+let mut app = App::new();
+app.add_observer(leave);
+```
+
+Matching content is told nothing. A server that reloads its content alone
+tells every client it no longer matches; reloaded alike, they match again.
+
 ## Pitfalls
 
 - **Plugin order.** lightyear's plugins, then [`MettlePlugins`]. The other way
   round panics.
+- **`Time`.** A server holds a client's early cancels a while, by Bevy's
+  `Time`: a server app without `MinimalPlugins` or `DefaultPlugins` (a bare
+  test app) panics as that system first runs. Add `TimePlugin`.
 - **The same protocol.** Both sides register the same attributes with
   [`replicate_attribute`], and the same components, in the same order.
-- **The same data.** Effects and abilities are named, not sent. Both sides
-  need the same registries.
+- **The same content.** Effects, abilities and tags go as their numbers,
+  never their definitions or names. Both sides need the same content,
+  loaded the same way, or a number names different things: a client that
+  doesn't is told, by [`ContentMismatch`]. Observe it.
+- **A modifier source without its replica.** An item replicated without a
+  `ModifiersReplica` shows no modifiers on a client.
 - **Control.** A mage without [`ControlledBy`] its player's link can't be
   cast for: every request is rejected.
 
@@ -221,6 +281,13 @@ messages and replication, and before [`AbilitySystems`].
 [`MettleChannel`]: https://docs.rs/bevy_mettle_lightyear/latest/bevy_mettle_lightyear/struct.MettleChannel.html
 [`MettleNetPlugin`]: https://docs.rs/bevy_mettle_lightyear/latest/bevy_mettle_lightyear/struct.MettleNetPlugin.html
 [`MettlePlugins`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettlePlugins.html
+[`ModifiersReplica`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.ModifiersReplica.html
+[`ModifierOf`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.ModifierOf.html
+[`EffectId`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectId.html
+[`AbilityId`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilityId.html
+[`TagId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagId.html
+[`ContentFingerprint`]: https://docs.rs/bevy_mettle_lightyear/latest/bevy_mettle_lightyear/struct.ContentFingerprint.html
+[`ContentMismatch`]: https://docs.rs/bevy_mettle_lightyear/latest/bevy_mettle_lightyear/struct.ContentMismatch.html
 [`NetRole`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/net/enum.NetRole.html
 [`Remote`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/authority/struct.Remote.html
 [`replicate_input`]: https://docs.rs/bevy_mettle_lightyear/latest/bevy_mettle_lightyear/trait.MettleNetApp.html#tymethod.replicate_input

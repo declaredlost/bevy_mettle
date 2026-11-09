@@ -29,8 +29,14 @@ bevy_mettle_macros = { workspace = true, features = [] }
 # telling them
 bevy_ecs = { workspace = true, features = ["bevy_reflect"] }
 
+# Adding the tags code names to an app
+bevy_app = { workspace = true, features = [] }
+
 # Reflection: for inspectors, scenes and remote access
 bevy_reflect = { workspace = true, features = [] }
+
+# Hash maps with a fast hasher
+bevy_platform = { workspace = true, features = [] }
 
 # Curves: what curve tables sample
 bevy_curve = { workspace = true, features = ["serialize"] }
@@ -48,8 +54,8 @@ fnv = { workspace = true, features = [] }
 smol_str = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
-# Definitions
-ron = { workspace = true, features = [] }
+# Checking what data reads and writes, whatever its format
+serde_test = { workspace = true, features = [] }
 
 [lints]
 workspace = true

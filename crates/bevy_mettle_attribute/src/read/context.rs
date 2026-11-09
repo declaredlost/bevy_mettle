@@ -1,9 +1,8 @@
 //! What a read is in: its context.
 
 use bevy::prelude::*;
-use bevy_mettle_core::Id;
 use bevy_mettle_core::condition::Context;
-use bevy_mettle_core::tag::{OwnedTags, Tag, TagCounts, Tags};
+use bevy_mettle_core::tag::{OwnedTags, TagCounts, TagKey, Tags};
 
 /// The context an attribute is read in: a hit's tags, its target, its source.
 ///
@@ -23,7 +22,7 @@ pub struct AttributeContext<'a> {
     target: Option<&'a TagCounts>,
     /// The target's tags, added one by one.
     more_target: Tags,
-    facts: Vec<(Id<Tag>, f32)>,
+    facts: Vec<(TagKey, f32)>,
     pub(crate) source: Option<Entity>,
     /// The source's owned tags, as given.
     source_owned: Option<&'a TagCounts>,
@@ -62,7 +61,7 @@ impl<'a> AttributeContext<'a> {
 
     /// The read has `tag` too.
     #[must_use]
-    pub fn tag(mut self, tag: impl Into<Id<Tag>>) -> Self {
+    pub fn tag(mut self, tag: impl Into<TagKey>) -> Self {
         self.more_tags.insert(tag.into());
         self
     }
@@ -76,7 +75,7 @@ impl<'a> AttributeContext<'a> {
 
     /// The target owns `tag` too.
     #[must_use]
-    pub fn target_tag(mut self, tag: impl Into<Id<Tag>>) -> Self {
+    pub fn target_tag(mut self, tag: impl Into<TagKey>) -> Self {
         self.more_target.insert(tag.into());
         self
     }
@@ -84,7 +83,7 @@ impl<'a> AttributeContext<'a> {
     /// `fact` (a tag: `fact.flown`) is `value` for this read. Supplying one
     /// again replaces it.
     #[must_use]
-    pub fn fact(mut self, fact: impl Into<Id<Tag>>, value: f32) -> Self {
+    pub fn fact(mut self, fact: impl Into<TagKey>, value: f32) -> Self {
         let fact = fact.into();
         match self.facts.iter_mut().find(|(known, _)| *known == fact) {
             Some((_, known)) => *known = value,
@@ -109,7 +108,7 @@ impl<'a> AttributeContext<'a> {
 
     /// The source owns `tag` too.
     #[must_use]
-    pub fn source_tag(mut self, tag: impl Into<Id<Tag>>) -> Self {
+    pub fn source_tag(mut self, tag: impl Into<TagKey>) -> Self {
         self.more_source.insert(tag.into());
         self
     }
@@ -136,32 +135,32 @@ pub(crate) struct Read<'q, 'a> {
 }
 
 impl Context for Read<'_, '_> {
-    fn tag(&self, tag: &Id<Tag>) -> bool {
+    fn tag(&self, tag: TagKey) -> bool {
         self.context.tags.is_some_and(|tags| tags.contains(tag))
             || self.context.more_tags.contains(tag)
     }
 
-    fn has(&self, tag: &Id<Tag>) -> bool {
+    fn has(&self, tag: TagKey) -> bool {
         self.owned.contains(tag)
     }
 
-    fn target(&self, tag: &Id<Tag>) -> bool {
+    fn target(&self, tag: TagKey) -> bool {
         self.context.target.is_some_and(|owned| owned.contains(tag))
             || self.context.more_target.contains(tag)
     }
 
-    fn source(&self, tag: &Id<Tag>) -> bool {
+    fn source(&self, tag: TagKey) -> bool {
         self.context
             .source_owned
             .is_some_and(|owned| owned.contains(tag))
             || self.context.more_source.contains(tag)
     }
 
-    fn fact(&self, fact: &Id<Tag>) -> Option<f32> {
+    fn fact(&self, fact: TagKey) -> Option<f32> {
         self.context
             .facts
             .iter()
-            .find(|(known, _)| known == fact)
+            .find(|(known, _)| *known == fact)
             .map(|(_, value)| *value)
     }
 }

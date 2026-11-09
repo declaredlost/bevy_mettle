@@ -1,43 +1,56 @@
-//! Abilities as data, and what effects grant.
+//! Abilities as data: what runs them, what they cost, and what effects grant.
+
+mod def;
 
 use bevy_mettle_core::condition::Condition;
-use bevy_mettle_core::tag::{Tag, Tags};
-use bevy_mettle_core::{Id, IdTarget};
-use bevy_mettle_effect::data::Effect;
+use bevy_mettle_core::registry::{Kind, Name};
+use bevy_mettle_core::tag::{TagKey, Tags};
+use bevy_mettle_effect::data::AnyEffect;
 use serde::{Deserialize, Serialize};
 
+pub use self::def::AbilityDef;
 use crate::behaviour::AnyBehaviour;
+
+/// The ability kind: what content names, and an [`AbilityId`](crate::AbilityId)
+/// numbers.
+///
+/// An ability's name in content is a `Name<AnyAbility>`, until it's resolved
+/// to an [`AbilityId`](crate::AbilityId).
+#[derive(Kind)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AnyAbility {}
 
 /// An ability, as data: what runs it, what it costs, and what activates it.
 ///
-/// Unreal's `GameplayAbility`, its properties. Named by an `Id<Ability>`, its
-/// `id`.
+/// Unreal's `GameplayAbility`, its properties. Named by an `Name<AnyAbility>`,
+/// its `id`.
 ///
-/// ```ron
-/// (
-///     id: "fireball",
-///     tags: ["ability.spell.fire"],
-///     behaviour: "projectile_cast",
-///     cost: "fireball.cost",
-///     cooldown: "fireball.cooldown",
-///     require: Not(OwnerHas("state.silenced")),
-///     blocked_by: ["state.stunned"],
-///     cancels: ["ability.channel"],
-///     blocks: ["ability.spell"],
-///     grants: ["state.casting"],
-/// )
+/// Written by a game's content, in whatever format it loads with serde, or
+/// built in code:
+///
 /// ```
-#[derive(IdTarget)]
+/// # use bevy_mettle_ability::prelude::*;
+/// # use bevy_mettle_core::prelude::*;
+/// let fireball = AbilityData::new("fireball", "projectile_cast")
+///     .tag("ability.spell.fire")
+///     .cost("fireball.cost")
+///     .cooldown("fireball.cooldown")
+///     .require(!Condition::owner_has("state.silenced"))
+///     .blocked_by("state.stunned")
+///     .cancels("ability.channel")
+///     .blocks("ability.spell")
+///     .grant("state.casting");
+/// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Ability {
-    /// Its id.
-    pub id: Id<Ability>,
+pub struct AbilityData {
+    /// Its name.
+    pub name: Name<AnyAbility>,
     /// What it is: what blocking, cancelling and activating by tag match on.
     #[serde(default, skip_serializing_if = "Tags::is_empty")]
     pub tags: Tags,
     /// The behaviour that runs it, registered in code.
-    pub behaviour: Id<AnyBehaviour>,
+    pub behaviour: Name<AnyBehaviour>,
     /// An instant effect it costs, applied to its owner as it commits: it can't
     /// activate if paying would take an attribute below 0.
     #[serde(
@@ -45,7 +58,7 @@ pub struct Ability {
         with = "bevy_mettle_core::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub cost: Option<Id<Effect>>,
+    pub cost: Option<Name<AnyEffect>>,
     /// A lasting effect applied to its owner as it commits: it can't activate
     /// while its owner owns what that effect grants.
     #[serde(
@@ -53,7 +66,7 @@ pub struct Ability {
         with = "bevy_mettle_core::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub cooldown: Option<Id<Effect>>,
+    pub cooldown: Option<Name<AnyEffect>>,
     /// What has to hold for it to activate: weighed in its own tags
     /// (`ReadTagged`) and its owner's (`OwnerHas`).
     #[serde(
@@ -93,20 +106,20 @@ pub struct Ability {
     pub commit: Commit,
 }
 
-/// What activates an ability besides being asked to.
+/// What activates an ability besides being asked to: an event, or a tag owned.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Trigger {
     /// A gameplay event sent to its owner with this tag, or one under it:
     /// activated with the event.
-    Event(Id<Tag>),
+    Event(TagKey),
     /// Its owner coming to own this tag.
-    TagAdded(Id<Tag>),
+    TagAdded(TagKey),
     /// Its owner owning this tag: activated as it comes to, cancelled as it no
     /// longer does.
-    TagPresent(Id<Tag>),
+    TagPresent(TagKey),
 }
 
-/// When an ability's cost and cooldown are applied.
+/// When an ability's cost and cooldown are applied: as it activates, or later.
 #[derive(
     Debug,
     Clone,
@@ -127,13 +140,13 @@ pub enum Commit {
     Manual,
 }
 
-impl Ability {
+impl AbilityData {
     /// An ability called `id`, run by `behaviour`, costing nothing yet: for
     /// abilities defined in code.
     #[must_use]
-    pub fn new(id: impl Into<Id<Ability>>, behaviour: impl Into<Id<AnyBehaviour>>) -> Self {
+    pub fn new(id: impl Into<Name<AnyAbility>>, behaviour: impl Into<Name<AnyBehaviour>>) -> Self {
         Self {
-            id: id.into(),
+            name: id.into(),
             tags: Tags::new(),
             behaviour: behaviour.into(),
             cost: None,
@@ -152,21 +165,21 @@ impl Ability {
 
     /// Labelled `tag` too.
     #[must_use]
-    pub fn tag(mut self, tag: impl Into<Id<Tag>>) -> Self {
+    pub fn tag(mut self, tag: impl Into<TagKey>) -> Self {
         self.tags.insert(tag.into());
         self
     }
 
     /// Costing `effect`.
     #[must_use]
-    pub fn cost(mut self, effect: impl Into<Id<Effect>>) -> Self {
+    pub fn cost(mut self, effect: impl Into<Name<AnyEffect>>) -> Self {
         self.cost = Some(effect.into());
         self
     }
 
     /// Cooling down by `effect`.
     #[must_use]
-    pub fn cooldown(mut self, effect: impl Into<Id<Effect>>) -> Self {
+    pub fn cooldown(mut self, effect: impl Into<Name<AnyEffect>>) -> Self {
         self.cooldown = Some(effect.into());
         self
     }
@@ -188,35 +201,35 @@ impl Ability {
 
     /// Kept from activating while its owner owns `tag`.
     #[must_use]
-    pub fn blocked_by(mut self, tag: impl Into<Id<Tag>>) -> Self {
+    pub fn blocked_by(mut self, tag: impl Into<TagKey>) -> Self {
         self.blocked_by.insert(tag.into());
         self
     }
 
     /// Cancelling active abilities tagged `tag` as it activates.
     #[must_use]
-    pub fn cancels(mut self, tag: impl Into<Id<Tag>>) -> Self {
+    pub fn cancels(mut self, tag: impl Into<TagKey>) -> Self {
         self.cancels.insert(tag.into());
         self
     }
 
     /// Keeping abilities tagged `tag` from activating while it's active.
     #[must_use]
-    pub fn blocks(mut self, tag: impl Into<Id<Tag>>) -> Self {
+    pub fn blocks(mut self, tag: impl Into<TagKey>) -> Self {
         self.blocks.insert(tag.into());
         self
     }
 
     /// Holding the cue `tag` on its owner while it's active.
     #[must_use]
-    pub fn cue(mut self, tag: impl Into<Id<Tag>>) -> Self {
+    pub fn cue(mut self, tag: impl Into<TagKey>) -> Self {
         self.cues.insert(tag.into());
         self
     }
 
     /// Granting its owner `tag` while it's active.
     #[must_use]
-    pub fn grant(mut self, tag: impl Into<Id<Tag>>) -> Self {
+    pub fn grant(mut self, tag: impl Into<TagKey>) -> Self {
         self.grants.insert(tag.into());
         self
     }
@@ -242,23 +255,24 @@ impl Ability {
 /// (an effect knows nothing of abilities). Equipping a staff applies its
 /// effect, which grants its skills; taking it off takes them away.
 ///
-/// ```ron
-/// [(effect: "staff", abilities: ["channel"])]
+/// ```
+/// # use bevy_mettle_ability::prelude::*;
+/// let staff = Grant::new("staff", ["channel"]);
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Grant {
     /// The effect: a lasting one.
-    pub effect: Id<Effect>,
+    pub effect: Name<AnyEffect>,
     /// The abilities its target is granted while it lasts.
-    pub abilities: Vec<Id<Ability>>,
+    pub abilities: Vec<Name<AnyAbility>>,
 }
 
 impl Grant {
     /// `effect` granting `abilities`.
     #[must_use]
-    pub fn new<A: Into<Id<Ability>>>(
-        effect: impl Into<Id<Effect>>,
+    pub fn new<A: Into<Name<AnyAbility>>>(
+        effect: impl Into<Name<AnyEffect>>,
         abilities: impl IntoIterator<Item = A>,
     ) -> Self {
         Self {

@@ -1,10 +1,9 @@
 //! Gameplay events, and what's told as abilities activate and end.
 
 use bevy::prelude::*;
-use bevy_mettle_core::Id;
-use bevy_mettle_core::tag::Tag;
+use bevy_mettle_core::tag::TagKey;
 
-use crate::data::Ability;
+use crate::AbilityId;
 
 /// A gameplay event sent to an actor: a tag, and who and how much.
 ///
@@ -16,7 +15,7 @@ pub struct GameplayEvent {
     /// The actor it's sent to.
     pub entity: Entity,
     /// What it is: `event.hit.parried`.
-    pub tag: Id<Tag>,
+    pub tag: TagKey,
     /// Who caused it.
     pub instigator: Option<Entity>,
     /// Who it's about.
@@ -28,7 +27,7 @@ pub struct GameplayEvent {
 impl GameplayEvent {
     /// `tag`, sent to `entity`, by no one, of nothing.
     #[must_use]
-    pub fn new(entity: Entity, tag: impl Into<Id<Tag>>) -> Self {
+    pub fn new(entity: Entity, tag: impl Into<TagKey>) -> Self {
         Self {
             entity,
             tag: tag.into(),
@@ -47,23 +46,23 @@ pub struct AbilityActivated {
     /// The granted ability.
     pub ability: Entity,
     /// Which ability.
-    pub id: Id<Ability>,
+    pub id: AbilityId,
     /// The activation.
     pub activation: u64,
 }
 
-/// An ability that didn't activate for an actor.
+/// Triggered on an actor as an ability it was asked for didn't activate.
 #[derive(EntityEvent, Debug, Clone, PartialEq, Eq)]
 pub struct AbilityFailed {
     /// The actor.
     pub entity: Entity,
     /// Which ability.
-    pub id: Id<Ability>,
+    pub id: AbilityId,
     /// Why.
     pub reason: Failure,
 }
 
-/// Why an ability didn't activate, or couldn't commit.
+/// Why an ability didn't activate, or couldn't commit: its cost, a cooldown.
 #[derive(
     Debug,
     Clone,
@@ -102,7 +101,7 @@ pub struct AbilityEnded {
     /// The granted ability.
     pub ability: Entity,
     /// Which ability.
-    pub id: Id<Ability>,
+    pub id: AbilityId,
     /// Whether it was cancelled.
     pub cancelled: bool,
 }

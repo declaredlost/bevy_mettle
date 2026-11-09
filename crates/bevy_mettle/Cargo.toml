@@ -53,12 +53,20 @@ serde = { workspace = true, features = ["derive"] }
 # Testing the plugin in a real app
 bevy_harness = { workspace = true, features = [] }
 
-# Definitions as a game would write them
-ron = { workspace = true, features = [] }
+# Checking what data reads and writes, whatever its format
+serde_test = { workspace = true, features = [] }
 
 # A server and a client, to add the plugins after lightyear's
 lightyear = { workspace = true, features = ["client", "server", "replication"] }
 bevy = { workspace = true, features = ["bevy_state"] }
+
+# Benchmarks
+criterion = { workspace = true, features = [] }
+
+[[bench]]
+name = "mettle"
+harness = false
+required-features = ["effect"]
 
 [lints]
 workspace = true

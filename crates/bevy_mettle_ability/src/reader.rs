@@ -6,8 +6,9 @@ use bevy::prelude::*;
 use crate::engine;
 use crate::events::Failure;
 
-/// Asks about granted abilities, with nothing done: whether one could
-/// activate, could pay, and how long its cooldown has left.
+/// Asks about granted abilities, with nothing done: could one activate or pay.
+///
+/// Whether one could activate, could pay, and how long its cooldown has left.
 ///
 /// For a UI greying out what can't be cast, a cooldown sweep, or an AI
 /// choosing what to cast. It reads the whole world, so it doesn't run

@@ -1,8 +1,8 @@
 //! Checking an expression against the tag tree.
 
 use super::Condition;
-use crate::MettleError;
-use crate::tag::TagTree;
+use crate::error::Error;
+use crate::tag::{TagKey, TagRegistry};
 
 impl Condition {
     /// Checks every tag in it is defined in `tags`, and its numbers can be:
@@ -11,7 +11,7 @@ impl Condition {
     /// # Errors
     ///
     /// The first tag that isn't defined, or number that can't be.
-    pub fn check(&self, tags: &TagTree, within: Option<&str>) -> Result<(), MettleError> {
+    pub fn check(&self, tags: &TagRegistry, within: Option<&str>) -> Result<(), Error> {
         self.walk(Some(tags), within)
     }
 
@@ -21,17 +21,17 @@ impl Condition {
     /// # Errors
     ///
     /// The first number that can't be.
-    pub fn check_values(&self, within: Option<&str>) -> Result<(), MettleError> {
+    pub fn check_values(&self, within: Option<&str>) -> Result<(), Error> {
         self.walk(None, within)
     }
 
     /// Checks its numbers, and its tags against `tags` if they're given.
-    fn walk(&self, tags: Option<&TagTree>, within: Option<&str>) -> Result<(), MettleError> {
-        let invalid = |what: String| MettleError::Invalid {
+    fn walk(&self, tags: Option<&TagRegistry>, within: Option<&str>) -> Result<(), Error> {
+        let invalid = |what: String| Error::Invalid {
             what,
             within: within.map(ToOwned::to_owned),
         };
-        let known = |tag| tags.map_or(Ok(()), |tags| tags.known(tag, within));
+        let known = |tag: &TagKey| tags.map_or(Ok(()), |tags| tags.known(*tag, within));
         match self {
             Self::All(terms) | Self::Any(terms) => {
                 terms.iter().try_for_each(|term| term.walk(tags, within))

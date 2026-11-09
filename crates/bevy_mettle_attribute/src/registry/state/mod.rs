@@ -2,23 +2,22 @@
 //! folded, and current values worked out.
 
 mod fold;
+mod slots;
 mod sum;
 mod systems;
 
-use std::collections::HashMap;
-
 use bevy::prelude::*;
-use bevy_mettle_core::Id;
 use bevy_mettle_core::tag::{OwnedTags, TagCounts};
 
 pub(crate) use self::fold::{Dirty, collect, fold};
+pub(crate) use self::slots::Slots;
 pub use self::sum::Breakdown;
 pub(crate) use self::sum::divisor;
 use self::sum::{Counts, Scoped, Sum};
 pub(crate) use self::systems::{follow_limits, publish, refresh, remove_base, rework, sync_base};
 use crate::modifier::Modifier;
 use crate::read::AttributeContext;
-use crate::registry::{AnyAttribute, AttributeRegistry, Limit};
+use crate::registry::{AttributeId, AttributeRegistry, Bound};
 
 /// How many whole `every` there are in `of`: none for less than one, floored a
 /// little above, against float error.
@@ -32,26 +31,26 @@ pub(crate) fn times_per(of: f32, every: f32) -> f32 {
 struct Walk {
     /// The attributes being worked out: one reading one of these again is a
     /// cycle, cut there.
-    visiting: Vec<Id<AnyAttribute>>,
+    visiting: Vec<AttributeId>,
     /// Values worked out with no cycle cut beneath them: the same, whatever
     /// reads them, so worked out once.
-    memo: HashMap<Id<AnyAttribute>, f32>,
+    memo: Slots<f32>,
     /// Whether a cycle was cut beneath the value being worked out.
     cut: bool,
 }
 
 impl Walk {
     /// A walk starting at `attribute`.
-    fn from(attribute: &Id<AnyAttribute>) -> Self {
+    fn from(attribute: AttributeId) -> Self {
         Self {
-            visiting: vec![attribute.clone()],
+            visiting: vec![attribute],
             ..Self::default()
         }
     }
 
     /// Whether reading `attribute` would be a cycle: if so, noted as cut.
-    fn cuts(&mut self, attribute: &Id<AnyAttribute>) -> bool {
-        let cycle = self.visiting.contains(attribute);
+    fn cuts(&mut self, attribute: AttributeId) -> bool {
+        let cycle = self.visiting.contains(&attribute);
         self.cut |= cycle;
         cycle
     }
@@ -85,16 +84,16 @@ struct Folded {
 #[reflect(Component, Default)]
 #[require(OwnedTags)]
 pub struct AttributeState {
-    bases: HashMap<Id<AnyAttribute>, f32>,
+    bases: Slots<f32>,
     #[reflect(ignore)]
-    folded: HashMap<Id<AnyAttribute>, Folded>,
-    current: HashMap<Id<AnyAttribute>, f32>,
+    folded: Slots<Folded>,
+    current: Slots<f32>,
     /// Each value with nothing in play as worked out the time before: what a
     /// limit moved from.
     #[reflect(ignore)]
-    previous: HashMap<Id<AnyAttribute>, f32>,
+    previous: Slots<f32>,
     /// The values served by the authority, as synced from `Served`.
-    served: HashMap<Id<AnyAttribute>, f32>,
+    served: Slots<f32>,
     /// Whether the authority is another world: its values are served.
     remote: bool,
     /// Whether a prediction counts for it: its values are its own.
@@ -105,12 +104,12 @@ pub struct AttributeState {
 impl AttributeState {
     /// Whether the actor has `attribute`: its `Base`.
     #[must_use]
-    pub(crate) fn has(&self, attribute: &Id<AnyAttribute>) -> bool {
-        self.bases.contains_key(attribute)
+    pub(crate) fn has(&self, attribute: AttributeId) -> bool {
+        self.bases.contains(attribute)
     }
 
     /// Sets `attribute`'s value as served: synced from its `Served`.
-    pub(crate) fn set_served(&mut self, attribute: Id<AnyAttribute>, value: f32) {
+    pub(crate) fn set_served(&mut self, attribute: AttributeId, value: f32) {
         self.served.insert(attribute, value);
         self.stale = true;
     }
@@ -123,26 +122,26 @@ impl AttributeState {
 
     /// `attribute`'s value with nothing in play as served, if it's shown so:
     /// the actor's remote, and no prediction counts for it.
-    fn shown_served(&self, attribute: &Id<AnyAttribute>) -> Option<f32> {
+    fn shown_served(&self, attribute: AttributeId) -> Option<f32> {
         (self.remote && !self.provisional)
             .then(|| self.served.get(attribute).copied())
             .flatten()
     }
 
     /// `attribute`'s base as cached, if it's there.
-    pub(crate) fn cached_base(&self, attribute: &Id<AnyAttribute>) -> Option<f32> {
+    pub(crate) fn cached_base(&self, attribute: AttributeId) -> Option<f32> {
         self.bases.get(attribute).copied()
     }
 
     /// Sets `attribute`'s base: synced from its `Base`, or as an effect changes
     /// it.
-    pub(crate) fn set_base(&mut self, attribute: Id<AnyAttribute>, value: f32) {
+    pub(crate) fn set_base(&mut self, attribute: AttributeId, value: f32) {
         self.bases.insert(attribute, value);
         self.stale = true;
     }
 
     /// Forgets `attribute`: its `Base` was taken off.
-    pub(crate) fn remove(&mut self, attribute: &Id<AnyAttribute>) {
+    pub(crate) fn remove(&mut self, attribute: AttributeId) {
         self.bases.remove(attribute);
         self.current.remove(attribute);
         self.stale = true;
@@ -166,17 +165,14 @@ impl AttributeState {
                 warn!("a modifier from {source} is skipped: {error}");
                 continue;
             }
-            let folded = self.folded.entry(modifier.attribute.clone()).or_default();
+            let folded = self.folded.or_default(modifier.attribute);
             if modifier.always() {
                 folded.sum.add(modifier.op, modifier.value, order);
             } else {
                 folded.scoped.push(Scoped {
                     op: modifier.op,
                     value: modifier.value,
-                    per: modifier
-                        .per
-                        .as_ref()
-                        .map(|per| (per.attribute.clone(), per.every)),
+                    per: modifier.per.as_ref().map(|per| (per.attribute, per.every)),
                     counts: Counts::of(modifier, source),
                     order,
                 });
@@ -192,7 +188,7 @@ impl AttributeState {
         &self,
         registry: &AttributeRegistry,
         owned: &OwnedTags,
-        attribute: &Id<AnyAttribute>,
+        attribute: AttributeId,
         context: &AttributeContext,
     ) -> f32 {
         if context.is_empty()
@@ -222,7 +218,7 @@ impl AttributeState {
         &self,
         registry: &AttributeRegistry,
         owned: &OwnedTags,
-        attribute: &Id<AnyAttribute>,
+        attribute: AttributeId,
         context: &AttributeContext,
     ) -> Breakdown {
         self.sum(
@@ -239,14 +235,14 @@ impl AttributeState {
     pub(crate) fn refresh(&mut self, registry: &AttributeRegistry, owned: &TagCounts) -> bool {
         let context = AttributeContext::new();
         let mut walk = Walk::default();
-        let current: HashMap<Id<AnyAttribute>, f32> = self
+        let current: Slots<f32> = self
             .bases
             .keys()
             .map(|attribute| {
                 let value = self
                     .shown_served(attribute)
                     .unwrap_or_else(|| self.eval(registry, owned, attribute, &context, &mut walk));
-                (attribute.clone(), value)
+                (attribute, value)
             })
             .collect();
         let changed = current != self.current;
@@ -257,7 +253,7 @@ impl AttributeState {
 
     /// What `attribute`'s value with nothing in play moved from and to, the
     /// last time values were worked out, if it moved.
-    pub(crate) fn moved(&self, attribute: &Id<AnyAttribute>) -> Option<(f32, f32)> {
+    pub(crate) fn moved(&self, attribute: AttributeId) -> Option<(f32, f32)> {
         let was = *self.previous.get(attribute)?;
         let is = *self.current.get(attribute)?;
         (was.to_bits() != is.to_bits()).then_some((was, is))
@@ -275,7 +271,7 @@ impl AttributeState {
     }
 
     /// `attribute`'s value with nothing in play, as last worked out.
-    pub(crate) fn current(&self, attribute: &Id<AnyAttribute>) -> Option<f32> {
+    pub(crate) fn current(&self, attribute: AttributeId) -> Option<f32> {
         self.current.get(attribute).copied()
     }
 
@@ -285,7 +281,7 @@ impl AttributeState {
         &self,
         registry: &AttributeRegistry,
         owned: &TagCounts,
-        attribute: &Id<AnyAttribute>,
+        attribute: AttributeId,
         value: f32,
     ) -> f32 {
         let context = AttributeContext::new();
@@ -305,7 +301,7 @@ impl AttributeState {
         &self,
         registry: &AttributeRegistry,
         owned: &TagCounts,
-        attribute: &Id<AnyAttribute>,
+        attribute: AttributeId,
         value: f32,
         context: &AttributeContext,
         walk: &mut Walk,
@@ -326,7 +322,7 @@ impl AttributeState {
     }
 
     /// `attribute`'s base: as synced, or where it starts.
-    fn base(&self, registry: &AttributeRegistry, attribute: &Id<AnyAttribute>) -> f32 {
+    fn base(&self, registry: &AttributeRegistry, attribute: AttributeId) -> f32 {
         self.bases
             .get(attribute)
             .copied()
@@ -339,7 +335,7 @@ impl AttributeState {
         &self,
         registry: &AttributeRegistry,
         owned: &TagCounts,
-        attribute: &Id<AnyAttribute>,
+        attribute: AttributeId,
         context: &AttributeContext,
         walk: &mut Walk,
     ) -> Breakdown {
@@ -356,10 +352,10 @@ impl AttributeState {
             let times = match &scoped.per {
                 None => 1.0,
                 Some((per, every)) => {
-                    if walk.cuts(per) {
+                    if walk.cuts(*per) {
                         continue;
                     }
-                    let of = self.eval(registry, owned, per, context, walk);
+                    let of = self.eval(registry, owned, *per, context, walk);
                     times_per(of, *every)
                 }
             };
@@ -374,17 +370,17 @@ impl AttributeState {
         &self,
         registry: &AttributeRegistry,
         owned: &TagCounts,
-        limit: Option<&Limit>,
+        limit: Option<&Bound>,
         context: &AttributeContext,
         walk: &mut Walk,
     ) -> Option<f32> {
         match limit? {
-            Limit::Value(value) => Some(*value),
-            Limit::Attribute(other) => {
-                if walk.cuts(other) {
+            Bound::Value(value) => Some(*value),
+            Bound::Attribute(other) => {
+                if walk.cuts(*other) {
                     None
                 } else {
-                    Some(self.eval(registry, owned, other, context, walk))
+                    Some(self.eval(registry, owned, *other, context, walk))
                 }
             }
         }
@@ -395,7 +391,7 @@ impl AttributeState {
         &self,
         registry: &AttributeRegistry,
         owned: &TagCounts,
-        attribute: &Id<AnyAttribute>,
+        attribute: AttributeId,
         context: &AttributeContext,
         walk: &mut Walk,
     ) -> f32 {
@@ -403,12 +399,12 @@ impl AttributeState {
             return *value;
         }
         let outer = std::mem::replace(&mut walk.cut, false);
-        walk.visiting.push(attribute.clone());
+        walk.visiting.push(attribute);
         let total = self.sum(registry, owned, attribute, context, walk).total();
         let value = self.kept(registry, owned, attribute, total, context, walk);
         walk.visiting.pop();
         if !walk.cut {
-            walk.memo.insert(attribute.clone(), value);
+            walk.memo.insert(attribute, value);
         }
         walk.cut |= outer;
         value

@@ -34,10 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MettleContentPlugin`, in `MettlePlugins`. `ContentLoaded` and
   `ContentRejected` (with every error) are triggered; rejected content leaves
   the content before in place. `MettleContent::check` answers at once.
-- `add_execution` and `add_calculation` (`EffectCodeApp`): effect code
-  registered on the app, as behaviours are; `EffectCode` is a resource.
-- `TagTree` and `CurveTable` are resources: those the content was checked
-  against.
+- `add_execution`, `add_calculation` and `add_route` (`EffectApp`): effect
+  code added to the app, as behaviours are, into `ExecutionRegistry`,
+  `CalculationRegistry` and `RouteRegistry`.
+- `TagRegistry` and `CurveRegistry` are resources: those the content was
+  checked against.
 - Ability input: what a player chose (an aim, a target), a component of
   yours a behaviour takes (`#[behaviour(input = Aim)]`), given with
   `activate_ability_with::<B>` or, while it runs, `set_input::<B>`, typed by
@@ -66,22 +67,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Asking without doing: `can_activate`, `can_afford` and
   `cooldown_remaining`, on `AbilityWorld` and the new `AbilityReader` system
   parameter.
-- Meta attributes: `#[derive(MetaAttribute)]`, an amount effects deal that
-  no actor has (incoming damage), added with its router,
-  `add_meta_attribute::<M>(router)`, which routes all an execution dealt it
-  into attributes actors have. Single-pass, the same on a server and a
-  predicting client, and seen by previews and ability costs. Dealt flat, by
-  effects that execute, with `EffectModifier::meta` or `BaseChange::meta`;
-  never read, held or replicated.
+- Routes: `#[derive(Route)]`, an amount effects deal that no actor holds
+  (incoming damage), added with its router, `add_route::<R>(router)`, which
+  routes all an execution dealt it into attributes actors have.
+  Single-pass, the same on a server and a predicting client, and seen by
+  previews and ability costs. Dealt flat, by effects that execute: in data
+  `(route: "incoming_damage", value: ..)`, in code `EffectModifier::route`
+  or `BaseChange::route`; never read, held or replicated.
 - `BaseChange::on_source()`: a change to the source's base, life stolen
   back; `Whose` says whose.
 - `EffectExecuted` says what came of it: `source`, `changes` to the
   target's bases after routing and limits, `source_changes` to its
-  source's, and what each meta attribute was dealt (`routed`).
+  source's, and what each route was dealt (`routed`).
 - `on_limit = Clamp | Ratio` on an attribute: its base follows a limit
   that's another attribute as it moves, the same frame, on the world that
   decides attributes. `Clamp`, the default, keeps it within its limits;
   `Ratio` keeps its fraction of its maximum.
+- Benchmarks of mettle's hot paths (`cargo bench -p bevy_mettle`):
+  attributes kept and read, tags and conditions, effects applied, routed
+  and ticked, for 1000 actors.
 - Cues (`bevy_mettle_effect::cue`): what's shown of effects and abilities.
   Lasting cues held while an effect counts or an ability is active (`cues`
   in their data), or by `add_cue`, each an entity (`ActiveCue`, `CueOf`);
@@ -95,6 +99,130 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Numbers, as Bevy's `ComponentId`: attributes, behaviours, routes,
+  executions and calculations each get a number as they're added
+  (`AttributeId`, `BehaviourId`, `RouteId`, `ExecutionId`,
+  `CalculationId`, each a `Key` of its kind), and everything that runs
+  knows them by it: actors' state, modifiers, changes, events and the
+  network. Names stay for data, debug output and what a client shows.
+  - Typed code finds them: `world.attribute_id::<A>()`,
+    `AttributeRegistry::id_of::<A>()`, `BehaviourRegistry::id_of::<B>()`,
+    `EffectContext::attribute_id` and `route_id`; typed reads
+    (`value::<A>()`) do it themselves. `Attribute::ID` and `Behaviour::ID`
+    are gone.
+  - `Modifier`, `Per` and `BaseChange` name attributes by number. Code
+    writes modifiers by type, as `ModifierSpec`s, and puts them on with
+    `modifiers(..)` on `EntityCommands` or `EntityWorldMut`, which resolves
+    them as Bevy resolves a component's type on insert; with a number in
+    hand, `Modifier::flat(power, 5.0)`. `Modifier` is no longer written in
+    data; an item's stats are an infinite effect.
+  - Checking content compiles it: `EffectRegistry` holds `EffectDef`s and
+    `AbilityRegistry` `AbilityDef`s, what their data names resolved to
+    numbers. Active effects and granted abilities run by them.
+  - Attribute limits name their attribute by type (`Limit::attribute`),
+    resolved once both are added (`Bound`).
+  - Attribute state is kept densely, by number, not hashed by name.
+- Gameplay tags are typed and interned. `Id<Tag>` and the `Tag` struct are
+  gone.
+  - Code names a tag by type: `#[derive(Tag)] #[tag(parent = State)] struct
+    Stunned;` is `state.stunned`, so a misspelled tag doesn't compile. The
+    `Tag` trait has the tag's `SEGMENT`, its `Parent` (`Root` at the top)
+    and its `key()`; a loop of parents panics, naming both, on first use.
+  - `TagKey` is a tag interned process-wide, as Bevy interns labels: a
+    `Copy` number with its name and parent. A tag type and its name give
+    the same key. Wherever mettle takes a tag, it takes `impl Into<TagKey>`:
+    a tag type or a name.
+  - `TagCounts`, and so `OwnedTags`, count densely by key: asking is an
+    index.
+  - `TagApp::add_tag::<T>()` adds a tag code names, with those above it, to
+    the `TagRegistry` content is checked against.
+  - Content lists its tags as names. Data still reads and writes a tag as
+    its name.
+- Code names effects, abilities, executions and calculations by type, never
+  by string. Content keeps naming them by name.
+  - The data structs are `EffectData` and `AbilityData`. Content names are
+    typed by `Any*` markers, as routes, attributes and behaviours were:
+    `Name<AnyEffect>`, `Name<AnyAbility>`, `Name<AnyCurve>`,
+    `Name<AnyExecution>`, `Name<AnyCalculation>`. Content structs hold their
+    name in `name`, not `id`.
+  - `#[derive(Effect)] struct Burning;` is the effect content defines as
+    `burning`, added with `add_effect::<Burning>()`. The type is its spec:
+    `apply_effect(Burning)`, `apply_effect(Burning.level(3.0).param(..))`.
+    `EffectSpec` no longer holds a name: it's made from a type
+    (`EffectSpec::of`) or a number (`EffectSpec::from_id`), and resolved as
+    it's applied.
+  - `#[derive(Ability)] struct Fireball;`, added with
+    `add_ability::<Fireball>()`. Granting takes an `AbilitySpec`, Unreal's
+    ability spec, as applying takes an effect spec: `grant_ability(Fireball)`,
+    `grant_ability(Fireball.level(2.0))`, `AbilitySpec::from_id`.
+    `activate_ability(Fireball)` takes an `Ability` type or an `AbilityId`
+    (`IntoAbilityId`).
+  - `#[derive(Execution)]` and `#[derive(Calculation)]`, added with
+    `add_execution::<T>(f)` and `add_calculation::<T>(f)`, as routes are.
+  - Content without an effect or ability code adds fails its check
+    (`Error::NotInContent`), so a misspelled name is caught as content
+    loads.
+  - `EffectContext` has the effect's `def`.
+- Content is numbered, as Bevy numbers components: `EffectId`, `AbilityId`,
+  `CurveId` and `TagId`, by name, so the same content is numbered the same on
+  a server and its clients.
+  - Registries are kept by number; definitions, chains, grants, costs,
+    cooldowns, active effects and events hold numbers. Names stay for
+    content, debug output and what's shown.
+  - `EffectRegistry::recheck`, `AbilityRegistry::recheck`,
+    `CurveRegistry::rebuild` and `TagRegistry::rebuild` keep the numbers
+    what's there had: content reloaded doesn't renumber what holds a number.
+    Loading content does so.
+  - `Stacking<E>` is named in data and numbered once checked, as durations
+    and periods are.
+  - Everything sent is numbers: `EffectReplica` carries the effect, its
+    params and its source's tags by number; ability requests, replies and
+    replicas carry `AbilityId`s; `ServedCues` and `CueBursts` carry
+    `TagId`s. A cue whose tag isn't in the registry isn't replicated.
+  - Conditions and modifiers are generic over their tags: `Condition` is
+    `ConditionOver<TagKey>`, and `Modifier<T>` is `TagKey` by default; both
+    have `map_tags`, and go over the wire over `TagId`s.
+  - `ModifiersReplica`, opt in on a modifier source the game replicates,
+    carries its modifiers by `TagId` and the actor they count for, kept by a
+    server as either changes and as it's put on, and made into `Modifiers`
+    and `ModifierOf` by a client. The lightyear adapter replicates it;
+    `ModifierOf` itself isn't, so a client keeps its own on effects it shows.
+  - Every registry has a `fingerprint` of its names and their numbers. Over
+    lightyear, a server tells each client its `ContentFingerprint` as it
+    connects and as its content changes; a client numbering content
+    otherwise logs an error and triggers `ContentMismatch`.
+- Names and numbers are told apart, each typed by a `Kind`
+  (`#[derive(Kind)]`, an empty enum such as `AnyEffect`): `Id<T>` is
+  `Name<K>`, what content names something by, and `Key<K>` is its number.
+  `EffectId` is `Key<AnyEffect>`, and so on for every kind; `number!` and
+  `IdTarget` are gone.
+- Core is reached by its modules: names, keys and registries are all in
+  `registry` (`Name`, `Kind`, `Key`, `Registry`). Nothing else is
+  re-exported at its root but `Error` and `Errors`, which were
+  `MettleError` and `MettleErrors`, and aren't in its prelude.
+- Every registry is one shape, `Registry<K, T>` in core, as Bevy's
+  `Components` is: entries of kind `K` by number, numbers by name and by
+  type, and `get`, `id`, `id_of`, `name`, `iter` and `fingerprint` alike.
+  - Two types adding something by one name panic, naming both: data
+    couldn't tell them apart.
+  - `EffectRegistry::check` and `AbilityRegistry::check` make a registry
+    from nothing, for tools and tests; an app's content is `recheck`ed from
+    its own registry, which knows the types code names.
+  - `TagTree` is `TagRegistry`, `CurveTable` is `CurveRegistry` and
+    `Behaviours` is `BehaviourRegistry`; `EffectCode` is split into
+    `ExecutionRegistry`, `CalculationRegistry` and `RouteRegistry`.
+  - What code names by type is kept in the registry itself: `CodeTags` is
+    gone, and `EffectChecks` and `AbilityChecks` take no code.
+- RON is no longer used: content is serde types, loaded however a game
+  likes (a designed format is #9). Serde shapes are tested with
+  `serde_test`.
+- Tag keys read without a lock: a tag's name and parent are kept in an
+  append-only table, so lineage walks and `is_within` don't contend across
+  systems; only interning a new name locks. `TagRegistry::id` is an index by
+  key.
+- Every hash map mettle keeps uses Bevy's (`bevy::platform::collections`,
+  foldhash) rather than the standard one: attribute frames and effect ticks
+  take about half the time.
 - `CueChange` is `Delta`, shared with `EffectExecuted`.
 - `bevy_mettle_macros` has a file per derive.
 - `bevy_mettle_ability::net` is split by what goes over the wire:
@@ -121,7 +249,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MettleNetPlugin { replicas: Replicas::Everyone }` sends them to all.
 
 - Behaviours are `#[derive(Behaviour)]`, named as data names them, and added
-  with `add_behaviour::<B>()`; their ids are `Id<AnyBehaviour>`. They're in
+  with `add_behaviour::<B>()`; content names them by `Name<AnyBehaviour>`. They're in
   `bevy_mettle_ability::behaviour`, code apart from `data`, as effects'
   executions are in `effect::code`.
 - An ability whose behaviour takes input can't have triggers.
@@ -148,6 +276,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An effect chained by another (`on_apply`, `on_remove`, `on_expire`,
+  overflow) keeps a spec naming itself, not the effect that chained it.
+- An actor's attribute slots compare by what they hold: one taken off past
+  the last no longer counts as a change.
 - An ability committing as it activates pays before it starts: before
   what it cancels, grants or cues, and before its behaviour. One that can't
   pay by then fails with `Failure::Cost` with nothing started, rather than

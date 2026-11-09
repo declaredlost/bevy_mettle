@@ -1,22 +1,22 @@
-//! Asking the server to activate an ability, and its answer: predicted on the
-//! client, served on the server, resolved as it comes back.
+//! Asking the server to activate an ability: predicted, served, and resolved.
+//!
+//! The ask and its answer: predicted on the client, served on the server,
+//! resolved as it comes back.
 
 use std::any::TypeId;
-use std::collections::HashMap;
 
 use bevy::ecs::entity::{EntityMapper, MapEntities};
+use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
-use bevy_mettle_core::Id;
 use bevy_mettle_core::net::NetRole;
 use bevy_mettle_effect::EffectWorld;
 use serde::{Deserialize, Serialize};
 
 use super::{SERVERS, role, running};
 use crate::active::ActiveAbility;
-use crate::behaviour::{AnyBehaviour, Behaviour, NoInput};
-use crate::data::Ability;
-use crate::engine;
+use crate::behaviour::{Behaviour, BehaviourId, BehaviourRegistry, NoInput};
 use crate::events::{AbilityFailed, Failure};
+use crate::{AbilityId, engine};
 
 /// A client's ask that the server activate an ability it already predicts.
 ///
@@ -27,7 +27,7 @@ pub struct AbilityRequest {
     /// The actor.
     pub actor: Entity,
     /// The ability.
-    pub ability: Id<Ability>,
+    pub ability: AbilityId,
     /// The activation the client predicted it under: its own, the top bit
     /// clear (the server's own have it set).
     pub activation: u64,
@@ -39,15 +39,16 @@ impl MapEntities for AbilityRequest {
     }
 }
 
-/// A client's ask that the server activate an ability with its input, which
-/// it already predicts: an [`AbilityRequest`], and the input it activated it
-/// with.
+/// A client's ask that the server activate an ability with its input.
+///
+/// One it already predicts: an [`AbilityRequest`], and the input it activated
+/// it with.
 #[derive(Message, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AbilityRequestWith<I> {
     /// The actor.
     pub actor: Entity,
     /// The ability.
-    pub ability: Id<Ability>,
+    pub ability: AbilityId,
     /// The activation the client predicted it under.
     pub activation: u64,
     /// The input it activated it with.
@@ -67,7 +68,7 @@ pub struct AbilityReply {
     /// The actor.
     pub actor: Entity,
     /// The ability.
-    pub ability: Id<Ability>,
+    pub ability: AbilityId,
     /// The activation it answers.
     pub activation: u64,
     /// Why it didn't activate, if it didn't.
@@ -85,11 +86,7 @@ impl MapEntities for AbilityReply {
 pub(crate) struct Pending(HashMap<u64, Entity>);
 
 /// Activates `id` for `actor`: on a client, predicted, and asked of the server.
-pub(crate) fn predict(
-    world: &mut World,
-    actor: Entity,
-    id: &Id<Ability>,
-) -> Result<Entity, Failure> {
+pub(crate) fn predict(world: &mut World, actor: Entity, id: AbilityId) -> Result<Entity, Failure> {
     if role(world) != NetRole::Client {
         return engine::activate_id(world, actor, id, None);
     }
@@ -101,7 +98,7 @@ pub(crate) fn predict(
         .insert(activation, ability);
     world.write_message(AbilityRequest {
         actor,
-        ability: id.clone(),
+        ability: id,
         activation,
     });
     Ok(ability)
@@ -112,15 +109,22 @@ pub(crate) fn predict(
 pub(crate) fn predict_with<B: Behaviour>(
     world: &mut World,
     actor: Entity,
-    id: &Id<Ability>,
+    id: AbilityId,
     input: B::Input,
 ) -> Result<Entity, Failure> {
+    let Some(behaviour) = world
+        .get_resource::<BehaviourRegistry>()
+        .and_then(|behaviours| behaviours.id_of::<B>())
+    else {
+        warn!("`{}` isn't added: nothing it runs can activate", B::NAME);
+        return Err(Failure::Input);
+    };
     if TypeId::of::<B::Input>() == TypeId::of::<NoInput>() {
         // Nothing to give: as any activation, but still of `B`.
-        return predict_runs(world, actor, id, &B::ID);
+        return predict_runs(world, actor, id, behaviour);
     }
     if role(world) != NetRole::Client {
-        return engine::activate_id_with(world, actor, id, None, Some(&B::ID), Some(input));
+        return engine::activate_id_with(world, actor, id, None, Some(behaviour), Some(input));
     }
     let activation = engine::next_activation(world);
     let ability = engine::activate_id_with(
@@ -128,7 +132,7 @@ pub(crate) fn predict_with<B: Behaviour>(
         actor,
         id,
         Some(activation),
-        Some(&B::ID),
+        Some(behaviour),
         Some(input.clone()),
     )?;
     world
@@ -137,7 +141,7 @@ pub(crate) fn predict_with<B: Behaviour>(
         .insert(activation, ability);
     world.write_message(AbilityRequestWith {
         actor,
-        ability: id.clone(),
+        ability: id,
         activation,
         input,
     });
@@ -149,8 +153,8 @@ pub(crate) fn predict_with<B: Behaviour>(
 fn predict_runs(
     world: &mut World,
     actor: Entity,
-    id: &Id<Ability>,
-    behaviour: &Id<AnyBehaviour>,
+    id: AbilityId,
+    behaviour: BehaviourId,
 ) -> Result<Entity, Failure> {
     if role(world) != NetRole::Client {
         return engine::activate_id_with::<NoInput>(world, actor, id, None, Some(behaviour), None);
@@ -170,7 +174,7 @@ fn predict_runs(
         .insert(activation, ability);
     world.write_message(AbilityRequest {
         actor,
-        ability: id.clone(),
+        ability: id,
         activation,
     });
     Ok(ability)
@@ -181,7 +185,7 @@ fn predict_runs(
 pub(crate) fn reject(
     world: &mut World,
     actor: Entity,
-    ability: Id<Ability>,
+    ability: AbilityId,
     activation: u64,
     reason: Failure,
 ) {
@@ -205,13 +209,13 @@ pub(crate) fn serve(mut requests: MessageReader<AbilityRequest>, mut commands: C
                 engine::activate_id(
                     world,
                     request.actor,
-                    &request.ability,
+                    request.ability,
                     Some(request.activation),
                 )
                 .err()
             } else {
                 warn!(
-                    "a client asked to activate `{}` under the server's activation {}: rejected",
+                    "a client asked to activate {:?} under the server's activation {}: rejected",
                     request.ability, request.activation
                 );
                 Some(Failure::NotGranted)

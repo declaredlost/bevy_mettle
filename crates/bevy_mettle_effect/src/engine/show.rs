@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use bevy::prelude::*;
 use bevy_mettle_attribute::modifier::Provisional;
-use bevy_mettle_core::tag::{TagCounts, Tags};
+use bevy_mettle_core::tag::{TagRegistry, Tags};
 
 use super::apply::capture;
 use super::count::{activate, deactivate, refresh};
@@ -22,7 +22,7 @@ pub(crate) fn relink(world: &mut World, registry: &EffectRegistry, effect: Entit
     let Some(active) = world.get::<ActiveEffect>(effect) else {
         return;
     };
-    let Some(def) = registry.get(&active.def.id).cloned() else {
+    let Some(def) = registry.get(active.def.id).cloned() else {
         remove(world, effect, false, 0);
         return;
     };
@@ -40,6 +40,7 @@ pub(crate) fn relink(world: &mut World, registry: &EffectRegistry, effect: Entit
             let context = EffectContext {
                 world,
                 target: of.0,
+                def: &def,
                 spec: &active.spec,
                 stacks: 1,
             };
@@ -86,15 +87,16 @@ pub(crate) fn unstack(world: &mut World, registry: &EffectRegistry, effect: Enti
 pub(crate) fn show(
     world: &mut World,
     registry: &EffectRegistry,
+    tags: &TagRegistry,
     entity: Entity,
     target: Entity,
     replica: &EffectReplica,
 ) {
-    let Some(def) = registry.get(&replica.spec.effect).cloned() else {
-        warn!("there's no effect called `{}` to show", replica.spec.effect);
+    let Some(def) = registry.get(replica.effect).cloned() else {
+        warn!("there's no effect {:?} to show", replica.effect);
         return;
     };
-    if let Some(activation) = replica.spec.activation {
+    if let Some(activation) = replica.activation {
         let predicted: Vec<Entity> = effects_on(world, target)
             .into_iter()
             .filter(|other| {
@@ -102,7 +104,7 @@ pub(crate) fn show(
                     && world.get::<net::PredictedUnder>(*other)
                         == Some(&net::PredictedUnder(activation))
                     && world.get::<ActiveEffect>(*other).is_some_and(|active| {
-                        active.def.id == def.id && active.spec.source == replica.spec.source
+                        active.def.id == def.id && active.spec.source == replica.source
                     })
             })
             .collect();
@@ -112,7 +114,7 @@ pub(crate) fn show(
     }
     world.entity_mut(entity).insert((
         ActiveEffect {
-            spec: replica.spec.clone(),
+            spec: replica.spec(tags),
             def,
             stacks: replica.stacks,
             duration: replica.duration,
@@ -122,7 +124,7 @@ pub(crate) fn show(
             inhibited: true,
             granted: Tags::new(),
             cues: Tags::new(),
-            source_tags: counts(&replica.source_tags),
+            source_tags: replica.source_tags(tags),
             predicted: 0,
             captured: replica.captured.clone(),
             removing: false,
@@ -157,11 +159,4 @@ pub(crate) fn update_shown(
         _ if restack => refresh(world, registry, entity),
         _ => {}
     }
-}
-
-/// `tags` held once each.
-pub(super) fn counts(tags: &Tags) -> TagCounts {
-    let mut counts = TagCounts::default();
-    counts.add_all(tags);
-    counts
 }

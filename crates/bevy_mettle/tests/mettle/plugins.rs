@@ -7,23 +7,33 @@ use bevy_mettle::prelude::*;
 
 use crate::common::{Strength, attributes, close, mettle};
 
+/// The buff, as code names it.
+#[derive(Effect)]
+struct Buff;
+
 /// A buff to `Strength` for a few ticks.
-fn buff() -> Effect {
-    Effect::lasting("buff", 0.05).modifier(EffectModifier::new::<Strength>(Operation::Flat, 5.0))
+fn buff() -> EffectData {
+    EffectData::lasting("buff", 0.05)
+        .modifier(EffectModifier::new::<Strength>(Operation::Flat, 5.0))
 }
 
-/// An effect registry of `buff`, for `app`'s attributes.
+/// `app`'s effect registry, of `buff`: checked against what `app` has.
 fn registry(app: &App) -> EffectRegistry {
-    EffectRegistry::check(
-        &[buff()],
-        EffectChecks {
-            tags: &TagTree::build(&[]).unwrap(),
-            curves: &CurveTable::default(),
-            attributes: app.world().resource::<AttributeRegistry>(),
-            code: &EffectCode::new(),
-        },
-    )
-    .unwrap()
+    let world = app.world();
+    world
+        .resource::<EffectRegistry>()
+        .recheck(
+            &[buff()],
+            EffectChecks {
+                tags: &TagRegistry::default(),
+                curves: &CurveRegistry::default(),
+                attributes: world.resource(),
+                executions: world.resource(),
+                calculations: world.resource(),
+                routes: world.resource(),
+            },
+        )
+        .unwrap()
 }
 
 /// Each tick, after mettle: whether the actor's buffed, and its strength.
@@ -56,6 +66,7 @@ fn effects_tick_before_attributes_fold_in_a_shared_schedule() {
         .plugins(mettle().set(EffectPlugin::new(FixedPreUpdate)))
         .with(attributes)
         .with(|app| {
+            app.add_effect::<Buff>();
             let registry = registry(app);
             app.insert_resource(registry)
                 .init_resource::<Seen>()
@@ -64,7 +75,7 @@ fn effects_tick_before_attributes_fold_in_a_shared_schedule() {
         .build();
     let actor = app.spawn(Base::<Strength>::default());
     app.tick();
-    app.world_mut().apply_effect(actor, EffectSpec::new("buff"));
+    app.world_mut().apply_effect(actor, Buff);
     app.secs(0.2);
     let seen = &app.resource::<Seen>().0;
     assert!(seen.iter().any(|&(buffed, _)| buffed), "buffed for a while");

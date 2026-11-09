@@ -15,19 +15,24 @@ A cue is a gameplay tag, under a branch of your own such as `cue`:
 - A **one-shot** cue plays at a moment: an effect executing, a hit. Sparks,
   a damage number, a puff each time a burn ticks.
 
-Effects and abilities name the cues they play, in data:
+Effects and abilities name the cues they play, in their `cues`, by tag:
 
-```ron
-(id: "burning", duration: For(Value(4)), period: (every: Value(0.5)),
- modifiers: [(attribute: "life", op: Flat, value: Value(-3))],
- cues: ["cue.burning", "cue.hit.fire"])
+```rust
+# use bevy_mettle::prelude::*;
+# #[derive(Attribute)] #[attribute(base = 100.0, min = 0.0)] struct Life;
+let burning = EffectData::lasting("burning", 4.0)
+    .period(0.5, false)
+    .modifier(EffectModifier::new::<Life>(Operation::Flat, -3.0))
+    .cue("cue.burning")
+    .cue("cue.hit.fire");
+# assert_eq!(burning.cues.written().count(), 2);
 ```
 
 An effect holds its cues on its target while it counts, and plays them once
 each time it executes. So burning shows flames while it lasts, and a puff
 with each tick of damage. An ability holds its cues on its owner while it's
-active. Cue tags are checked as content is: one that isn't in the tree is an
-error.
+active. Cue tags are checked as content is: one that isn't in the tag
+registry is an error.
 
 ## Lasting cues are entities
 
@@ -41,7 +46,7 @@ the cue does:
 # use bevy_mettle::prelude::*;
 /// Flames on every burning actor, for as long as it burns.
 fn flames(added: On<Add<ActiveCue>>, cues: Query<&ActiveCue>, mut commands: Commands) {
-    if cues.get(added.entity).is_ok_and(|cue| cue.tag.as_str() == "cue.burning") {
+    if cues.get(added.entity).is_ok_and(|cue| cue.tag.name() == "cue.burning") {
         commands.entity(added.entity).insert(Name::new("flames"));
     }
 }
@@ -90,24 +95,29 @@ fn embers(In(event): In<CueEvent>, mut shown: Local<u32>) {
     }
 }
 
+#[derive(Effect)]
+#[effect(name = "fireball.hit")]
+struct FireballHit;
+
 let mut app = App::new();
 app.add_plugins((MinimalPlugins, MettlePlugins))
     .add_attribute::<Life>()
+    .add_effect::<FireballHit>()
     .add_cue_handler("cue.hit", spark)
     .add_cue_handler("cue.hit.fire", embers)
     .insert_resource(MettleContent {
         tags: ["cue", "cue.hit", "cue.hit.fire"]
             .into_iter()
-            .map(|id| Tag { id: Id::new(id) })
+            .map(TagKey::named)
             .collect(),
-        effects: vec![Effect::instant("fireball.hit")
+        effects: vec![EffectData::instant("fireball.hit")
             .modifier(EffectModifier::new::<Life>(Operation::Flat, -15.0))
             .cue("cue.hit.fire")],
         ..default()
     });
 app.update();
 let mage = app.world_mut().spawn(Base::<Life>::default()).id();
-app.world_mut().apply_effect(mage, EffectSpec::new("fireball.hit"));
+app.world_mut().apply_effect(mage, FireballHit);
 ```
 
 A cue runs the handler for its most specific tag, alone: a fire hit runs
@@ -141,14 +151,22 @@ own: a client can't send them.
 A server's cues reach the clients that see the actor, with the actor:
 
 - **Lasting cues**, the server's [`ServedCues`], are replicated: a handful
-  of tags, not the effects. A client shows them next to its own, so what it
+  of tags, each sent as its number, a `TagId`, in the [tag
+  registry](tags.md#the-tag-registry),
+  not the effects. A client shows them next to its own, so what it
   predicts and what the server serves are one entity, with no flicker
   between.
 - **One-shots** the server plays are replicated as [`CueBursts`]: those of
   the last half second, numbered. A client plays each once. One it played
   itself, predicting under its activation, isn't played again, however
   many times it played it; if the server rejects the activation, or never
-  plays it, the client forgets it.
+  plays it, the client forgets it. A burst names its cue by its tag's
+  number too, and its effect, if one played it, by its [`EffectId`].
+
+A cue whose tag isn't in the tag registry has no number to send, so it isn't
+replicated: the server warns, and plays it only for itself. Cues from code
+are tags like any other, so define them in content or add them with
+`add_tag`.
 
 A client coming to see an actor joins what's going: its lasting cues are
 added with `joined` set, for a quiet start rather than a burst, and it plays
@@ -164,6 +182,9 @@ alone, unless you say, following control as it changes hands.
 - **One tag, both kinds.** An effect's cue is held while it counts and
   played as it executes. A periodic burn with one cue gets both: give it two
   tags if they should look different.
+- **A cue has to be a tag in the registry.** One named in content is checked as
+  content loads. One from code that isn't defined is played where it's
+  made, but never sent.
 - **Cues are shown late in the frame.** Lasting cues are worked out in
   `PostUpdate`, in [`CueSystems`]. One-shots play at once.
 - **Handlers are for showing.** They run where the cue is shown, a client
@@ -182,4 +203,5 @@ alone, unless you say, following control as it changes hands.
 [`local`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/struct.Cue.html#method.local
 [`ServedCues`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/struct.ServedCues.html
 [`CueBursts`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/struct.CueBursts.html
+[`EffectId`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectId.html
 [`CueSystems`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/struct.CueSystems.html

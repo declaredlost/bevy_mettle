@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use bevy::prelude::*;
 use bevy_mettle_attribute::modifier::Provisional;
-use bevy_mettle_core::Id;
 use bevy_mettle_core::tag::{OwnedTags, TagCounts, Tags};
 
 use super::count::{activate, holds_ongoing, refresh};
@@ -13,36 +12,54 @@ use super::remove::remove_tagged;
 use super::{Check, DEPTH, effects_on, source_tags};
 use crate::active::{ActiveEffect, EffectOf};
 use crate::code::EffectContext;
-use crate::data::{Effect, EffectDuration, Reapply, StackBy, Stacking};
+use crate::data::{EffectDef, EffectDuration, MagnitudeDef, Reapply, StackBy, Stacking};
 use crate::events::{Blocked, EffectApplied, EffectBlocked, EffectStacked};
 use crate::net::{self};
-use crate::{EffectRegistry, EffectSpec};
+use crate::{EffectId, EffectRegistry, EffectSpec};
 
-/// Applies `spec` to `target`.
-pub(crate) fn apply(world: &mut World, target: Entity, spec: EffectSpec) {
-    apply_at(world, target, spec, 0);
+/// Applies `spec` to `target`, its effect resolved to its number.
+pub(crate) fn apply(world: &mut World, target: Entity, spec: &EffectSpec) {
+    let Some(registry) = world.get_resource::<EffectRegistry>() else {
+        warn!(
+            "effect `{}` isn't applied: there's no effect registry",
+            spec.label()
+        );
+        return;
+    };
+    let Some(effect) = spec.effect_id(registry) else {
+        warn!(
+            "effect `{}` isn't applied: it isn't added, or content hasn't it",
+            spec.label()
+        );
+        return;
+    };
+    apply_at(world, target, effect, spec.clone(), 0);
 }
 
-/// Applies `spec` to `target`, `depth` effects deep in a chain.
-pub(super) fn apply_at(world: &mut World, target: Entity, spec: EffectSpec, depth: u32) {
+/// Applies `effect` as `spec` says to `target`, `depth` effects deep in a
+/// chain.
+pub(super) fn apply_at(
+    world: &mut World,
+    target: Entity,
+    effect: EffectId,
+    spec: EffectSpec,
+    depth: u32,
+) {
+    let Some(registry) = world.get_resource::<EffectRegistry>().cloned() else {
+        warn!("effect {effect:?} isn't applied: there's no effect registry");
+        return;
+    };
+    let Some(def) = registry.get(effect).cloned() else {
+        warn!("there's no effect {effect:?}: content reloaded without it");
+        return;
+    };
     if depth > DEPTH {
         warn!(
             "effect `{}` applies effects more than {DEPTH} deep: taken for a loop, and stopped",
-            spec.effect
+            def.name
         );
         return;
     }
-    let Some(registry) = world.get_resource::<EffectRegistry>().cloned() else {
-        warn!(
-            "effect `{}` isn't applied: there's no effect registry",
-            spec.effect
-        );
-        return;
-    };
-    let Some(def) = registry.get(&spec.effect).cloned() else {
-        warn!("there's no effect called `{}`", spec.effect);
-        return;
-    };
     if net::answered(world, &spec) {
         return;
     }
@@ -50,14 +67,14 @@ pub(super) fn apply_at(world: &mut World, target: Entity, spec: EffectSpec, dept
     if world.get::<OwnedTags>(target).is_none() {
         warn!(
             "effect `{}` isn't applied to {target}: it owns no tags",
-            def.id
+            def.name
         );
         return;
     }
     if let Some(reason) = blocked(world, target, &def, &source_tags) {
         world.trigger(EffectBlocked {
             entity: target,
-            id: def.id.clone(),
+            id: def.id,
             reason,
         });
         return;
@@ -71,7 +88,7 @@ pub(super) fn apply_at(world: &mut World, target: Entity, spec: EffectSpec, dept
         return;
     }
     if let Some(stacking) = &def.stacking
-        && let Some(existing) = stack_of(world, target, &def.id, stacking.by, spec.source)
+        && let Some(existing) = stack_of(world, target, def.id, stacking.by, spec.source)
     {
         stack(world, &registry, existing, stacking, &spec, depth);
         return;
@@ -85,7 +102,7 @@ pub(super) fn apply_at(world: &mut World, target: Entity, spec: EffectSpec, dept
     world.trigger(EffectApplied {
         entity: target,
         effect,
-        id: def.id.clone(),
+        id: def.id,
     });
     chain(world, target, &spec, &def.on_apply, depth);
 }
@@ -94,7 +111,7 @@ pub(super) fn apply_at(world: &mut World, target: Entity, spec: EffectSpec, dept
 pub(super) fn blocked(
     world: &World,
     target: Entity,
-    def: &Effect,
+    def: &EffectDef,
     source_tags: &TagCounts,
 ) -> Option<Blocked> {
     let owner = world.get::<OwnedTags>(target)?;
@@ -124,13 +141,14 @@ pub(super) fn spawn(
     registry: &EffectRegistry,
     target: Entity,
     spec: &EffectSpec,
-    def: &Arc<Effect>,
+    def: &Arc<EffectDef>,
     source_tags: TagCounts,
 ) -> Option<Entity> {
     let (duration, period, captured) = {
         let context = EffectContext {
             world: &*world,
             target,
+            def,
             spec,
             stacks: 1,
         };
@@ -143,7 +161,7 @@ pub(super) fn spawn(
         {
             warn!(
                 "effect `{}` would last {seconds} seconds: it isn't applied",
-                def.id
+                def.name
             );
             return None;
         }
@@ -156,7 +174,7 @@ pub(super) fn spawn(
                 if !fine {
                     warn!(
                         "effect `{}` has a period of {every}: it executes on apply alone",
-                        def.id
+                        def.name
                     );
                 }
                 fine
@@ -206,15 +224,13 @@ pub(super) fn spawn(
 pub(super) fn capture(
     context: &EffectContext,
     registry: &EffectRegistry,
-    def: &Effect,
+    def: &EffectDef,
 ) -> Vec<Option<f32>> {
     def.modifiers
         .iter()
         .map(|modifier| {
-            modifier
-                .value
-                .attribute()
-                .map(|_| resolve(context, registry, &modifier.value))
+            matches!(modifier.value, MagnitudeDef::Attribute { .. })
+                .then(|| resolve(context, registry, &modifier.value))
         })
         .collect()
 }
@@ -233,13 +249,13 @@ pub(super) fn immune(world: &World, target: Entity, tags: &Tags) -> bool {
 pub(super) fn stack_of(
     world: &World,
     target: Entity,
-    id: &Id<Effect>,
+    id: EffectId,
     by: StackBy,
     source: Option<Entity>,
 ) -> Option<Entity> {
     effects_on(world, target).into_iter().find(|effect| {
         world.get::<ActiveEffect>(*effect).is_some_and(|active| {
-            active.def.id == *id && (by == StackBy::Target || active.spec.source == source)
+            active.def.id == id && (by == StackBy::Target || active.spec.source == source)
         })
     })
 }
@@ -254,7 +270,7 @@ pub(super) fn stack(
     world: &mut World,
     registry: &EffectRegistry,
     existing: Entity,
-    stacking: &Stacking,
+    stacking: &Stacking<EffectId>,
     spec: &EffectSpec,
     depth: u32,
 ) {
@@ -264,7 +280,7 @@ pub(super) fn stack(
     let Some(mut active) = world.get_mut::<ActiveEffect>(existing) else {
         return;
     };
-    let id = active.def.id.clone();
+    let id = active.def.id;
     if active.stacks >= stacking.limit {
         // At the limit, applying again still refreshes the time, as it says.
         if stacking.reapply == Reapply::Refresh {
@@ -274,7 +290,13 @@ pub(super) fn stack(
             active.until_period = active.period.unwrap_or_default();
         }
         for overflow in &stacking.overflow {
-            apply_at(world, target, spec.for_effect(overflow.clone()), depth + 1);
+            apply_at(
+                world,
+                target,
+                *overflow,
+                spec.for_effect(*overflow),
+                depth + 1,
+            );
         }
         world.trigger(EffectBlocked {
             entity: target,
@@ -320,10 +342,10 @@ pub(super) fn chain(
     world: &mut World,
     target: Entity,
     spec: &EffectSpec,
-    effects: &[Id<Effect>],
+    effects: &[EffectId],
     depth: u32,
 ) {
-    for effect in effects {
-        apply_at(world, target, spec.for_effect(effect.clone()), depth + 1);
+    for &effect in effects {
+        apply_at(world, target, effect, spec.for_effect(effect), depth + 1);
     }
 }

@@ -1,184 +1,202 @@
-//! The effects there are, checked.
+//! The effects there are, checked: their data compiled to what the app runs.
 
-use std::collections::HashMap;
+use std::any::TypeId;
 use std::sync::Arc;
 
+use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
-use bevy_mettle_attribute::modifier::Operation;
-use bevy_mettle_attribute::registry::{AnyAttribute, AttributeRegistry};
-use bevy_mettle_core::curve::CurveTable;
-use bevy_mettle_core::tag::TagTree;
-use bevy_mettle_core::{Id, MettleError, MettleErrors};
+use bevy_mettle_attribute::modifier::{Operation, Per};
+use bevy_mettle_attribute::registry::AttributeRegistry;
+use bevy_mettle_core::curve::CurveRegistry;
+use bevy_mettle_core::registry::{Key, Name, Registry};
+use bevy_mettle_core::tag::TagRegistry;
+use bevy_mettle_core::{Error, Errors};
 
-use crate::code::{Calculation, CalculationFn, EffectCode, Execution, ExecutionFn, RouterFn};
-use crate::data::{Effect, EffectDuration, EffectModifier, Magnitude};
+use crate::Effect;
+use crate::code::{
+    AnyRoute, CalculationFn, CalculationId, CalculationRegistry, Changes, ExecutionFn, ExecutionId,
+    ExecutionRegistry, RouteId, RouteRegistry,
+};
+use crate::data::{
+    AnyEffect, EffectData, EffectDef, EffectDuration, EffectModifier, Magnitude, MagnitudeDef,
+    ModifierDef, Period, Stacking,
+};
 
-/// The effects there are, checked against the tags, curves and effect code.
+/// An effect's number in the [`EffectRegistry`], as the app knows it.
 ///
-/// Made only by [`check`](Self::check)ing their definitions: every name they
-/// use defined, every number one that can be. A resource: in an app with
-/// `bevy_mettle`, its content loads it; insert another (a hot reload, a mod)
-/// and active effects take their new definitions.
-#[derive(Resource, Clone, Default)]
+/// What an active effect, a replica, a chain or an event knows it by, as Bevy
+/// knows a component by its `ComponentId`.
+///
+/// Numbered in order of name as content is checked, so the same content is
+/// numbered the same on a server and its clients; a reload keeps the
+/// numbers effects had.
+pub type EffectId = Key<AnyEffect>;
+
+/// The effects there are, checked against what they name, and compiled.
+///
+/// Checked against the tags, curves, attributes and effect code, compiled to
+/// [`EffectDef`]s, and numbered.
+///
+/// Made by checking their definitions: every name they use defined, every
+/// number one that can be. Each effect is numbered, an [`EffectId`], in order
+/// of name. A resource: in an app with `bevy_mettle`, its content loads it, and
+/// active effects take the new definitions.
+///
+/// An app's registry also holds the effect types code names
+/// ([`add_effect`](crate::code::EffectApp::add_effect)), which content has to
+/// define. So an app's content is checked by [`recheck`](Self::recheck)ing its
+/// registry, which keeps those types and the numbers effects had: what a load
+/// or a hot reload does. [`check`](Self::check) makes a registry from nothing,
+/// knowing no types: for tools and tests outside an app. Inserted into an app,
+/// it would forget what code names.
+///
+/// Read as a [`Registry`]: `get(id)`, `id(name)`, `id_of::<E>()`, `name(id)`,
+/// `iter()`.
+#[derive(Resource, Deref, Clone, Default)]
 pub struct EffectRegistry {
-    effects: Arc<HashMap<Id<Effect>, Arc<Effect>>>,
-    curves: CurveTable,
-    code: Arc<EffectCode>,
+    #[deref]
+    registry: Registry<AnyEffect, Arc<EffectDef>>,
+    curves: CurveRegistry,
+    executions: ExecutionRegistry,
+    calculations: CalculationRegistry,
+    routes: RouteRegistry,
 }
 
 impl std::fmt::Debug for EffectRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut effects: Vec<&Id<Effect>> = self.effects.keys().collect();
-        effects.sort();
         f.debug_struct("EffectRegistry")
-            .field("effects", &effects)
-            .field(
-                "executions",
-                &self.code.executions.keys().collect::<Vec<_>>(),
-            )
-            .field(
-                "calculations",
-                &self.code.calculations.keys().collect::<Vec<_>>(),
-            )
-            .field(
-                "meta attributes",
-                &self.code.routers.keys().collect::<Vec<_>>(),
-            )
+            .field("effects", &self.registry)
+            .field("executions", &self.executions)
+            .field("calculations", &self.calculations)
+            .field("routes", &self.routes)
             .finish_non_exhaustive()
     }
 }
 
-/// What effects are checked against: what they can name.
+/// What effects are checked against: the tags, curves and code they can name.
 #[derive(Clone, Copy)]
 pub struct EffectChecks<'a> {
     /// The gameplay tags there are.
-    pub tags: &'a TagTree,
+    pub tags: &'a TagRegistry,
     /// The curves magnitudes scale by.
-    pub curves: &'a CurveTable,
+    pub curves: &'a CurveRegistry,
     /// The attributes the app added.
     pub attributes: &'a AttributeRegistry,
-    /// The executions and calculations the app added.
-    pub code: &'a EffectCode,
+    /// The executions the app added.
+    pub executions: &'a ExecutionRegistry,
+    /// The calculations the app added.
+    pub calculations: &'a CalculationRegistry,
+    /// The routes the app added.
+    pub routes: &'a RouteRegistry,
+}
+
+/// What compiling one effect reads: what it can name, and where errors go.
+struct Compile<'a> {
+    registry: &'a Registry<AnyEffect, Arc<EffectDef>>,
+    checks: EffectChecks<'a>,
+    errors: &'a mut Vec<Error>,
 }
 
 impl EffectRegistry {
-    /// The registry of `definitions`, checked against what they can name: the
-    /// only way there is one.
+    /// A registry of `definitions`, from nothing, checked against what they
+    /// can name and compiled: knowing no effect types code names. For tools
+    /// and tests; an app's content is [`recheck`](Self::recheck)ed.
     ///
     /// # Errors
     ///
     /// Everything wrong with them, at once: effects defined twice; tags,
-    /// curves, attributes, effects, executions and calculations named that
-    /// aren't; numbers that can't be; what an instant effect can't have; meta
-    /// attributes read, dealt other than flat, or held by a lasting effect;
-    /// and a meta attribute sharing an attribute's name.
-    pub fn check(definitions: &[Effect], against: EffectChecks<'_>) -> Result<Self, MettleErrors> {
-        let EffectChecks {
-            tags,
-            curves,
-            attributes,
-            code,
-        } = against;
+    /// curves, attributes, routes, effects, executions and calculations named
+    /// that aren't; numbers that can't be; what an instant effect can't have;
+    /// and routes dealt other than flat, or by a lasting effect.
+    pub fn check(definitions: &[EffectData], against: EffectChecks<'_>) -> Result<Self, Errors> {
+        Self::default().recheck(definitions, against)
+    }
+
+    /// The registry of `definitions`, as [`check`](Self::check) makes it, each
+    /// effect here keeping its number: new ones numbered after the last, in
+    /// order of name. What a reload does, so what holds an effect's number
+    /// still names it. The effect types code names here are kept.
+    ///
+    /// # Errors
+    ///
+    /// As `check`'s, and an effect code names that content doesn't define.
+    pub fn recheck(
+        &self,
+        definitions: &[EffectData],
+        against: EffectChecks<'_>,
+    ) -> Result<Self, Errors> {
         let mut errors = Vec::new();
-        let mut effects = HashMap::new();
+        let mut names: HashSet<&str> = HashSet::default();
         for def in definitions {
-            if effects
-                .insert(def.id.clone(), Arc::new(def.clone()))
-                .is_some()
-            {
-                errors.push(MettleError::Duplicate {
+            if !names.insert(def.name.as_str()) {
+                errors.push(Error::Duplicate {
                     kind: "effect",
-                    id: def.id.to_string(),
+                    name: def.name.to_string(),
                 });
             }
         }
-        for meta in code.routers.keys() {
-            if attributes.get(meta).is_some() {
-                errors.push(MettleError::Invalid {
-                    what: format!("an attribute and a meta attribute both named `{meta}`"),
-                    within: None,
-                });
+        let mut names: Vec<&str> = names.into_iter().collect();
+        names.sort_unstable();
+        let mut registry = self.registry.renumbered(names);
+        errors.extend(registry.unnumbered().map(|name| Error::NotInContent {
+            kind: "effect",
+            name: name.to_owned(),
+        }));
+        let mut compiled = Vec::new();
+        for def in definitions {
+            let mut compile = Compile {
+                registry: &registry,
+                checks: against,
+                errors: &mut errors,
+            };
+            if let Some(effect) = compile.effect(def) {
+                compiled.push(effect);
             }
         }
-        let registry = Self {
-            effects: Arc::new(effects),
-            curves: curves.clone(),
-            code: Arc::new(code.clone()),
-        };
-        for def in registry.effects.values() {
-            registry.check_def(def, tags, attributes, &mut errors);
+        for effect in compiled {
+            registry.set(effect.id, Arc::new(effect));
         }
         errors.sort_by_key(ToString::to_string);
         if errors.is_empty() {
-            Ok(registry)
+            Ok(Self {
+                registry,
+                curves: against.curves.clone(),
+                executions: against.executions.clone(),
+                calculations: against.calculations.clone(),
+                routes: against.routes.clone(),
+            })
         } else {
-            Err(MettleErrors(errors))
+            Err(Errors(errors))
         }
     }
 
-    /// The effect called `id`, if there is one.
-    #[must_use]
-    pub fn get(&self, id: &Id<Effect>) -> Option<&Arc<Effect>> {
-        self.effects.get(id)
+    /// Notes that code names the effect `E`: content has to define it.
+    pub fn name_type<E: Effect>(&mut self) {
+        self.registry.name_type(TypeId::of::<E>(), E::NAME);
     }
 
-    /// Every effect.
-    pub fn iter(&self) -> impl Iterator<Item = &Arc<Effect>> {
-        self.effects.values()
-    }
-
-    pub(crate) fn curves(&self) -> &CurveTable {
+    pub(crate) fn curves(&self) -> &CurveRegistry {
         &self.curves
     }
 
-    pub(crate) fn execution(&self, id: &Id<Execution>) -> Option<&ExecutionFn> {
-        self.code.executions.get(id)
+    pub(crate) fn execution(&self, id: ExecutionId) -> Option<&ExecutionFn> {
+        self.executions.get(id)
     }
 
-    /// The router of the meta attribute `id`, if it's one.
-    pub(crate) fn router(&self, id: &Id<AnyAttribute>) -> Option<&RouterFn> {
-        self.code.routers.get(id)
+    pub(crate) fn calculation(&self, id: CalculationId) -> Option<&CalculationFn> {
+        self.calculations.get(id)
     }
 
-    /// Checks `attribute` is one actors have, whose value can be read: not a
-    /// meta attribute, which has none.
-    fn readable(
-        &self,
-        attribute: &Id<AnyAttribute>,
-        attributes: &AttributeRegistry,
-        within: Option<&str>,
-    ) -> Result<(), MettleError> {
-        if self.router(attribute).is_some() {
-            return Err(MettleError::Invalid {
-                what: format!("reading meta attribute `{attribute}`: it has no value"),
-                within: within.map(ToOwned::to_owned),
-            });
-        }
-        attributes.check(attribute, within)
+    pub(crate) fn routes(&self) -> &RouteRegistry {
+        &self.routes
     }
+}
 
-    pub(crate) fn calculation(&self, id: &Id<Calculation>) -> Option<&CalculationFn> {
-        self.code.calculations.get(id)
-    }
-
-    /// Checks `def`, noting what's wrong in `errors`.
-    fn check_def(
-        &self,
-        def: &Effect,
-        tags: &TagTree,
-        attributes: &AttributeRegistry,
-        errors: &mut Vec<MettleError>,
-    ) {
-        let within = Some(def.id.as_str());
-        let invalid = |what: String| MettleError::Invalid {
-            what,
-            within: within.map(ToOwned::to_owned),
-        };
-        let mut push = |result: Result<(), MettleError>| {
-            if let Err(error) = result {
-                errors.push(error);
-            }
-        };
+impl Compile<'_> {
+    /// `def` compiled, or what's wrong with it noted.
+    fn effect(&mut self, def: &EffectData) -> Option<EffectDef> {
+        let within = def.name.as_str().to_owned();
+        let errors_before = self.errors.len();
         for set in [
             &def.tags,
             &def.grants,
@@ -186,46 +204,121 @@ impl EffectRegistry {
             &def.removes,
             &def.immunity,
         ] {
-            push(tags.known_all(set.written(), within));
+            self.push(self.checks.tags.known_all(set.written(), Some(&within)));
         }
         for condition in [&def.require, &def.ongoing, &def.remove_if]
             .into_iter()
             .flatten()
         {
-            push(condition.check(tags, within));
+            self.push(condition.check(self.checks.tags, Some(&within)));
         }
-        if let EffectDuration::For(seconds) = &def.duration {
-            push(self.positive(seconds, "a duration", tags, attributes, within));
-        }
-        if let Some(period) = &def.period {
-            push(self.positive(&period.every, "a period", tags, attributes, within));
-        }
-        for modifier in &def.modifiers {
-            self.check_modifier(def, modifier, tags, attributes, &mut push);
-        }
-        for execution in &def.executions {
-            if self.execution(execution).is_none() {
-                push(Err(MettleError::unknown::<Execution>(
-                    execution.as_str(),
-                    within,
-                )));
-            }
-        }
-        let chained = def
-            .on_apply
+        let timing = self.timing(def, &within);
+        let modifiers: Vec<Option<ModifierDef>> = def
+            .modifiers
             .iter()
-            .chain(&def.on_remove)
-            .chain(&def.on_expire)
-            .chain(def.stacking.iter().flat_map(|stacking| &stacking.overflow));
-        for effect in chained {
-            if self.get(effect).is_none() {
-                push(Err(MettleError::unknown::<Effect>(effect.as_str(), within)));
-            }
+            .map(|modifier| self.modifier(def, modifier, &within))
+            .collect();
+        let executions: Vec<Option<ExecutionId>> = def
+            .executions
+            .iter()
+            .map(|execution| {
+                let id = self.checks.executions.resolve(execution, Some(&within));
+                self.held(id)
+            })
+            .collect();
+        let on_apply = self.effects(&def.on_apply, &within);
+        let on_remove = self.effects(&def.on_remove, &within);
+        let on_expire = self.effects(&def.on_expire, &within);
+        let stacking = def.stacking.as_ref().map(|stacking| Stacking {
+            by: stacking.by,
+            limit: stacking.limit,
+            reapply: stacking.reapply,
+            reset_period: stacking.reset_period,
+            expire: stacking.expire,
+            overflow: self.effects(&stacking.overflow, &within),
+        });
+        self.lasting(def, &within);
+        if self.errors.len() > errors_before {
+            return None;
         }
+        let (duration, period) = timing?;
+        Some(EffectDef {
+            id: self.registry.id(def.name.as_str())?,
+            name: def.name.clone(),
+            tags: def.tags.clone(),
+            duration,
+            period,
+            modifiers: modifiers.into_iter().collect::<Option<_>>()?,
+            executions: executions.into_iter().collect::<Option<_>>()?,
+            grants: def.grants.clone(),
+            cues: def.cues.clone(),
+            require: def.require.clone(),
+            ongoing: def.ongoing.clone(),
+            remove_if: def.remove_if.clone(),
+            removes: def.removes.clone(),
+            immunity: def.immunity.clone(),
+            stacking,
+            on_apply,
+            on_remove,
+            on_expire,
+        })
+    }
+
+    /// The numbers of the effects `names` names, those there are; what's
+    /// wrong noted.
+    fn effects(&mut self, names: &[Name<AnyEffect>], within: &str) -> Vec<EffectId> {
+        names
+            .iter()
+            .filter_map(|name| {
+                let id = self.registry.id(name.as_str());
+                if id.is_none() {
+                    self.push(Err(Error::unknown::<AnyEffect>(
+                        name.as_str(),
+                        Some(within),
+                    )));
+                }
+                id
+            })
+            .collect()
+    }
+
+    /// How long `def` lasts and how often it executes, compiled, or what's
+    /// wrong with them noted.
+    fn timing(
+        &mut self,
+        def: &EffectData,
+        within: &str,
+    ) -> Option<(EffectDuration<MagnitudeDef>, Option<Period<MagnitudeDef>>)> {
+        let duration = match &def.duration {
+            EffectDuration::Instant => Some(EffectDuration::Instant),
+            EffectDuration::Infinite => Some(EffectDuration::Infinite),
+            EffectDuration::For(seconds) => self
+                .positive(seconds, "a duration", within)
+                .map(EffectDuration::For),
+        };
+        // Both worked out, so what's wrong with either is noted.
+        let period = match &def.period {
+            None => Ok(None),
+            Some(period) => self
+                .positive(&period.every, "a period", within)
+                .map(|every| {
+                    Some(Period {
+                        every,
+                        on_apply: period.on_apply,
+                    })
+                })
+                .ok_or(()),
+        };
+        Some((duration?, period.ok()?))
+    }
+
+    /// Notes what `def` can't have for how long it lasts: what an instant one
+    /// can't, executions a lasting one never runs, and a stacking limit of 0.
+    fn lasting(&mut self, def: &EffectData, within: &str) {
         if let Some(stacking) = &def.stacking
             && stacking.limit == 0
         {
-            push(Err(invalid("a stacking limit of 0".to_owned())));
+            self.invalid("a stacking limit of 0".to_owned(), within);
         }
         if !def.lasts() {
             let lasting = [
@@ -240,120 +333,204 @@ impl EffectRegistry {
             ];
             for (what, has) in lasting {
                 if has {
-                    push(Err(invalid(format!(
-                        "an instant effect with {what}: it doesn't last"
-                    ))));
+                    self.invalid(
+                        format!("an instant effect with {what}: it doesn't last"),
+                        within,
+                    );
                 }
             }
         } else if def.period.is_none() && !def.executions.is_empty() {
             // A lasting effect executes only as its period comes round.
-            push(Err(invalid(
+            self.invalid(
                 "executions on a lasting effect with no period: it never executes".to_owned(),
-            )));
+                within,
+            );
         }
     }
 
-    /// Checks `def`'s `modifier`, pushing what's wrong to `push`.
-    fn check_modifier(
-        &self,
-        def: &Effect,
+    /// `def`'s `modifier` compiled, or what's wrong with it noted.
+    fn modifier(
+        &mut self,
+        def: &EffectData,
         modifier: &EffectModifier,
-        tags: &TagTree,
-        attributes: &AttributeRegistry,
-        push: &mut impl FnMut(Result<(), MettleError>),
-    ) {
-        let within = Some(def.id.as_str());
-        let invalid = |what: String| MettleError::Invalid {
-            what,
-            within: within.map(ToOwned::to_owned),
+        within: &str,
+    ) -> Option<ModifierDef> {
+        let changes = match (&modifier.attribute, &modifier.route) {
+            (Some(attribute), None) => self.attribute(attribute, within).map(Changes::Attribute),
+            (None, Some(route)) => {
+                if modifier.op != Operation::Flat {
+                    self.invalid(
+                        format!(
+                            "an {:?} modifier of route `{route}`: it's dealt flat amounts only",
+                            modifier.op
+                        ),
+                        within,
+                    );
+                }
+                if def.lasts() && def.period.is_none() {
+                    self.invalid(
+                        format!(
+                            "route `{route}` on a lasting effect with no period: it's routed only \
+                             as an effect executes"
+                        ),
+                        within,
+                    );
+                }
+                self.route(route, within).map(Changes::Route)
+            }
+            (Some(_), Some(_)) => {
+                self.invalid(
+                    "a modifier of both an attribute and a route: it's one or the other".to_owned(),
+                    within,
+                );
+                None
+            }
+            (None, None) => {
+                self.invalid(
+                    "a modifier of neither an attribute nor a route".to_owned(),
+                    within,
+                );
+                None
+            }
         };
-        if self.router(&modifier.attribute).is_some() {
-            if modifier.op != Operation::Flat {
-                push(Err(invalid(format!(
-                    "an {:?} modifier of meta attribute `{}`: it's dealt flat amounts only",
-                    modifier.op, modifier.attribute
-                ))));
-            }
-            if def.lasts() && def.period.is_none() {
-                push(Err(invalid(format!(
-                    "meta attribute `{}` on a lasting effect with no period: it's routed only as \
-                     an effect executes",
-                    modifier.attribute
-                ))));
-            }
-        } else {
-            push(attributes.check(&modifier.attribute, within));
-        }
-        push(self.magnitude(&modifier.value, tags, attributes, within));
+        let value = self.magnitude(&modifier.value, within);
         if let Some(condition) = &modifier.condition {
-            push(condition.check(tags, within));
+            self.push(condition.check(self.checks.tags, Some(within)));
         }
-        if let Some(per) = &modifier.per {
-            push(self.readable(&per.attribute, attributes, within));
-            if !(per.every.is_finite() && per.every > 0.0) {
-                push(Err(invalid(format!(
-                    "a modifier per {} {:?}",
-                    per.every, per.attribute
-                ))));
+        let per = match &modifier.per {
+            None => Some(None),
+            Some(per) => {
+                if !(per.every.is_finite() && per.every > 0.0) {
+                    self.invalid(
+                        format!("a modifier per {} `{}`", per.every, per.attribute),
+                        within,
+                    );
+                }
+                self.attribute(&per.attribute, within).map(|attribute| {
+                    Some(Per {
+                        attribute,
+                        every: per.every,
+                    })
+                })
             }
-        }
+        };
+        Some(ModifierDef {
+            changes: changes?,
+            op: modifier.op,
+            value: value?,
+            condition: modifier.condition.clone(),
+            per: per?,
+        })
     }
 
-    /// Checks `magnitude` can be worked out.
-    fn magnitude(
-        &self,
-        magnitude: &Magnitude,
-        tags: &TagTree,
-        attributes: &AttributeRegistry,
-        within: Option<&str>,
-    ) -> Result<(), MettleError> {
-        if let Some(attribute) = magnitude.attribute() {
-            self.readable(attribute, attributes, within)?;
-        }
-        let invalid = |what: String| MettleError::Invalid {
-            what,
-            within: within.map(ToOwned::to_owned),
-        };
+    /// `magnitude` compiled, or what's wrong with it noted.
+    fn magnitude(&mut self, magnitude: &Magnitude, within: &str) -> Option<MagnitudeDef> {
         match magnitude {
-            Magnitude::Value(value) if !value.is_finite() => {
-                Err(invalid(format!("a value of {value}")))
+            Magnitude::Value(value) => {
+                if !value.is_finite() {
+                    self.invalid(format!("a value of {value}"), within);
+                    return None;
+                }
+                Some(MagnitudeDef::Value(*value))
             }
             Magnitude::Scaled { base, curve } => {
-                self.curves.known(curve, within)?;
-                if base.is_finite() {
-                    Ok(())
-                } else {
-                    Err(invalid(format!("a base of {base}")))
+                let curve = self.checks.curves.known(curve, Some(within));
+                if !base.is_finite() {
+                    self.invalid(format!("a base of {base}"), within);
+                }
+                match curve {
+                    Err(error) => {
+                        self.errors.push(error);
+                        None
+                    }
+                    Ok(curve) => base
+                        .is_finite()
+                        .then_some(MagnitudeDef::Scaled { base: *base, curve }),
                 }
             }
-            Magnitude::Attribute { coefficient, .. } if !coefficient.is_finite() => {
-                Err(invalid(format!("a coefficient of {coefficient}")))
+            Magnitude::Param(param) => {
+                self.push(self.checks.tags.known(*param, Some(within)));
+                Some(MagnitudeDef::Param(*param))
             }
-            Magnitude::Param(param) => tags.known(param, within),
-            Magnitude::Custom(calculation) if self.calculation(calculation).is_none() => Err(
-                MettleError::unknown::<Calculation>(calculation.as_str(), within),
-            ),
-            _ => Ok(()),
+            Magnitude::Attribute {
+                attribute,
+                from,
+                coefficient,
+            } => {
+                if !coefficient.is_finite() {
+                    self.invalid(format!("a coefficient of {coefficient}"), within);
+                }
+                let attribute = self.attribute(attribute, within)?;
+                coefficient.is_finite().then_some(MagnitudeDef::Attribute {
+                    attribute,
+                    from: *from,
+                    coefficient: *coefficient,
+                })
+            }
+            Magnitude::Custom(calculation) => {
+                let id = self.checks.calculations.resolve(calculation, Some(within));
+                self.held(id).map(MagnitudeDef::Custom)
+            }
         }
     }
 
-    /// Checks `magnitude` can be worked out, and is more than 0 if it's a
-    /// value.
+    /// `magnitude` compiled, checked more than 0 if it's a value.
     fn positive(
-        &self,
+        &mut self,
         magnitude: &Magnitude,
         what: &str,
-        tags: &TagTree,
-        attributes: &AttributeRegistry,
-        within: Option<&str>,
-    ) -> Result<(), MettleError> {
-        self.magnitude(magnitude, tags, attributes, within)?;
-        match magnitude {
-            Magnitude::Value(value) if *value <= 0.0 => Err(MettleError::Invalid {
-                what: format!("{what} of {value}: it has to be more than 0"),
-                within: within.map(ToOwned::to_owned),
-            }),
-            _ => Ok(()),
+        within: &str,
+    ) -> Option<MagnitudeDef> {
+        let compiled = self.magnitude(magnitude, within)?;
+        if let MagnitudeDef::Value(value) = compiled
+            && value <= 0.0
+        {
+            self.invalid(
+                format!("{what} of {value}: it has to be more than 0"),
+                within,
+            );
+            return None;
         }
+        Some(compiled)
+    }
+
+    /// The attribute named `name`'s number, or that there's none noted.
+    fn attribute(
+        &mut self,
+        name: &Name<bevy_mettle_attribute::registry::AnyAttribute>,
+        within: &str,
+    ) -> Option<bevy_mettle_attribute::registry::AttributeId> {
+        let resolved = self.checks.attributes.resolve(name, Some(within));
+        match resolved {
+            Ok(id) => Some(id),
+            Err(error) => {
+                self.errors.push(error);
+                None
+            }
+        }
+    }
+
+    /// The route named `name`'s number, or that there's none noted.
+    fn route(&mut self, name: &Name<AnyRoute>, within: &str) -> Option<RouteId> {
+        let id = self.checks.routes.resolve(name, Some(within));
+        self.held(id)
+    }
+
+    /// What `result` holds, or its error noted.
+    fn held<T>(&mut self, result: Result<T, Error>) -> Option<T> {
+        result.map_err(|error| self.errors.push(error)).ok()
+    }
+
+    fn push(&mut self, result: Result<(), Error>) {
+        if let Err(error) = result {
+            self.errors.push(error);
+        }
+    }
+
+    fn invalid(&mut self, what: String, within: &str) {
+        self.errors.push(Error::Invalid {
+            what,
+            within: Some(within.to_owned()),
+        });
     }
 }

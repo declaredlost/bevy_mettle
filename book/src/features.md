@@ -17,6 +17,16 @@ with `ability`.
 
 The prelude brings in every enabled part's prelude, with `MettlePlugins`,
 `MettleSystems`, `MettleContent`, `ContentLoaded` and `ContentRejected`.
+That's the derives and the app traits (`AttributeApp`, `TagApp`,
+`EffectApp`, `BehaviourApp`, `AbilityApp`); the specs (`EffectSpec`,
+`AbilitySpec`, `IntoAbilityId`); every registry and its numbers
+(`TagRegistry` and `TagId`, `CurveRegistry` and `CurveId`,
+`AttributeRegistry`, `EffectRegistry` and `EffectId`, `AbilityRegistry` and
+`AbilityId`, and the rest); the data types with their `AnyEffect` and
+`AnyAbility` names; and the replicas, `ModifiersReplica` among them.
+`AnyCurve`, `AnyAttribute`, `AnyBehaviour`, `AnyExecution`,
+`AnyCalculation` and `AnyRoute` are in their crates' modules, for code that
+writes those ids out.
 
 ## The parts
 

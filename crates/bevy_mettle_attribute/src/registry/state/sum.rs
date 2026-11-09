@@ -1,14 +1,13 @@
 //! An attribute's modifiers summed, and those kept apart to weigh on reads.
 
 use bevy::prelude::*;
-use bevy_mettle_core::Id;
 use bevy_mettle_core::condition::Condition;
 use bevy_mettle_core::tag::TagCounts;
 use serde::{Deserialize, Serialize};
 
 use crate::modifier::{Modifier, Operation};
 use crate::read::{AttributeContext, Read};
-use crate::registry::AnyAttribute;
+use crate::registry::AttributeId;
 
 /// When a modifier counts, and how much: its expression, and whether it's local
 /// to its source.
@@ -49,7 +48,7 @@ pub(super) struct Scoped {
     pub(super) op: Operation,
     pub(super) value: f32,
     /// The attribute it's per, and how much of it makes one.
-    pub(super) per: Option<(Id<AnyAttribute>, f32)>,
+    pub(super) per: Option<(AttributeId, f32)>,
     pub(super) counts: Counts,
     /// Where it comes, its actor's modifiers in the order they were applied:
     /// of `Base`s and `Override`s, the last counts.

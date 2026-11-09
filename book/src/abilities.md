@@ -8,42 +8,64 @@ systems run while the ability is active.
 
 ## The fireball
 
-In data, the fireball looks like this:
-
-```ron
-(
-    id: "fireball",
-    tags: ["ability.spell.fire"],
-    behaviour: "cast_fireball",
-    cost: "fireball.cost",
-    cooldown: "fireball.cooldown",
-    require: Not(OwnerHas("state.silenced")),
-    blocked_by: ["state.stunned"],
-    cancels: ["ability.channel"],
-    blocks: ["ability.spell"],
-    grants: ["state.casting"],
-    triggers: [Event("event.parried")],
-    commit: OnActivate,
-)
-```
-
-Only `id` and `behaviour` are needed. Everything else has a default: no
-tags, no cost, no cooldown, nothing blocking it, and `commit: OnActivate`.
-
-The same ability, written in code with [`Ability`]'s builders:
+An ability is content, an [`AbilityData`], named by a string as effects are.
+Here is the fireball, built with its builders:
 
 ```rust
 # use bevy_mettle::prelude::*;
-let fireball = Ability::new("fireball", "cast_fireball")
+let fireball = AbilityData::new("fireball", "cast_fireball")
     .tag("ability.spell.fire")
     .cost("fireball.cost")
     .cooldown("fireball.cooldown")
+    .require(!Condition::owner_has("state.silenced"))
     .blocked_by("state.stunned")
     .cancels("ability.channel")
+    .blocks("ability.spell")
     .grant("state.casting")
-    .trigger(Trigger::Event(Id::from_static("event.parried")));
+    .trigger(Trigger::Event(TagKey::named("event.parried")));
 assert_eq!(fireball.commit, Commit::OnActivate);
 ```
+
+Only `name` and `behaviour` are needed. Everything else has a default: no
+tags, no cost, no cooldown, nothing blocking it, and `Commit::OnActivate`.
+`AbilityData` is a serde type, so the same abilities can come from files in
+any serde format: a struct with the fields below, its tags, effects and
+behaviour written as their names, strings, and fields left out taking their
+defaults.
+
+## Naming abilities in code
+
+Content names abilities by string, an `Name<AnyAbility>`. Code names an ability by its type, as it
+does an [effect](effects.md#naming-effects-in-code) or a
+[tag](tags.md#tags-in-code). Derive [`Ability`] on a unit struct, and add it
+to the app:
+
+```rust
+# use bevy::prelude::*;
+# use bevy_mettle::prelude::*;
+#[derive(Ability)]
+struct Fireball;                   // "fireball"
+
+#[derive(Ability)]
+#[ability(name = "fireball.charged")]
+struct ChargedFireball;            // "fireball.charged"
+
+let mut app = App::new();
+app.add_plugins(MettlePlugins)
+    .add_ability::<Fireball>()
+    .add_ability::<ChargedFireball>();
+```
+
+Its name is its type's in `snake_case`, unless `name` says otherwise. Code
+then grants and activates it by the type: `grant_ability(Fireball)`, or
+`grant_ability(Fireball.level(2.0))` at a level, and
+`activate_ability(Fireball)`, as [Granting and activating](activating.md)
+shows. A misspelled type doesn't compile.
+
+`add_ability` is a promise that content defines the ability: content that
+doesn't is rejected with "code names ability `fireball`, which content
+doesn't define". Abilities only content names, such as those an effect
+grants, needn't be types.
 
 ## The fields
 
@@ -64,7 +86,7 @@ assert_eq!(fireball.commit, Commit::OnActivate);
 | `commit` | When its cost and cooldown are applied: `OnActivate` or `Manual`. |
 
 A tag in `blocked_by`, `cancels` or `blocks` matches the tags under it too.
-`blocks: ["ability.spell"]` keeps every spell from activating, fire or not.
+`.blocks("ability.spell")` keeps every spell from activating, fire or not.
 
 `require` is weighed in the ability's own tags and its owner's. `ReadTagged`
 asks the ability's tags. `OwnerHas`, `TargetHas` and `SourceHas` all ask the
@@ -76,7 +98,9 @@ fact term never holds.
 A behaviour is a component with [`#[derive(Behaviour)]`][`Behaviour`], added
 to the app with
 [`add_behaviour`](https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/behaviour/trait.BehaviourApp.html#tymethod.add_behaviour).
-Data names it by its name: its type's in `snake_case`, unless it says.
+Data names it by its name, an `Name<AnyBehaviour>`: its type's in
+`snake_case`, unless it says. Adding it gives it its number in the
+[`BehaviourRegistry`], as attributes get theirs.
 
 ```rust
 # use bevy::prelude::*;
@@ -89,7 +113,10 @@ struct CastFireball {
 let mut app = App::new();
 app.add_plugins(MettlePlugins)
     .add_behaviour::<CastFireball>();
-assert!(app.world().resource::<Behaviours>().contains(&Id::from_static("cast_fireball")));
+let behaviours = app.world().resource::<BehaviourRegistry>();
+let id = behaviours.id_of::<CastFireball>().unwrap();
+assert_eq!(behaviours.id("cast_fireball"), Some(id));
+assert_eq!(behaviours.name(id), Some("cast_fireball"));
 ```
 
 When the fireball activates, `CastFireball::default()` is put on the
@@ -121,9 +148,9 @@ The fireball's cost and cooldown are effects:
 # #[attribute(base = 100.0, min = 0.0)]
 # struct Mana;
 # use bevy_mettle::prelude::*;
-let cost = Effect::instant("fireball.cost")
+let cost = EffectData::instant("fireball.cost")
     .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0));
-let cooldown = Effect::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball");
+let cooldown = EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball");
 # let _ = (cost, cooldown);
 ```
 
@@ -164,6 +191,7 @@ effects and the behaviours there are, and every grant (see
 [`AbilityRegistry`]. It reports everything wrong at once:
 
 - an ability defined twice;
+- an ability code names with `add_ability` that content doesn't define;
 - a tag, effect or behaviour named that doesn't exist;
 - a cost that isn't instant;
 - a cooldown that doesn't last, or grants no tag;
@@ -183,27 +211,31 @@ struct Mana;
 #[derive(Component, Default, Behaviour)]
 struct CastFireball;
 
+#[derive(Ability)]
+struct Fireball;
+
 let mut app = App::new();
 app.add_plugins(MettlePlugins)
     .add_attribute::<Mana>()
-    .add_behaviour::<CastFireball>();
+    .add_behaviour::<CastFireball>()
+    .add_ability::<Fireball>();
 
-let tags: Vec<Tag> = [
+let tags: Vec<TagKey> = [
     "state", "state.stunned", "state.casting",
     "cooldown", "cooldown.fireball",
     "ability", "ability.spell", "ability.spell.fire",
 ]
 .into_iter()
-.map(|id| Tag { id: Id::from_static(id) })
+.map(TagKey::named)
 .collect();
 
 let effects = vec![
-    Effect::instant("fireball.cost")
+    EffectData::instant("fireball.cost")
         .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-    Effect::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
+    EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
 ];
 
-let fireball = Ability::new("fireball", "cast_fireball")
+let fireball = AbilityData::new("fireball", "cast_fireball")
     .tag("ability.spell.fire")
     .cost("fireball.cost")
     .cooldown("fireball.cooldown")
@@ -222,29 +254,56 @@ content.check(app.world()).unwrap();
 let mut broken = content.clone();
 broken
     .abilities
-    .push(Ability::new("firebal", "cast_firebal").cooldown("fireball.cost"));
+    .push(AbilityData::new("firebal", "cast_firebal").cooldown("fireball.cost"));
 let errors = broken.check(app.world()).unwrap_err();
 assert_eq!(errors.0.len(), 2);
 
+// Content without the fireball code names:
+let mut missing = content.clone();
+missing.abilities.clear();
+let errors = missing.check(app.world()).unwrap_err();
+assert_eq!(
+    errors.to_string(),
+    "code names ability `fireball`, which content doesn't define"
+);
+
 app.insert_resource(content);
+app.update();
+
+// Checked, the fireball has its number.
+let registry = app.world().resource::<AbilityRegistry>();
+let id = registry.id_of::<Fireball>().unwrap();
+assert_eq!(registry.id("fireball"), Some(id));
+assert_eq!(registry.name(id), Some("fireball"));
 ```
 
+As content is checked, each ability is numbered: an [`AbilityId`], in order
+of name, as effects are. Granted abilities, events and the network go by the
+number; the name is for content, debug output and what a client shows.
+[`AbilityRegistry`] goes between them, as every registry does: `get(id)`,
+`id("fireball")`, `id_of::<Fireball>()`, `name(id)` and `iter()`.
+
 Change the content later, a hot reload, and every granted ability takes its
-new definition. One whose ability is gone is taken away from its actor.
+new definition. Abilities keep their numbers, and new ones are numbered after
+them. One whose ability is gone is taken away from its actor.
 
 Mettle doesn't load anything. Your game reads its files and hands over the
-content. [Loading data](loading-data.md) shows how.
+content: see [Loading data](loading-data.md).
 
 ## Pitfalls
 
 - **Behaviours first.** Content is checked against the behaviours the app
-  added, so add them all before you insert it.
+  added, so add them all before you insert it. The same goes for the
+  abilities and effects code names with `add_ability` and `add_effect`.
 - **A cooldown is a tag.** Two abilities whose cooldowns grant the same tag
   share a cooldown. That's useful for a shared "global cooldown", and a bug
   otherwise.
 
-[`Ability`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/data/struct.Ability.html
+[`AbilityData`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/data/struct.AbilityData.html
+[`Ability`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/trait.Ability.html
+[`AbilityId`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilityId.html
 [`Behaviour`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/behaviour/trait.Behaviour.html
 [`MettleContent`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleContent.html
 [`AbilityRegistry`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilityRegistry.html
+[`BehaviourRegistry`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/behaviour/struct.BehaviourRegistry.html
 [`ActiveAbility`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.ActiveAbility.html

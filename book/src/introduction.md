@@ -20,24 +20,31 @@ struct Mana;
 #[derive(Component, Default)]
 struct CastFireball;
 
-fn fireball() -> Ability {
-    Ability::new("fireball", "cast_fireball")
+/// The fireball, as code names it.
+#[derive(Ability)]
+struct Fireball;
+
+/// The fireball, as content defines it.
+fn fireball() -> AbilityData {
+    AbilityData::new("fireball", "cast_fireball")
         .tag("ability.spell.fire")
         .cost("fireball.cost")
         .cooldown("fireball.cooldown")
         .blocked_by("state.stunned")
 }
 
-fn effects() -> [Effect; 2] {
+fn effects() -> [EffectData; 2] {
     [
-        Effect::instant("fireball.cost")
+        EffectData::instant("fireball.cost")
             .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-        Effect::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
+        EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
     ]
 }
 ```
 
-The mage casts it with `commands.entity(mage).activate_ability("fireball")`.
+The mage casts it with `commands.entity(mage).activate_ability(Fireball)`.
+Content names things by string, so a designer can add them; code names them
+by type, so a typo doesn't compile.
 That pays 20 mana, starts a two-second cooldown, and puts `CastFireball`
 on the ability for your systems to run. While the mage is stunned, or the
 cooldown lasts, or there isn't enough mana, it fails, and says why.
@@ -72,12 +79,12 @@ behind feature flags.
 | Crate | Contains |
 |---|---|
 | `bevy_mettle` | Every part, with one prelude and one plugin group |
-| `bevy_mettle_core` | Gameplay tags, curve tables and conditions |
+| `bevy_mettle_core` | Gameplay tags, curves and conditions |
 | `bevy_mettle_attribute` | Attributes, modifiers and reads in context |
 | `bevy_mettle_effect` | Effects |
 | `bevy_mettle_ability` | Abilities |
 | `bevy_mettle_lightyear` | Prediction over lightyear |
-| `bevy_mettle_macros` | The `Attribute` and `IdTarget` derives |
+| `bevy_mettle_macros` | The derives: `Attribute`, `Tag`, `Effect`, `Ability`, `Behaviour` and the rest |
 
 This book is the guide. The API reference is on
 [docs.rs](https://docs.rs/bevy_mettle).

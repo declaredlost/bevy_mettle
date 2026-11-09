@@ -7,9 +7,8 @@ mod end;
 mod react;
 
 use bevy::prelude::*;
-use bevy_mettle_core::Id;
 use bevy_mettle_core::condition::Context;
-use bevy_mettle_core::tag::{OwnedTags, Tag, TagCounts, Tags};
+use bevy_mettle_core::tag::{OwnedTags, TagCounts, TagKey, Tags};
 
 pub(crate) use self::activate::{
     activate, activate_id, activate_id_with, activate_tagged, set_input,
@@ -20,9 +19,8 @@ pub(crate) use self::end::{
     Interrupting, cancel, cancel_tagged, end, end_quietly, interrupt, note_interrupt,
 };
 pub(crate) use self::react::{effect_applied, send, tag_added, tag_removed, ungranted};
-use crate::AbilityRegistry;
 use crate::active::{Abilities, AbilityOf, ActiveAbility, GrantedAbility, GrantedBy};
-use crate::data::Ability;
+use crate::{AbilityId, AbilityRegistry};
 
 /// The next activation's number.
 #[derive(Resource, Default)]
@@ -55,23 +53,23 @@ fn interrupts(granted: &GrantedAbility, owner: &OwnedTags) -> bool {
 }
 
 impl Context for Check<'_> {
-    fn tag(&self, tag: &Id<Tag>) -> bool {
+    fn tag(&self, tag: TagKey) -> bool {
         self.tags.contains(tag)
     }
 
-    fn has(&self, tag: &Id<Tag>) -> bool {
+    fn has(&self, tag: TagKey) -> bool {
         self.owner.contains(tag)
     }
 
-    fn target(&self, tag: &Id<Tag>) -> bool {
+    fn target(&self, tag: TagKey) -> bool {
         self.owner.contains(tag)
     }
 
-    fn source(&self, tag: &Id<Tag>) -> bool {
+    fn source(&self, tag: TagKey) -> bool {
         self.owner.contains(tag)
     }
 
-    fn fact(&self, _fact: &Id<Tag>) -> Option<f32> {
+    fn fact(&self, _fact: TagKey) -> Option<f32> {
         None
     }
 }
@@ -89,7 +87,7 @@ pub(crate) fn abilities_of(world: &World, actor: Entity) -> Vec<Entity> {
 pub(crate) fn grant(
     world: &mut World,
     actor: Entity,
-    id: &Id<Ability>,
+    id: AbilityId,
     level: f32,
     source: Option<Entity>,
 ) -> Option<Entity> {
@@ -97,7 +95,7 @@ pub(crate) fn grant(
         .get_resource::<AbilityRegistry>()
         .and_then(|registry| registry.get(id).cloned())
     else {
-        warn!("there's no ability called `{id}`");
+        warn!("there's no ability {id:?}: content reloaded without it");
         return None;
     };
     let mut granted = world.spawn((GrantedAbility::new(def, level, source), AbilityOf(actor)));
@@ -139,7 +137,7 @@ pub(crate) fn relink(world: &mut World, granted: &mut QueryState<Entity, With<Gr
         let Some(granted) = world.get::<GrantedAbility>(ability) else {
             continue;
         };
-        match registry.get(&granted.def.id).cloned() {
+        match registry.get(granted.def.id).cloned() {
             None => revoke(world, ability),
             Some(def) if !std::sync::Arc::ptr_eq(&def, &granted.def) => {
                 if let Some(mut granted) = world.get_mut::<GrantedAbility>(ability) {

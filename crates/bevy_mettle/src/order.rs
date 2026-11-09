@@ -1,8 +1,10 @@
 use bevy::ecs::schedule::InternedScheduleLabel;
 use bevy::prelude::*;
 
-/// Every part's systems, in each schedule they run in: abilities, then
-/// effects, then attributes, where they run in the same one.
+/// Every part's systems in each schedule: abilities, effects, then attributes.
+///
+/// In each schedule they run in: abilities, then effects, then attributes,
+/// where they run in the same one.
 ///
 /// By default each runs in its own: abilities in `PreUpdate`, attributes in
 /// `FixedPreUpdate`, effects in `FixedUpdate`. Put what reads an actor's
@@ -10,9 +12,11 @@ use bevy::prelude::*;
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MettleSystems;
 
-/// Puts every part's systems in [`MettleSystems`], in order, in each
-/// schedule they were given. In [`MettlePlugins`](crate::MettlePlugins); add
-/// it yourself if you add the parts' plugins one by one.
+/// Puts every part's systems in [`MettleSystems`], in order, in each schedule.
+///
+/// In each schedule they were given. In
+/// [`MettlePlugins`](crate::MettlePlugins); add it yourself if you add the
+/// parts' plugins one by one.
 ///
 /// It looks at the parts' plugins once all plugins are added, so they can be
 /// added in any order.

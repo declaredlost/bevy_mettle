@@ -1,12 +1,12 @@
 //! Whether an ability could activate, could pay, and how long its cooldown has
 //! left: asked with nothing done.
 
-use std::collections::HashMap;
-
+use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use bevy_mettle_attribute::read::{AttributeContext, AttributeWorld};
 use bevy_mettle_core::tag::{OwnedTags, Tags};
 use bevy_mettle_effect::active::{ActiveEffect, ActiveEffects};
+use bevy_mettle_effect::code::Changes;
 use bevy_mettle_effect::{EffectRegistry, EffectSpec, EffectWorld};
 
 use super::{Check, abilities_of, interrupts};
@@ -64,7 +64,7 @@ pub(crate) fn can_activate(world: &World, ability: Entity) -> Result<(), Failure
 fn cooldown_grants<'w>(world: &'w World, granted: &GrantedAbility) -> Option<&'w Tags> {
     world
         .get_resource::<EffectRegistry>()?
-        .get(granted.def.cooldown.as_ref()?)
+        .get(granted.def.cooldown?)
         .map(|effect| &effect.grants)
 }
 
@@ -111,12 +111,10 @@ pub(crate) fn cooldown_remaining(world: &World, ability: Entity) -> Option<f32> 
 /// Whether `actor` can pay `granted`'s cost: applying it, each change after
 /// the one before, wouldn't leave an attribute below 0.
 pub(super) fn affords(world: &World, actor: Entity, granted: &GrantedAbility) -> bool {
-    let Some(cost) = &granted.def.cost else {
+    let Some(cost) = granted.def.cost else {
         return true;
     };
-    let spec = EffectSpec::new(cost.clone())
-        .level(granted.level)
-        .source(actor);
+    let spec = EffectSpec::from_id(cost).level(granted.level).source(actor);
     let Some(changes) = world.preview_effect(actor, &spec) else {
         return true;
     };
@@ -124,13 +122,18 @@ pub(super) fn affords(world: &World, actor: Entity, granted: &GrantedAbility) ->
     for change in &changes {
         // Not worked out yet (spawned this frame), it's its base, as its
         // `Current` is.
-        let now = after.get(&change.attribute).copied().unwrap_or_else(|| {
+        // Routes are routed in a preview already: what's left changes
+        // attributes.
+        let Changes::Attribute(attribute) = change.changes else {
+            continue;
+        };
+        let now = after.get(&attribute).copied().unwrap_or_else(|| {
             world
-                .value_at(actor, &change.attribute, &AttributeContext::new())
-                .or_else(|| world.base_at(actor, &change.attribute))
+                .value_at(actor, attribute, &AttributeContext::new())
+                .or_else(|| world.base_at(actor, attribute))
                 .unwrap_or_default()
         });
-        after.insert(change.attribute.clone(), change.op.apply(now, change.value));
+        after.insert(attribute, change.op.apply(now, change.value));
     }
     after.values().all(|value| *value >= 0.0)
 }

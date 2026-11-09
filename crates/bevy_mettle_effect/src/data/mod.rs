@@ -1,44 +1,61 @@
 //! Effects as data: what one does, for how long, and how it stacks.
 
+mod def;
 mod magnitude;
 mod stacking;
 
 use bevy_mettle_attribute::Attribute;
-use bevy_mettle_attribute::modifier::{Operation, Per};
+use bevy_mettle_attribute::modifier::Operation;
 use bevy_mettle_attribute::registry::AnyAttribute;
 use bevy_mettle_core::condition::Condition;
-use bevy_mettle_core::tag::{Tag, Tags};
-use bevy_mettle_core::{Id, IdTarget};
+use bevy_mettle_core::registry::{Kind, Name};
+use bevy_mettle_core::tag::{TagKey, Tags};
 use serde::{Deserialize, Serialize};
 
+pub use self::def::{EffectDef, MagnitudeDef, ModifierDef};
 pub use self::magnitude::{Capture, Magnitude};
 pub use self::stacking::{Expire, Reapply, StackBy, Stacking};
-use crate::code::{Execution, MetaAttribute};
+use crate::code::{AnyExecution, AnyRoute, Route};
+
+/// The effect kind: what content names, and an [`EffectId`](crate::EffectId)
+/// numbers.
+///
+/// An effect's name in content is a `Name<AnyEffect>`, until it's resolved to
+/// an [`EffectId`](crate::EffectId).
+#[derive(Kind)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AnyEffect {}
 
 /// An effect, as data: what it changes, for how long, and what it grants.
 ///
 /// Unreal's `GameplayEffect`: also what it needs, and how it stacks. Named by
-/// an `Id<Effect>`, its `id`; what's applied is a spec naming it.
+/// an `Name<AnyEffect>`, its `id`. Code applies it by an
+/// [`Effect`](crate::Effect) type naming it.
 ///
-/// ```ron
-/// (
-///     id: "burning",
-///     tags: ["effect.affliction.burning"],
-///     duration: For(Value(4)),
-///     period: (every: Value(0.5), on_apply: true),
-///     modifiers: [(attribute: "life", op: Flat, value: Param("param.damage"))],
-///     grants: ["state.burning"],
-///     require: Not(OwnerHas("immune.fire")),
-///     ongoing: Not(OwnerHas("state.wet")),
-///     stacking: (limit: 3, expire: RemoveOne),
-/// )
+/// Written by a game's content, in whatever format it loads with serde, or
+/// built in code:
+///
 /// ```
-#[derive(IdTarget)]
+/// # use bevy_mettle_attribute::prelude::*;
+/// # use bevy_mettle_core::prelude::*;
+/// # use bevy_mettle_effect::prelude::*;
+/// # #[derive(Attribute)] #[attribute(base = 100.0)] struct Life;
+/// let burning = EffectData::lasting("burning", 4.0)
+///     .tag("effect.affliction.burning")
+///     .period(0.5, true)
+///     .modifier(EffectModifier::new::<Life>(
+///         Operation::Flat,
+///         Magnitude::param("param.damage"),
+///     ))
+///     .grant("state.burning")
+///     .require(!Condition::owner_has("immune.fire"))
+///     .ongoing(!Condition::owner_has("state.wet"));
+/// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Effect {
-    /// Its id.
-    pub id: Id<Effect>,
+pub struct EffectData {
+    /// Its name.
+    pub name: Name<AnyEffect>,
     /// What it is: what removal, immunity and requirements match on.
     #[serde(default, skip_serializing_if = "Tags::is_empty")]
     pub tags: Tags,
@@ -58,7 +75,7 @@ pub struct Effect {
     pub modifiers: Vec<EffectModifier>,
     /// Formulas in code, run as it executes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub executions: Vec<Id<Execution>>,
+    pub executions: Vec<Name<AnyExecution>>,
     /// Tags its target owns while it lasts.
     #[serde(default, skip_serializing_if = "Tags::is_empty")]
     pub grants: Tags,
@@ -104,87 +121,140 @@ pub struct Effect {
     pub stacking: Option<Stacking>,
     /// Effects applied to its target as it applies.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub on_apply: Vec<Id<Effect>>,
+    pub on_apply: Vec<Name<AnyEffect>>,
     /// Effects applied to its target as it's taken off, however.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub on_remove: Vec<Id<Effect>>,
+    pub on_remove: Vec<Name<AnyEffect>>,
     /// Effects applied to its target as it runs out of time.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub on_expire: Vec<Id<Effect>>,
+    pub on_expire: Vec<Name<AnyEffect>>,
 }
 
 /// How long an effect lasts: an instant, for a while, or until it's removed.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum EffectDuration {
+pub enum EffectDuration<M = Magnitude> {
     /// Not at all: it executes once, changing bases, and is gone.
     Instant,
     /// Until it's taken off.
     Infinite,
     /// So many seconds.
-    For(Magnitude),
+    For(M),
 }
 
 /// How often a lasting effect executes, and whether on apply too.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Period {
+pub struct Period<M = Magnitude> {
     /// Every so many seconds: more than 0.
-    pub every: Magnitude,
+    pub every: M,
     /// Whether it executes as it's applied, too.
     #[serde(default)]
     pub on_apply: bool,
 }
 
-/// A modifier in an effect: its attribute, how, how much, when, and per what.
+/// A modifier as data writes it: what it changes, by name, how, and how much.
+///
+/// It changes an attribute, or deals a [route](crate::code::Route) its amount:
+///
+/// ```
+/// # use bevy_mettle_attribute::prelude::*;
+/// # use bevy_mettle_effect::prelude::*;
+/// # #[derive(Attribute)] #[attribute(base = 100.0)] struct Life;
+/// # #[derive(Route)] struct IncomingDamage;
+/// EffectModifier::new::<Life>(
+///     Operation::Flat,
+///     Magnitude::param("param.damage"),
+/// );
+/// EffectModifier::route::<IncomingDamage>(40.0);
+/// ```
+///
+/// One of `attribute` and `route`, never both; a route is dealt flat amounts,
+/// and `op` says so unless it says otherwise.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EffectModifier {
     /// The attribute it changes.
-    pub attribute: Id<AnyAttribute>,
-    /// How.
+    #[serde(
+        default,
+        with = "bevy_mettle_core::optional",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub attribute: Option<Name<AnyAttribute>>,
+    /// The route it deals its amount, for its router.
+    #[serde(
+        default,
+        with = "bevy_mettle_core::optional",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub route: Option<Name<AnyRoute>>,
+    /// How: flat, unless it says.
+    #[serde(default = "flat")]
     pub op: Operation,
     /// By how much.
     pub value: Magnitude,
-    /// When it counts, and how much. In a lasting effect, it's a modifier of
-    /// its target's, weighed on each read: `ReadTagged` the read's tags (+20%
-    /// damage with fire hits), `OwnerHas` the target's owned tags, `TargetHas`
-    /// the read's target's, `SourceHas` as the effect's source was when it
-    /// applied. As an effect executes, `ReadTagged` is the effect's own tags,
-    /// and `OwnerHas` and `TargetHas` its target's.
+    /// When it counts, and how much, as an attribute's modifier does.
     #[serde(
         default,
         with = "bevy_mettle_core::optional",
         skip_serializing_if = "Option::is_none"
     )]
     pub condition: Option<Condition>,
-    /// That it counts once for each whole so much of the target's attribute.
+    /// That it counts once for each whole so much of an attribute.
     #[serde(
         default,
         with = "bevy_mettle_core::optional",
         skip_serializing_if = "Option::is_none"
     )]
-    pub per: Option<Per>,
+    pub per: Option<EffectPer>,
+}
+
+/// That a modifier counts once for each whole `every` of an attribute, by name.
+///
+/// The attribute named as data names it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EffectPer {
+    /// The attribute it scales with.
+    pub attribute: Name<AnyAttribute>,
+    /// How much of it makes one: more than 0.
+    pub every: f32,
+}
+
+/// What a modifier does unless it says: adds.
+fn flat() -> Operation {
+    Operation::Flat
 }
 
 impl EffectModifier {
     /// `op` of `value` to `A`.
     #[must_use]
     pub fn new<A: Attribute>(op: Operation, value: impl Into<Magnitude>) -> Self {
-        Self::of_id(A::ID, op, value)
+        Self::named(Name::from_static(A::NAME), op, value)
     }
 
-    /// `value` dealt to the meta attribute `M`, for its router: flat, as
-    /// meta attributes are dealt.
+    /// `value` dealt the route `R`, for its router: flat, as routes are dealt.
     #[must_use]
-    pub fn meta<M: MetaAttribute>(value: impl Into<Magnitude>) -> Self {
-        Self::of_id(M::ID, Operation::Flat, value)
-    }
-
-    /// `op` of `value` to `attribute`.
-    #[must_use]
-    pub fn of_id(attribute: Id<AnyAttribute>, op: Operation, value: impl Into<Magnitude>) -> Self {
+    pub fn route<R: Route>(value: impl Into<Magnitude>) -> Self {
         Self {
-            attribute,
+            attribute: None,
+            route: Some(Name::from_static(R::NAME)),
+            op: Operation::Flat,
+            value: value.into(),
+            condition: None,
+            per: None,
+        }
+    }
+
+    /// `op` of `value` to the attribute named `attribute`.
+    #[must_use]
+    pub fn named(
+        attribute: Name<AnyAttribute>,
+        op: Operation,
+        value: impl Into<Magnitude>,
+    ) -> Self {
+        Self {
+            attribute: Some(attribute),
+            route: None,
             op,
             value: value.into(),
             condition: None,
@@ -205,21 +275,21 @@ impl EffectModifier {
     /// Counting once for each whole `every` of the target's `A`.
     #[must_use]
     pub fn per<A: Attribute>(mut self, every: f32) -> Self {
-        self.per = Some(Per {
-            attribute: A::ID,
+        self.per = Some(EffectPer {
+            attribute: Name::from_static(A::NAME),
             every,
         });
         self
     }
 }
 
-impl Effect {
+impl EffectData {
     /// An effect called `id` lasting `duration`, doing nothing yet: for effects
     /// defined in code.
     #[must_use]
-    pub fn new(id: impl Into<Id<Effect>>, duration: EffectDuration) -> Self {
+    pub fn new(id: impl Into<Name<AnyEffect>>, duration: EffectDuration) -> Self {
         Self {
-            id: id.into(),
+            name: id.into(),
             tags: Tags::new(),
             duration,
             period: None,
@@ -241,25 +311,25 @@ impl Effect {
 
     /// An instant effect called `id`.
     #[must_use]
-    pub fn instant(id: impl Into<Id<Effect>>) -> Self {
+    pub fn instant(id: impl Into<Name<AnyEffect>>) -> Self {
         Self::new(id, EffectDuration::Instant)
     }
 
     /// An effect called `id` lasting until it's taken off.
     #[must_use]
-    pub fn infinite(id: impl Into<Id<Effect>>) -> Self {
+    pub fn infinite(id: impl Into<Name<AnyEffect>>) -> Self {
         Self::new(id, EffectDuration::Infinite)
     }
 
     /// An effect called `id` lasting `seconds`.
     #[must_use]
-    pub fn lasting(id: impl Into<Id<Effect>>, seconds: impl Into<Magnitude>) -> Self {
+    pub fn lasting(id: impl Into<Name<AnyEffect>>, seconds: impl Into<Magnitude>) -> Self {
         Self::new(id, EffectDuration::For(seconds.into()))
     }
 
     /// Labelled `tag` too.
     #[must_use]
-    pub fn tag(mut self, tag: impl Into<Id<Tag>>) -> Self {
+    pub fn tag(mut self, tag: impl Into<TagKey>) -> Self {
         self.tags.insert(tag.into());
         self
     }
@@ -283,7 +353,7 @@ impl Effect {
 
     /// Running the execution `execution` too.
     #[must_use]
-    pub fn execution(mut self, execution: impl Into<Id<Execution>>) -> Self {
+    pub fn execution(mut self, execution: impl Into<Name<AnyExecution>>) -> Self {
         self.executions.push(execution.into());
         self
     }
@@ -291,14 +361,14 @@ impl Effect {
     /// Playing the cue `tag`: held on its target while it counts, and played
     /// once each time it executes.
     #[must_use]
-    pub fn cue(mut self, tag: impl Into<Id<Tag>>) -> Self {
+    pub fn cue(mut self, tag: impl Into<TagKey>) -> Self {
         self.cues.insert(tag.into());
         self
     }
 
     /// Granting its target `tag` while it lasts.
     #[must_use]
-    pub fn grant(mut self, tag: impl Into<Id<Tag>>) -> Self {
+    pub fn grant(mut self, tag: impl Into<TagKey>) -> Self {
         self.grants.insert(tag.into());
         self
     }
@@ -326,14 +396,14 @@ impl Effect {
 
     /// Taking active effects with `tag` off as it applies.
     #[must_use]
-    pub fn removes(mut self, tag: impl Into<Id<Tag>>) -> Self {
+    pub fn removes(mut self, tag: impl Into<TagKey>) -> Self {
         self.removes.insert(tag.into());
         self
     }
 
     /// Keeping effects with `tag` from applying while it lasts.
     #[must_use]
-    pub fn immunity(mut self, tag: impl Into<Id<Tag>>) -> Self {
+    pub fn immunity(mut self, tag: impl Into<TagKey>) -> Self {
         self.immunity.insert(tag.into());
         self
     }
@@ -347,27 +417,28 @@ impl Effect {
 
     /// Applying `effect` to its target as it applies.
     #[must_use]
-    pub fn on_apply(mut self, effect: impl Into<Id<Effect>>) -> Self {
+    pub fn on_apply(mut self, effect: impl Into<Name<AnyEffect>>) -> Self {
         self.on_apply.push(effect.into());
         self
     }
 
     /// Applying `effect` to its target as it's taken off.
     #[must_use]
-    pub fn on_remove(mut self, effect: impl Into<Id<Effect>>) -> Self {
+    pub fn on_remove(mut self, effect: impl Into<Name<AnyEffect>>) -> Self {
         self.on_remove.push(effect.into());
         self
     }
 
     /// Applying `effect` to its target as it runs out of time.
     #[must_use]
-    pub fn on_expire(mut self, effect: impl Into<Id<Effect>>) -> Self {
+    pub fn on_expire(mut self, effect: impl Into<Name<AnyEffect>>) -> Self {
         self.on_expire.push(effect.into());
         self
     }
 
     /// Whether it lasts at all.
-    pub(crate) fn lasts(&self) -> bool {
+    #[must_use]
+    pub fn lasts(&self) -> bool {
         !matches!(self.duration, EffectDuration::Instant)
     }
 }

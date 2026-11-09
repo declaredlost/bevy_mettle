@@ -97,7 +97,7 @@ impl Attribute for Life {
     const MAX: Option<Limit> = Some(Limit::attribute::<MaxLife>());
 }
 
-assert_eq!(Life::ID.as_str(), "life");
+assert_eq!(Life::NAME, "life");
 ```
 
 ## Adding them to the app
@@ -123,6 +123,29 @@ fn main() {
 Once it's added, data can name it, and every actor with its base has its
 current value kept. Its components are registered for reflection, so
 inspectors and scenes see them.
+
+Adding it gives it its number, an [`AttributeId`]: what modifiers, actors'
+state and the network know it by. Add attributes in the same order on a
+server and its clients, as replication already asks of components, and the
+numbers agree. [Names and numbers](concepts.md#names-and-numbers) says why.
+Ask for a number with `world.attribute_id::<Life>()`, or from the
+[`AttributeRegistry`] resource, which also gives each one's name and rules:
+
+```rust
+# use bevy::prelude::*;
+# use bevy_mettle::prelude::*;
+# #[derive(Attribute)] #[attribute(base = 100.0, min = 0.0, max = MaxLife)] struct Life;
+# #[derive(Attribute)] #[attribute(base = 100.0)] struct MaxLife;
+# let mut app = App::new();
+# app.add_plugins((MinimalPlugins, MettlePlugins))
+#     .add_attribute::<Life>()
+#     .add_attribute::<MaxLife>();
+let attributes = app.world().resource::<AttributeRegistry>();
+let life = attributes.id_of::<Life>().unwrap();
+assert_eq!(app.world().attribute_id::<Life>(), Some(life));
+assert_eq!(attributes.name(life), Some("life"));
+assert_eq!(attributes.id("max_life"), attributes.id_of::<MaxLife>());
+```
 
 `add_attribute` adds [`AttributePlugin`] if it isn't there yet. So add
 `MettlePlugins` (or `AttributePlugin` itself) before the first
@@ -257,6 +280,7 @@ predictions show until the server answers.
 - **The same name twice.** Two attribute types named alike (by the
   `name` setting or by their type names) panic when the second is added.
 
+[`AttributeRegistry`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/registry/struct.AttributeRegistry.html
 [`Attribute`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/trait.Attribute.html
 [`add_attribute`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/registry/trait.AttributeApp.html#tymethod.add_attribute
 [`AttributePlugin`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/struct.AttributePlugin.html

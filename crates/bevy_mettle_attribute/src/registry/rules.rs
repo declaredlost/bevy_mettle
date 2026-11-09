@@ -1,38 +1,65 @@
 //! What attributes are named by, and what their rules are made of.
 
-use bevy_mettle_core::{Id, IdTarget};
+use std::any::TypeId;
+
+use bevy_mettle_core::registry::{Key, Kind};
 use serde::{Deserialize, Serialize};
 
 use crate::Attribute;
 
-/// Any attribute: what an `Id<AnyAttribute>` names, in data and in modifiers.
+/// The attribute kind: what data names, and an [`AttributeId`] numbers.
 ///
-/// Each attribute is a type of its own; this is what they share.
-#[derive(IdTarget)]
-#[id_target(name = "attribute")]
+/// An attribute's name in data is a `Name<AnyAttribute>`, until it's resolved
+/// to an [`AttributeId`].
+#[derive(Kind)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnyAttribute {}
 
+/// An attribute's number in an app: what state, modifiers and the network use.
+///
+/// Dense, and given as it's added.
+///
+/// As Bevy's `ComponentId` is to a component: look one up from its type in
+/// the [`AttributeRegistry`](super::AttributeRegistry), with
+/// [`id_of`](bevy_mettle_core::registry::Registry::id_of), or with
+/// [`AttributeWorld::attribute_id`](crate::read::AttributeWorld::attribute_id),
+/// and its name and rules with
+/// [`get`](bevy_mettle_core::registry::Registry::get).
+pub type AttributeId = Key<AnyAttribute>;
+
 /// What an attribute is kept within: a value, or another attribute's value.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// Set by the attribute's type.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Limit {
     /// This value.
     Value(f32),
-    /// This attribute's current value, as the actor has it, read in the same
-    /// context.
-    Attribute(Id<AnyAttribute>),
+    /// The current value of the attribute of this type, as the actor has it,
+    /// read in the same context.
+    Attribute(TypeId),
 }
 
 impl Limit {
     /// `A`'s current value.
     #[must_use]
     pub const fn attribute<A: Attribute>() -> Self {
-        Self::Attribute(A::ID)
+        Self::Attribute(TypeId::of::<A>())
     }
 }
 
-/// What an attribute's base does as a limit that's another attribute moves:
-/// life as its maximum drops, or rises.
+/// A [`Limit`] as an app has it: its attribute resolved to its number.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Bound {
+    /// This value.
+    Value(f32),
+    /// This attribute's current value, as the actor has it, read in the same
+    /// context.
+    Attribute(AttributeId),
+}
+
+/// What an attribute's base does as another attribute that limits it moves.
+///
+/// Life, say, as its maximum drops or rises.
 ///
 /// Only the world that decides attributes moves it: a server, or a game on
 /// its own. A client sees what the server serves.

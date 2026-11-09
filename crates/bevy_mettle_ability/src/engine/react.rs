@@ -2,8 +2,7 @@
 //! effects applied, grants taken back.
 
 use bevy::prelude::*;
-use bevy_mettle_core::Id;
-use bevy_mettle_core::tag::Tag;
+use bevy_mettle_core::tag::TagKey;
 
 use super::activate::activate;
 use super::end::end;
@@ -24,7 +23,7 @@ pub(crate) fn send(world: &mut World, event: GameplayEvent) {
                 .get::<GrantedAbility>(*ability)
                 .is_some_and(|granted| {
                     granted.def.triggers.iter().any(|trigger| {
-                    matches!(trigger, Trigger::Event(tag) if event.tag.is_within(tag))
+                    matches!(trigger, Trigger::Event(tag) if event.tag.is_within(*tag))
                 })
                 })
         })
@@ -39,7 +38,7 @@ pub(crate) fn send(world: &mut World, event: GameplayEvent) {
 }
 
 /// `actor` came to own `tag`: abilities it triggers activated.
-pub(crate) fn tag_added(world: &mut World, actor: Entity, tag: &Id<Tag>) {
+pub(crate) fn tag_added(world: &mut World, actor: Entity, tag: TagKey) {
     if crate::net::defers(world) {
         return;
     }
@@ -50,7 +49,7 @@ pub(crate) fn tag_added(world: &mut World, actor: Entity, tag: &Id<Tag>) {
                 .get::<GrantedAbility>(*ability)
                 .is_some_and(|granted| {
                     granted.def.triggers.iter().any(|trigger| match trigger {
-                        Trigger::TagAdded(on) | Trigger::TagPresent(on) => on == tag,
+                        Trigger::TagAdded(on) | Trigger::TagPresent(on) => *on == tag,
                         Trigger::Event(_) => false,
                     })
                 })
@@ -62,7 +61,7 @@ pub(crate) fn tag_added(world: &mut World, actor: Entity, tag: &Id<Tag>) {
 }
 
 /// `actor` no longer owns `tag`: abilities present on it cancelled.
-pub(crate) fn tag_removed(world: &mut World, actor: Entity, tag: &Id<Tag>) {
+pub(crate) fn tag_removed(world: &mut World, actor: Entity, tag: TagKey) {
     if crate::net::defers(world) {
         return;
     }
@@ -76,7 +75,7 @@ pub(crate) fn tag_removed(world: &mut World, actor: Entity, tag: &Id<Tag>) {
                         .def
                         .triggers
                         .iter()
-                        .any(|trigger| matches!(trigger, Trigger::TagPresent(on) if on == tag))
+                        .any(|trigger| matches!(trigger, Trigger::TagPresent(on) if *on == tag))
                 })
         })
         .collect();
@@ -99,7 +98,7 @@ pub(crate) fn effect_applied(world: &mut World, actor: Entity, effect: Entity) {
     };
     let abilities = registry.granted_by(active.id()).to_vec();
     for ability in abilities {
-        grant(world, actor, &ability, level, Some(effect));
+        grant(world, actor, ability, level, Some(effect));
     }
 }
 

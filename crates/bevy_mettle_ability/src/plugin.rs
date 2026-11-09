@@ -4,7 +4,7 @@ use bevy_mettle_core::tag::{TagAdded, TagRemoved};
 use bevy_mettle_effect::events::EffectApplied;
 
 use crate::active::GrantedBy;
-use crate::behaviour::Behaviours;
+use crate::behaviour::BehaviourRegistry;
 use crate::net::end::{AbilityCancelRequest, AbilityEnd};
 use crate::net::request::{AbilityReply, AbilityRequest};
 use crate::net::{self};
@@ -29,7 +29,7 @@ pub struct AbilityPlugin;
 impl Plugin for AbilityPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AbilityRegistry>()
-            .init_resource::<Behaviours>()
+            .init_resource::<BehaviourRegistry>()
             .init_resource::<engine::Activations>()
             .init_resource::<NetRole>()
             .init_resource::<net::Pending>()
@@ -65,9 +65,9 @@ impl Plugin for AbilityPlugin {
                  role: Res<NetRole>,
                  mut interrupting: ResMut<engine::Interrupting>,
                  mut commands: Commands| {
-                    let (actor, tag) = (event.entity, event.tag.clone());
+                    let (actor, tag) = (event.entity, event.tag);
                     engine::note_interrupt(actor, *role, &mut interrupting, &mut commands);
-                    commands.queue(move |world: &mut World| engine::tag_added(world, actor, &tag));
+                    commands.queue(move |world: &mut World| engine::tag_added(world, actor, tag));
                 },
             )
             .add_observer(
@@ -75,10 +75,9 @@ impl Plugin for AbilityPlugin {
                  role: Res<NetRole>,
                  mut interrupting: ResMut<engine::Interrupting>,
                  mut commands: Commands| {
-                    let (actor, tag) = (event.entity, event.tag.clone());
+                    let (actor, tag) = (event.entity, event.tag);
                     engine::note_interrupt(actor, *role, &mut interrupting, &mut commands);
-                    commands
-                        .queue(move |world: &mut World| engine::tag_removed(world, actor, &tag));
+                    commands.queue(move |world: &mut World| engine::tag_removed(world, actor, tag));
                 },
             )
             .add_observer(|event: On<EffectApplied>, mut commands: Commands| {

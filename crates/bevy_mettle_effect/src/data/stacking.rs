@@ -1,9 +1,9 @@
 //! How applying an effect again stacks.
 
-use bevy_mettle_core::Id;
+use bevy_mettle_core::registry::Name;
 use serde::{Deserialize, Serialize};
 
-use crate::data::Effect;
+use crate::data::AnyEffect;
 
 /// How an effect applied again onto its target stacks, up to a limit.
 ///
@@ -17,12 +17,11 @@ use crate::data::Effect;
 /// apart. At the limit, applying again applies `overflow` instead of the
 /// effect's own `on_apply`.
 ///
-/// ```ron
-/// (by: Target, limit: 3, reapply: Refresh, expire: RemoveOne, overflow: ["ignited"])
-/// ```
+/// Its overflow effects are named (`E`, an `Name<AnyEffect>`) in data, and
+/// numbered (an [`EffectId`](crate::EffectId)) once checked.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Stacking {
+pub struct Stacking<E = Name<AnyEffect>> {
     /// Whose stacks are one: everyone's on the target, unless it says.
     #[serde(default)]
     pub by: StackBy,
@@ -40,8 +39,8 @@ pub struct Stacking {
     #[serde(default)]
     pub expire: Expire,
     /// Effects applied to the target in its place when it's at its limit.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub overflow: Vec<Id<Effect>>,
+    #[serde(default = "Vec::new", skip_serializing_if = "Vec::is_empty")]
+    pub overflow: Vec<E>,
 }
 
 /// Whose applications of an effect stack: everyone's, or each source's apart.
@@ -84,7 +83,7 @@ pub enum Reapply {
     Keep,
 }
 
-/// What running out of time does to a stacked effect.
+/// What running out of time does to a stacked effect: clear, drop one, refresh.
 #[derive(
     Debug,
     Clone,

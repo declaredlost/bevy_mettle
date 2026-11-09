@@ -7,10 +7,8 @@ Abilities can also come from effects, and be activated by events and tags.
 
 The mage's staff lets it channel. Equipping the staff applies the `staff`
 effect, and a [`Grant`] says what that effect grants:
-
-```ron
-[(effect: "staff", abilities: ["channel"])]
-```
+`Grant::new("staff", ["channel"])`. `Grant` is a serde type: in data, a
+grant names its effect and its abilities by name.
 
 While the staff's effect lasts, the mage has `channel`. When the effect goes,
 however it goes, the ability goes with it, cancelled first if it's active.
@@ -34,13 +32,16 @@ exist.
 # struct Mana;
 # #[derive(Component, Default, Behaviour)]
 # struct Channel;
+#[derive(Effect)]
+struct Staff;
+
 # let mut app = App::new();
 # app.add_plugins(MettlePlugins)
 #     .add_attribute::<Mana>()
 #     .add_behaviour::<Channel>();
-app.insert_resource(MettleContent {
-    effects: vec![Effect::infinite("staff")],
-    abilities: vec![Ability::new("channel", "channel")],
+app.add_effect::<Staff>().insert_resource(MettleContent {
+    effects: vec![EffectData::infinite("staff")],
+    abilities: vec![AbilityData::new("channel", "channel")],
     grants: vec![Grant::new("staff", ["channel"])],
     ..default()
 });
@@ -49,10 +50,15 @@ let world = app.world_mut();
 let mage = world.spawn(Base::<Mana>::default()).id();
 
 // Equipping the staff grants channel.
-world.apply_effect(mage, EffectSpec::new("staff"));
+world.apply_effect(mage, Staff);
 world.flush();
 let granted: Vec<Entity> = world.get::<Abilities>(mage).unwrap().iter().collect();
 assert_eq!(granted.len(), 1);
+
+// What the staff grants, by number.
+let channel = world.resource::<AbilityRegistry>().id("channel").unwrap();
+let staff_id = world.resource::<EffectRegistry>().id_of::<Staff>().unwrap();
+assert_eq!(world.resource::<AbilityRegistry>().granted_by(staff_id), [channel]);
 let staff = world.get::<GrantedBy>(granted[0]).unwrap().0;
 
 // Taking it off takes channel away.
@@ -63,7 +69,8 @@ assert!(world.get_entity(granted[0]).is_err());
 
 The granted ability is [`GrantedBy`] the effect, and the effect lists what it
 granted in [`GrantedAbilities`]. It's granted at the effect's level. Its
-`GrantedAbility::source()` is the effect.
+`GrantedAbility::source()` is the effect. [`AbilityRegistry::granted_by`]
+lists what an effect grants, by its number.
 
 Grants are applied by an observer of the effect being applied, so they land
 when that observer's commands do: at once in a system's commands, after
@@ -89,15 +96,8 @@ event or a tag has no aim to give it. Content with one is rejected.
 ### Gameplay events
 
 A [`GameplayEvent`] is a tag sent to an actor, with who caused it, who it's
-about, and how much. The mage ripostes with a fireball when it parries:
-
-```ron
-(
-    id: "fireball",
-    behaviour: "cast_fireball",
-    triggers: [Event("event.parried")],
-)
-```
+about, and how much. The mage ripostes with a fireball when it parries: its
+fireball has the trigger `Trigger::Event(TagKey::named("event.parried"))`.
 
 ```rust
 # use bevy::prelude::*;
@@ -135,15 +135,8 @@ not an ability is listening. Observe it for anything else a parry should do.
 
 ### Tags
 
-The mage lashes out with `smolder` while it's burning:
-
-```ron
-(
-    id: "smolder",
-    behaviour: "smolder",
-    triggers: [TagPresent("state.burning")],
-)
-```
+The mage lashes out with `smolder` while it's burning: its trigger is
+`Trigger::TagPresent(TagKey::named("state.burning"))`.
 
 ```rust
 # use core::time::Duration;
@@ -155,23 +148,25 @@ The mage lashes out with `smolder` while it's burning:
 # struct Life;
 # #[derive(Component, Default, Behaviour)]
 # struct Smolder;
+# #[derive(Effect)] struct Burning;
+# #[derive(Ability)] #[ability(name = "smolder")] struct SmolderAbility;
 # let mut app = App::new();
 # app.add_plugins((MinimalPlugins, MettlePlugins))
 #     .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(50)))
 #     .add_attribute::<Life>()
-#     .add_behaviour::<Smolder>();
-# let tags: Vec<Tag> = ["state", "state.burning"]
-#     .into_iter()
-#     .map(|id| Tag { id: Id::from_static(id) })
-#     .collect();
-# let tags = TagTree::build(&tags).unwrap();
-# let effects = EffectRegistry::check(&[Effect::lasting("burning", 4.0).grant("state.burning")], EffectChecks { tags: &tags, curves: &CurveTable::default(), attributes: app.world().resource::<AttributeRegistry>(), code: &EffectCode::new() })
-# .unwrap();
-# let abilities = AbilityRegistry::check(&[Ability::new("smolder", "smolder") .trigger(Trigger::TagPresent(Id::from_static("state.burning")))], &[], AbilityChecks { tags: &tags, effects: &effects, behaviours: app.world().resource::<Behaviours>() })
-# .unwrap();
-# app.insert_resource(effects).insert_resource(abilities);
+#     .add_behaviour::<Smolder>()
+#     .add_effect::<Burning>()
+#     .add_ability::<SmolderAbility>()
+#     .insert_resource(MettleContent {
+#         tags: ["state", "state.burning"].map(TagKey::named).to_vec(),
+#         effects: vec![EffectData::lasting("burning", 4.0).grant("state.burning")],
+#         abilities: vec![AbilityData::new("smolder", "smolder")
+#             .trigger(Trigger::TagPresent(TagKey::named("state.burning")))],
+#         ..default()
+#     });
+# app.update();
 let mage = app.world_mut().spawn(Base::<Life>::default()).id();
-app.world_mut().grant_ability(mage, "smolder", 1.0);
+app.world_mut().grant_ability(mage, SmolderAbility);
 
 let smoldering = |app: &mut App| {
     app.world_mut()
@@ -181,7 +176,7 @@ let smoldering = |app: &mut App| {
 };
 
 // Set alight: once its owned tags are told, smolder activates.
-app.world_mut().apply_effect(mage, EffectSpec::new("burning"));
+app.world_mut().apply_effect(mage, Burning);
 app.update();
 app.update();
 assert_eq!(smoldering(&mut app), 1);
@@ -197,8 +192,8 @@ assert_eq!(smoldering(&mut app), 0);
 ```
 
 `TagAdded` and `TagPresent` name a tag exactly. They fire when that tag
-comes to be owned, and owning a tag under it counts: `TagAdded("state")`
-fires when the mage first owns any `state.*` tag at all. They fire when
+comes to be owned, and owning a tag under it counts: a `TagAdded` of
+`state` fires when the mage first owns any `state.*` tag at all. They fire when
 [`TagAdded`](https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagAdded.html)
 and [`TagRemoved`](https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagRemoved.html)
 are told, which is when attributes are next worked out, not the moment the
@@ -214,7 +209,7 @@ any of the tags given. Since an ability's tags include those above them,
 # use bevy::prelude::*;
 # use bevy_mettle::prelude::*;
 fn cast_everything(commands: &mut Commands, mage: Entity) {
-    let spells: Tags = [Id::from_static("ability.spell")].into_iter().collect();
+    let spells: Tags = ["ability.spell"].into_iter().collect();
     commands.entity(mage).activate_tagged(spells);
 }
 # let _ = cast_everything;
@@ -235,4 +230,5 @@ server activates and grants arrives by replication. See
 [`GameplayEvent`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.GameplayEvent.html
 [`Grant`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/data/struct.Grant.html
 [`GrantedAbilities`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.GrantedAbilities.html
+[`AbilityRegistry::granted_by`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilityRegistry.html#method.granted_by
 [`GrantedBy`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.GrantedBy.html

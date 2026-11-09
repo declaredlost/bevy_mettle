@@ -8,19 +8,47 @@ use bevy::prelude::*;
 use bevy_harness::TestApp;
 use bevy_mettle::prelude::*;
 
-use crate::common::{Mana, Strength, actor, attributes, close, get, own};
+use crate::common::{Mana, Strength, actor, attributes, close, get, id, own};
+
+#[derive(Ability)]
+struct Fireball;
+
+#[derive(Ability)]
+struct Charge;
+
+#[derive(Ability)]
+struct Focus;
+
+#[derive(Ability)]
+struct Shot;
+
+#[derive(Ability)]
+struct Bolt;
+
+#[derive(Effect)]
+#[effect(name = "fireball.cooldown")]
+struct FireballCooldown;
+
+#[derive(Effect)]
+struct Burn;
+
+#[derive(Effect)]
+struct Ward;
+
+#[derive(Effect)]
+struct Blessed;
 
 #[derive(Component, Default, Behaviour)]
 struct Cast;
 
 /// A price paid in mana, and paid back in strength to whoever paid it.
-#[derive(MetaAttribute)]
+#[derive(Route)]
 struct Price;
 
 fn route_price(_: &EffectContext, price: f32) -> Vec<BaseChange> {
     vec![
-        BaseChange::new::<Mana>(Operation::Flat, -price),
-        BaseChange::new::<Strength>(Operation::Flat, 1.0).on_source(),
+        BaseChange::new(id::<Mana>(), Operation::Flat, -price),
+        BaseChange::new(id::<Strength>(), Operation::Flat, 1.0).on_source(),
     ]
 }
 
@@ -49,14 +77,8 @@ const TAGS: &[&str] = &[
     "cooldown.fireball",
 ];
 
-fn tags() -> TagTree {
-    let defs: Vec<Tag> = TAGS
-        .iter()
-        .map(|&id| Tag {
-            id: Id::from_static(id),
-        })
-        .collect();
-    TagTree::build(&defs).unwrap()
+fn tags() -> TagRegistry {
+    TagRegistry::build(TAGS.iter().map(|&name| TagKey::named(name))).unwrap()
 }
 
 /// A world playing as `role`, with fireball.
@@ -73,68 +95,84 @@ fn world(role: NetRole) -> TestApp {
             app.add_behaviour::<Cast>()
                 .add_behaviour::<Shoot>()
                 .check_input::<Aim, _>(in_reach)
-                .insert_resource(Reach(reach));
+                .insert_resource(Reach(reach))
+                .add_ability::<Fireball>()
+                .add_ability::<Charge>()
+                .add_ability::<Focus>()
+                .add_ability::<Shot>()
+                .add_ability::<Bolt>()
+                .add_route::<Price>(route_price)
+                .add_effect::<FireballCooldown>()
+                .add_effect::<Burn>()
+                .add_effect::<Ward>()
+                .add_effect::<Blessed>()
+                .insert_resource(tags());
         })
         .build();
     let world = app.world_mut();
-    let attributes = world.resource::<AttributeRegistry>().clone();
-    let effects = EffectRegistry::check(
-        &[
-            Effect::instant("fireball.cost")
-                .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-            Effect::instant("bolt.cost").modifier(EffectModifier::meta::<Price>(20.0)),
-            Effect::lasting("fireball.cooldown", 1.0).grant("cooldown.fireball"),
-            Effect::instant("focus.cost")
-                .modifier(EffectModifier::new::<Mana>(Operation::Additive, -0.5)),
-            Effect::lasting("burn", 5.0)
-                .period(0.5, false)
-                .modifier(EffectModifier::new::<Mana>(Operation::Flat, -1.0)),
-            Effect::lasting("ward", 5.0)
-                .modifier(EffectModifier::new::<Mana>(Operation::Flat, 1.0))
-                .stacking(Stacking {
-                    by: StackBy::Target,
-                    limit: 3,
-                    reapply: Reapply::Refresh,
-                    reset_period: false,
-                    expire: Expire::ClearAll,
-                    overflow: Vec::new(),
-                }),
-            Effect::infinite("blessed").modifier(
-                EffectModifier::new::<Mana>(Operation::Flat, 10.0)
-                    .condition(Condition::source_has("state.stunned")),
-            ),
-        ],
-        EffectChecks {
-            tags: &tags(),
-            curves: &CurveTable::default(),
-            attributes: &attributes,
-            code: &EffectCode::new().meta_attribute::<Price>(route_price),
-        },
-    )
-    .unwrap();
-    let fireball = Ability::new("fireball", "cast")
+    let effects = world
+        .resource::<EffectRegistry>()
+        .recheck(
+            &[
+                EffectData::instant("fireball.cost")
+                    .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
+                EffectData::instant("bolt.cost").modifier(EffectModifier::route::<Price>(20.0)),
+                EffectData::lasting("fireball.cooldown", 1.0).grant("cooldown.fireball"),
+                EffectData::instant("focus.cost")
+                    .modifier(EffectModifier::new::<Mana>(Operation::Additive, -0.5)),
+                EffectData::lasting("burn", 5.0)
+                    .period(0.5, false)
+                    .modifier(EffectModifier::new::<Mana>(Operation::Flat, -1.0)),
+                EffectData::lasting("ward", 5.0)
+                    .modifier(EffectModifier::new::<Mana>(Operation::Flat, 1.0))
+                    .stacking(Stacking {
+                        by: StackBy::Target,
+                        limit: 3,
+                        reapply: Reapply::Refresh,
+                        reset_period: false,
+                        expire: Expire::ClearAll,
+                        overflow: Vec::new(),
+                    }),
+                EffectData::infinite("blessed").modifier(
+                    EffectModifier::new::<Mana>(Operation::Flat, 10.0)
+                        .condition(Condition::source_has("state.stunned")),
+                ),
+            ],
+            EffectChecks {
+                tags: world.resource(),
+                curves: &CurveRegistry::default(),
+                attributes: world.resource(),
+                executions: world.resource(),
+                calculations: world.resource(),
+                routes: world.resource(),
+            },
+        )
+        .unwrap();
+    let fireball = AbilityData::new("fireball", "cast")
         .cost("fireball.cost")
         .cooldown("fireball.cooldown")
         .blocked_by("state.stunned")
         .cancel_if(Condition::owner_has("state.stunned"));
-    let charge = Ability::new("charge", "cast")
+    let charge = AbilityData::new("charge", "cast")
         .cost("fireball.cost")
         .commit(Commit::Manual);
-    let focus = Ability::new("focus", "cast").cost("focus.cost");
-    let shot = Ability::new("shot", "shoot").cost("fireball.cost");
-    let bolt = Ability::new("bolt", "cast")
+    let focus = AbilityData::new("focus", "cast").cost("focus.cost");
+    let shot = AbilityData::new("shot", "shoot").cost("fireball.cost");
+    let bolt = AbilityData::new("bolt", "cast")
         .cost("bolt.cost")
         .blocked_by("state.stunned");
-    let abilities = AbilityRegistry::check(
-        &[fireball, charge, focus, shot, bolt],
-        &[],
-        AbilityChecks {
-            tags: &tags(),
-            effects: &effects,
-            behaviours: world.resource::<Behaviours>(),
-        },
-    )
-    .unwrap();
+    let abilities = world
+        .resource::<AbilityRegistry>()
+        .recheck(
+            &[fireball, charge, focus, shot, bolt],
+            &[],
+            AbilityChecks {
+                tags: world.resource(),
+                effects: &effects,
+                behaviours: world.resource(),
+            },
+        )
+        .unwrap();
     world.insert_resource(effects);
     world.insert_resource(abilities);
     app
@@ -153,25 +191,23 @@ struct Game {
 
 impl Game {
     fn new() -> Self {
-        Self::with(&["fireball"], &[])
+        Self::with(Fireball, &[])
     }
 
-    /// The mage granted `abilities`, with `modifiers` of its own.
-    fn with(abilities: &[&'static str], modifiers: &[Modifier]) -> Self {
+    /// The mage granted `ability`, with `modifiers` of its own.
+    fn with(ability: impl Into<AbilitySpec>, modifiers: &[Modifier]) -> Self {
         let mut server = world(NetRole::Server);
         let mut client = world(NetRole::Client);
         let there = actor(&mut server, modifiers.to_vec());
         let here = actor(&mut client, modifiers.to_vec());
-        for id in abilities {
-            let ability = server.world_mut().grant_ability(there, *id, 1.0).unwrap();
-            server.tick();
-            let replica = server
-                .world()
-                .get::<AbilityReplica>(ability)
-                .unwrap()
-                .clone();
-            client.spawn((replica, AbilityOf(here)));
-        }
+        let ability = server.world_mut().grant_ability(there, ability).unwrap();
+        server.tick();
+        let replica = server
+            .world()
+            .get::<AbilityReplica>(ability)
+            .unwrap()
+            .clone();
+        client.spawn((replica, AbilityOf(here)));
         client.tick();
         Self {
             server,
@@ -292,8 +328,13 @@ impl Game {
         self.client.tick();
     }
 
-    /// The mage's granted `id`, on the client.
-    fn ability_here(&self, id: &str) -> Entity {
+    /// The mage's granted `A`, on the client.
+    fn ability_here<A: Ability>(&self) -> Entity {
+        let id = self
+            .client
+            .world()
+            .resource::<AbilityRegistry>()
+            .id_of::<A>();
         self.client
             .entity(self.here)
             .get::<Abilities>()
@@ -302,13 +343,18 @@ impl Game {
                 self.client
                     .entity(*ability)
                     .try_get::<GrantedAbility>()
-                    .is_some_and(|granted| granted.id().as_str() == id)
+                    .is_some_and(|granted| Some(granted.id()) == id)
             })
             .unwrap()
     }
 
-    /// The mage's granted `id`, on the server.
-    fn ability_there(&self, id: &str) -> Entity {
+    /// The mage's granted `A`, on the server.
+    fn ability_there<A: Ability>(&self) -> Entity {
+        let id = self
+            .server
+            .world()
+            .resource::<AbilityRegistry>()
+            .id_of::<A>();
         self.server
             .entity(self.there)
             .get::<Abilities>()
@@ -317,7 +363,7 @@ impl Game {
                 self.server
                     .entity(*ability)
                     .try_get::<GrantedAbility>()
-                    .is_some_and(|granted| granted.id().as_str() == id)
+                    .is_some_and(|granted| Some(granted.id()) == id)
             })
             .unwrap()
     }
@@ -340,9 +386,7 @@ impl Game {
 }
 
 fn owns(app: &TestApp, actor: Entity, tag: &'static str) -> bool {
-    app.entity(actor)
-        .get::<OwnedTags>()
-        .contains(&Id::from_static(tag))
+    app.entity(actor).get::<OwnedTags>().contains(tag)
 }
 
 #[test]
@@ -350,7 +394,7 @@ fn a_client_predicts_at_once_and_the_servers_own_replaces_it() {
     let mut game = Game::new();
     game.client
         .world_mut()
-        .activate_ability(game.here, "fireball")
+        .activate_ability(game.here, Fireball)
         .unwrap();
     game.client.tick();
     assert!(
@@ -383,10 +427,10 @@ fn a_client_predicts_at_once_and_the_servers_own_replaces_it() {
 
 #[test]
 fn what_a_cost_is_routed_into_is_predicted_and_undone_if_rejected() {
-    let mut game = Game::with(&["bolt"], &[]);
+    let mut game = Game::with(Bolt, &[]);
     game.client
         .world_mut()
-        .activate_ability(game.here, "bolt")
+        .activate_ability(game.here, Bolt)
         .unwrap();
     game.client.tick();
     assert!(close(get::<Mana>(&game.client, game.here), 10.0));
@@ -406,10 +450,10 @@ fn what_a_cost_is_routed_into_is_predicted_and_undone_if_rejected() {
 
 #[test]
 fn what_a_cost_is_routed_into_is_confirmed_as_the_server_has_it() {
-    let mut game = Game::with(&["bolt"], &[]);
+    let mut game = Game::with(Bolt, &[]);
     game.client
         .world_mut()
-        .activate_ability(game.here, "bolt")
+        .activate_ability(game.here, Bolt)
         .unwrap();
     game.ask();
     assert!(close(get::<Mana>(&game.server, game.there), 10.0));
@@ -425,7 +469,7 @@ fn a_rejected_prediction_is_undone() {
     own(&mut game.server, game.there, "state.stunned", true);
     game.client
         .world_mut()
-        .activate_ability(game.here, "fireball")
+        .activate_ability(game.here, Fireball)
         .unwrap();
     game.client.tick();
     assert!(close(get::<Mana>(&game.client, game.here), 10.0));
@@ -457,7 +501,7 @@ fn a_shown_effect_takes_its_tags_with_it_as_it_goes() {
     let mut game = Game::new();
     game.client
         .world_mut()
-        .activate_ability(game.here, "fireball")
+        .activate_ability(game.here, Fireball)
         .unwrap();
     game.client.tick();
     game.ask();
@@ -485,18 +529,18 @@ fn a_shown_effect_takes_its_tags_with_it_as_it_goes() {
 
 #[test]
 fn a_commit_after_the_answer_predicts_nothing_more() {
-    let mut game = Game::with(&["charge"], &[]);
+    let mut game = Game::with(Charge, &[]);
     game.client
         .world_mut()
-        .activate_ability(game.here, "charge")
+        .activate_ability(game.here, Charge)
         .unwrap();
     game.client.tick();
     game.ask();
     game.answer();
-    let here = game.ability_here("charge");
+    let here = game.ability_here::<Charge>();
     assert!(game.client.world_mut().commit_ability(here));
     game.client.tick();
-    let there = game.ability_there("charge");
+    let there = game.ability_there::<Charge>();
     assert!(game.server.world_mut().commit_ability(there));
     game.server.tick();
     game.answer();
@@ -511,7 +555,7 @@ fn a_predicted_periodic_effect_predicts_nothing_once_answered() {
     let mut game = Game::new();
     game.client
         .world_mut()
-        .apply_effect(game.here, EffectSpec::new("burn").activation(7));
+        .apply_effect(game.here, Burn.spec().activation(7));
     game.client.secs(1.0);
     assert!(
         get::<Mana>(&game.client, game.here) < 30.0,
@@ -527,10 +571,8 @@ fn a_predicted_periodic_effect_predicts_nothing_once_answered() {
 }
 
 /// The server's `effect` on its mage, shown on the client.
-fn shown(game: &mut Game, effect: &'static str) -> Entity {
-    game.server
-        .world_mut()
-        .apply_effect(game.there, EffectSpec::new(effect));
+fn shown(game: &mut Game, effect: impl Into<EffectSpec>) -> Entity {
+    game.server.world_mut().apply_effect(game.there, effect);
     game.server.tick();
     game.answer();
     game.client
@@ -544,10 +586,10 @@ fn shown(game: &mut Game, effect: &'static str) -> Entity {
 #[test]
 fn a_stack_predicted_onto_the_servers_effect_is_kept_apart() {
     let mut game = Game::new();
-    let ward = shown(&mut game, "ward");
+    let ward = shown(&mut game, Ward);
     game.client
         .world_mut()
-        .apply_effect(game.here, EffectSpec::new("ward").activation(7));
+        .apply_effect(game.here, Ward.spec().activation(7));
     game.client.tick();
     let stacks = |game: &Game| {
         game.client
@@ -578,7 +620,7 @@ fn a_shown_effect_counts_its_source_as_it_was() {
     game.server.tick();
     game.server
         .world_mut()
-        .apply_effect(game.there, EffectSpec::new("blessed").source(server_caster));
+        .apply_effect(game.there, Blessed.source(server_caster));
     game.server.tick();
     let effect = game
         .server
@@ -597,7 +639,7 @@ fn a_shown_effect_counts_its_source_as_it_was() {
     let mut mapping = EntityHashMap::default();
     mapping.insert(server_caster, client_caster);
     replica.map_entities(&mut mapping);
-    assert_eq!(replica.spec.source, Some(client_caster), "mapped");
+    assert_eq!(replica.source, Some(client_caster), "mapped");
     game.client.spawn((replica, EffectOf(game.here)));
     game.client.ticks(2);
     assert!(
@@ -608,10 +650,10 @@ fn a_shown_effect_counts_its_source_as_it_was() {
 
 #[test]
 fn a_predicted_cost_comes_to_what_the_server_works_out() {
-    let mut game = Game::with(&["focus"], &[Modifier::additive::<Mana>(0.5)]);
+    let mut game = Game::with(Focus, &[Modifier::additive(id::<Mana>(), 0.5)]);
     game.client
         .world_mut()
-        .activate_ability(game.here, "focus")
+        .activate_ability(game.here, Focus)
         .unwrap();
     game.client.tick();
     game.ask();
@@ -626,26 +668,34 @@ fn another_sources_effect_under_the_same_activation_isnt_taken_for_mine() {
     let mut game = Game::new();
     game.client
         .world_mut()
-        .activate_ability(game.here, "fireball")
+        .activate_ability(game.here, Fireball)
         .unwrap();
     game.client.tick();
     let activation = game
         .client
         .world()
-        .get::<ActiveAbility>(game.ability_here("fireball"))
+        .get::<ActiveAbility>(game.ability_here::<Fireball>())
         .unwrap()
         .activation;
     let elsewhere = game.client.spawn(());
+    let cooldown = game
+        .client
+        .world()
+        .resource::<EffectRegistry>()
+        .id_of::<FireballCooldown>()
+        .unwrap();
     game.client.spawn((
         EffectReplica {
-            spec: EffectSpec::new("fireball.cooldown")
-                .source(elsewhere)
-                .activation(activation),
+            effect: cooldown,
+            level: 1.0,
+            params: Vec::new(),
+            source: Some(elsewhere),
+            activation: Some(activation),
             stacks: 1,
             duration: Some(1.0),
             remaining: Some(1.0),
             inhibited: false,
-            source_tags: Tags::new(),
+            source_tags: Vec::new(),
             captured: Vec::new(),
         },
         EffectOf(game.here),
@@ -661,9 +711,15 @@ fn another_sources_effect_under_the_same_activation_isnt_taken_for_mine() {
 #[test]
 fn a_request_under_the_servers_bit_is_rejected() {
     let mut game = Game::new();
+    let fireball = game
+        .server
+        .world()
+        .resource::<AbilityRegistry>()
+        .id_of::<Fireball>()
+        .unwrap();
     game.server.write(AbilityRequest {
         actor: game.there,
-        ability: Id::from_static("fireball"),
+        ability: fireball,
         activation: 1 << 63 | 5,
     });
     game.server.tick();
@@ -681,7 +737,7 @@ fn a_request_under_the_servers_bit_is_rejected() {
 #[test]
 fn an_abilitys_replica_restated_changes_its_level() {
     let mut game = Game::new();
-    let ability = game.ability_here("fireball");
+    let ability = game.ability_here::<Fireball>();
     game.client
         .world_mut()
         .get_mut::<AbilityReplica>(ability)
@@ -696,15 +752,15 @@ fn an_abilitys_replica_restated_changes_its_level() {
 
 #[test]
 fn a_client_predicts_with_its_input_and_the_server_runs_with_the_same() {
-    let mut game = Game::with(&["shot"], &[]);
+    let mut game = Game::with(Shot, &[]);
     let here = game
         .client
         .world_mut()
-        .activate_ability_with::<Shoot>(game.here, "shot", Aim(4.0))
+        .activate_ability_with::<Shoot>(game.here, Shot, Aim(4.0))
         .unwrap();
     game.client.entity(here).assert_eq(Aim(4.0));
     game.ask();
-    let there = game.ability_there("shot");
+    let there = game.ability_there::<Shot>();
     game.server
         .entity(there)
         .assert_has::<Shoot>()
@@ -719,12 +775,12 @@ fn a_client_predicts_with_its_input_and_the_server_runs_with_the_same() {
 
 #[test]
 fn input_the_server_rejects_undoes_the_prediction() {
-    let mut game = Game::with(&["shot"], &[]);
+    let mut game = Game::with(Shot, &[]);
     game.client.watch_triggered::<AbilityFailed>();
     let here = game
         .client
         .world_mut()
-        .activate_ability_with::<Shoot>(game.here, "shot", Aim(40.0))
+        .activate_ability_with::<Shoot>(game.here, Shot, Aim(40.0))
         .unwrap();
     game.client.tick();
     assert!(
@@ -733,7 +789,7 @@ fn input_the_server_rejects_undoes_the_prediction() {
     );
     game.ask();
     game.server
-        .entity(game.ability_there("shot"))
+        .entity(game.ability_there::<Shot>())
         .assert_lacks::<Shoot>();
     assert!(
         close(get::<Mana>(&game.server, game.there), 30.0),
@@ -754,15 +810,15 @@ fn input_the_server_rejects_undoes_the_prediction() {
 
 #[test]
 fn new_input_is_predicted_and_cancels_both_sides_if_the_server_rejects_it() {
-    let mut game = Game::with(&["shot"], &[]);
+    let mut game = Game::with(Shot, &[]);
     let here = game
         .client
         .world_mut()
-        .activate_ability_with::<Shoot>(game.here, "shot", Aim(4.0))
+        .activate_ability_with::<Shoot>(game.here, Shot, Aim(4.0))
         .unwrap();
     game.ask();
     game.answer();
-    let there = game.ability_there("shot");
+    let there = game.ability_there::<Shot>();
 
     // Aimed again, within reach: taken.
     game.client
@@ -801,7 +857,7 @@ fn a_cast_the_server_interrupts_ends_on_the_client_too() {
     let here = game
         .client
         .world_mut()
-        .activate_ability(game.here, "fireball")
+        .activate_ability(game.here, Fireball)
         .unwrap();
     game.ask();
     game.answer();
@@ -810,7 +866,7 @@ fn a_cast_the_server_interrupts_ends_on_the_client_too() {
     own(&mut game.server, game.there, "state.stunned", true);
     game.server.tick();
     game.server
-        .entity(game.ability_there("fireball"))
+        .entity(game.ability_there::<Fireball>())
         .assert_lacks::<ActiveAbility>();
     game.answer();
     game.client.entity(here).assert_lacks::<ActiveAbility>();
@@ -827,11 +883,11 @@ fn casting(game: &mut Game) -> (Entity, Entity) {
     let here = game
         .client
         .world_mut()
-        .activate_ability(game.here, "fireball")
+        .activate_ability(game.here, Fireball)
         .unwrap();
     game.ask();
     game.answer();
-    let there = game.ability_there("fireball");
+    let there = game.ability_there::<Fireball>();
     game.server.entity(there).assert_has::<ActiveAbility>();
     (here, there)
 }
@@ -873,15 +929,15 @@ fn a_client_leaves_interrupting_to_the_server() {
 
 #[test]
 fn a_client_that_cant_pay_from_what_it_predicts_leaves_it_to_the_server() {
-    let mut game = Game::with(&["charge"], &[]);
+    let mut game = Game::with(Charge, &[]);
     let here = game
         .client
         .world_mut()
-        .activate_ability(game.here, "charge")
+        .activate_ability(game.here, Charge)
         .unwrap();
     game.ask();
     game.answer();
-    let there = game.ability_there("charge");
+    let there = game.ability_there::<Charge>();
 
     // The client predicts too little mana; the server has enough.
     game.client
@@ -912,7 +968,7 @@ fn a_cancel_that_overtakes_its_cast_is_held_for_it() {
     let here = game
         .client
         .world_mut()
-        .activate_ability(game.here, "fireball")
+        .activate_ability(game.here, Fireball)
         .unwrap();
     game.client.world_mut().cancel_ability(here);
 
@@ -927,7 +983,7 @@ fn a_cancel_that_overtakes_its_cast_is_held_for_it() {
     game.client.world_mut().write_message_batch(request);
     game.ask();
     game.server
-        .entity(game.ability_there("fireball"))
+        .entity(game.ability_there::<Fireball>())
         .assert_lacks::<ActiveAbility>();
 }
 
@@ -937,7 +993,7 @@ fn a_cancel_held_past_its_time_is_let_go() {
     let here = game
         .client
         .world_mut()
-        .activate_ability(game.here, "fireball")
+        .activate_ability(game.here, Fireball)
         .unwrap();
     game.client.world_mut().cancel_ability(here);
     let request: Vec<AbilityRequest> = game
@@ -953,7 +1009,7 @@ fn a_cancel_held_past_its_time_is_let_go() {
     game.client.world_mut().write_message_batch(request);
     game.ask();
     game.server
-        .entity(game.ability_there("fireball"))
+        .entity(game.ability_there::<Fireball>())
         .assert_has::<ActiveAbility>();
 }
 
@@ -963,11 +1019,11 @@ fn a_cancel_asked_with_the_cast_follows_it_to_the_server() {
     let here = game
         .client
         .world_mut()
-        .activate_ability(game.here, "fireball")
+        .activate_ability(game.here, Fireball)
         .unwrap();
     game.client.world_mut().cancel_ability(here);
     game.ask();
     game.server
-        .entity(game.ability_there("fireball"))
+        .entity(game.ability_there::<Fireball>())
         .assert_lacks::<ActiveAbility>();
 }

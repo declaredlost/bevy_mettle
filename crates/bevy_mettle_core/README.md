@@ -14,23 +14,25 @@
 [docs-url]: https://docs.rs/bevy_mettle_core
 
 What bevy_mettle's parts share: gameplay tags and the tags an actor owns,
-curve tables, and the condition language.
+curves, the condition language, and the registries everything is numbered in.
 
 ## Overview
 
-- An [`Id<T>`] names what's defined in data: a tag, a curve, an effect. What
-  it can name derives [`IdTarget`].
-- A [`TagTree`] is the gameplay tags there are, from [`Tag`]s in data, each a
+- A [`Name<K>`] names what content defines: a tag, a curve, an effect, of a
+  [`Kind`] such as `AnyEffect`. Checked, it's known by its number, a
+  [`Key<K>`], in a [`Registry`]: entries by number, numbers by name and by
+  type, as Bevy keeps components.
+- A [`TagRegistry`] is the gameplay tags there are, from [`Tag`]s in data, each a
   path such as `damage.elemental.fire`. What has a tag has every tag above
   it: a rule on `damage.elemental` holds for fire.
 - [`Tags`] is a set of them, what an effect or an ability is labelled with;
   [`OwnedTags`] is what an actor owns by count, as its states come and go,
   told by [`TagAdded`] and [`TagRemoved`].
-- A [`CurveTable`] is values by level, from [`LevelCurve`]s in data, built as
+- A [`CurveRegistry`] is values by level, from [`LevelCurve`]s in data, built as
   Bevy's curves: what effects scale by.
 - A [`Condition`] is an expression over a read's tags, what its owner,
   target and source own, and the facts it supplies, weighed from 0 to 1.
-- Building any of them checks it, and returns every [`MettleError`] at once.
+- Building any of them checks it, and returns every [`Error`] at once.
 
 Its only ECS is the owned tags, with `bevy_ecs` and no app.
 
@@ -54,32 +56,42 @@ bevy_mettle_core = "0.1"
 ## Usage
 
 ```rust
+use bevy_mettle_core::registry::Name;
 use bevy_mettle_core::prelude::*;
 
-// The tags there are, read from data.
-let tags: Vec<Tag> = ron::from_str(
-    r#"[(id: "damage"), (id: "damage.elemental"), (id: "damage.elemental.fire")]"#,
-)
-.unwrap();
-let tree = TagTree::build(&tags).unwrap();
-assert!(tree.contains(&Id::new("damage.elemental.fire")));
+// Tags code names, as types: a misspelled one doesn't compile.
+#[derive(Tag)]
+struct Damage;
+#[derive(Tag)]
+#[tag(parent = Damage)]
+struct Elemental;
+#[derive(Tag)]
+#[tag(parent = Elemental)]
+struct Fire;
+
+// The tags there are: those content names, with those code names.
+let content = ["damage", "damage.elemental", "damage.cold"].map(TagKey::named);
+let tree = TagRegistry::build(content.into_iter().chain([Fire.into()])).unwrap();
+assert!(tree.contains(Fire));
+assert!(tree.contains("damage.cold"));
 
 // A fire hit is elemental too.
 let mut hit = Tags::new();
-hit.insert(Id::new("damage.elemental.fire"));
-assert!(hit.contains(&Id::new("damage.elemental")));
+hit.insert(Fire);
+assert!(hit.contains(Elemental));
 
 // Damage by level: 10 at level 1, 110 at level 11, linearly between.
-let curves = CurveTable::build(&[LevelCurve {
-    id: Id::new("fireball.damage"),
+let curves = CurveRegistry::build(&[LevelCurve {
+    name: Name::new("fireball.damage"),
     interpolation: Interpolation::Linear,
     keys: vec![(1.0, 10.0), (11.0, 110.0)],
 }])
 .unwrap();
-assert_eq!(curves.at(&Id::new("fireball.damage"), 6.0), Some(60.0));
+let damage = curves.id("fireball.damage").unwrap();
+assert_eq!(curves.at(damage, 6.0), Some(60.0));
 
 // A condition, checked against the tree.
-let elemental = Condition::read_tagged("damage.elemental");
+let elemental = Condition::read_tagged(Elemental);
 elemental.check(&tree, None).unwrap();
 ```
 
@@ -100,15 +112,17 @@ for development setup and guidelines.
 Licensed under either of [Apache License, Version 2.0](https://github.com/declaredlost/bevy_mettle/blob/main/LICENSE-APACHE)
 or [MIT license](https://github.com/declaredlost/bevy_mettle/blob/main/LICENSE-MIT) at your option.
 
-[`Id<T>`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.Id.html
-[`IdTarget`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/trait.IdTarget.html
-[`TagTree`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagTree.html
-[`Tag`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.Tag.html
+[`Name<K>`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/struct.Name.html
+[`Key<K>`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/struct.Key.html
+[`Registry`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/struct.Registry.html
+[`Kind`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/trait.Kind.html
+[`TagRegistry`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagRegistry.html
+[`Tag`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/trait.Tag.html
 [`Tags`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.Tags.html
 [`OwnedTags`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.OwnedTags.html
 [`TagAdded`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagAdded.html
 [`TagRemoved`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagRemoved.html
-[`CurveTable`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveTable.html
+[`CurveRegistry`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveRegistry.html
 [`LevelCurve`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.LevelCurve.html
-[`Condition`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/condition/enum.Condition.html
-[`MettleError`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/enum.MettleError.html
+[`Condition`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/condition/type.Condition.html
+[`Error`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/enum.Error.html

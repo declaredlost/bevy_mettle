@@ -1,8 +1,7 @@
 //! Committing abilities: paying their cost, starting their cooldown, or both.
 
 use bevy::prelude::*;
-use bevy_mettle_core::Id;
-use bevy_mettle_effect::{EffectSpec, EffectWorld};
+use bevy_mettle_effect::{EffectId, EffectSpec, EffectWorld};
 
 use super::check::affords;
 use super::end::end;
@@ -85,18 +84,18 @@ pub(super) fn pay(
         return Committed::Unaffordable;
     }
     let level = granted.level;
-    let effects: Vec<Id<_>> = granted
+    let effects: Vec<EffectId> = granted
         .def
         .cost
         .iter()
         .filter(|_| pay)
         .chain(granted.def.cooldown.iter().filter(|_| start))
-        .cloned()
+        .copied()
         .collect();
     for effect in effects {
         world.apply_effect(
             actor,
-            EffectSpec::new(effect)
+            EffectSpec::from_id(effect)
                 .level(level)
                 .source(actor)
                 .activation(activation),

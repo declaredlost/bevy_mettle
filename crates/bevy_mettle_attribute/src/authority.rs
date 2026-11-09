@@ -15,7 +15,7 @@ use bevy::prelude::*;
 use bevy::reflect::TypePath;
 use bevy::reflect::utility::GenericTypePathCell;
 
-use crate::registry::AttributeState;
+use crate::registry::{AttributeRegistry, AttributeState};
 use crate::{Attribute, Current};
 
 /// On an actor: attribute `A`'s value with nothing in play, as served.
@@ -122,13 +122,17 @@ pub struct Remote;
 /// Syncs each `Remote` actor's `Served<A>` into its state, as it changes or
 /// the actor comes to be remote.
 pub(crate) fn sync_served<A: Attribute>(
+    registry: Res<AttributeRegistry>,
     mut actors: Query<
         (&Served<A>, &mut AttributeState),
         (With<Remote>, Or<(Changed<Served<A>>, Added<Remote>)>),
     >,
 ) {
+    let Some(id) = registry.id_of::<A>() else {
+        return;
+    };
     for (served, mut state) in &mut actors {
-        state.set_served(A::ID, served.get());
+        state.set_served(id, served.get());
     }
 }
 

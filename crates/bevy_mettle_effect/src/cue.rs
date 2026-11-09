@@ -17,26 +17,26 @@
 //! it: a client shows them next to its own, and plays a one-shot it predicted
 //! once.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 
 use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::ecs::query::SpawnDetails;
 use bevy::ecs::system::SystemId;
+use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
-use bevy_mettle_attribute::Attribute;
-use bevy_mettle_core::Id;
+use bevy_mettle_attribute::registry::AttributeId;
 use bevy_mettle_core::net::NetRole;
-use bevy_mettle_core::tag::Tag;
+use bevy_mettle_core::tag::{TagId, TagKey, TagRegistry};
 use serde::{Deserialize, Serialize};
 
-use crate::data::Effect;
+use crate::EffectId;
 use crate::events::Delta;
 
-/// A cue to play: its tag, and what it's played with.
+/// A cue to play: its tag, and what it's played with, such as its magnitude.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Cue {
     /// Its tag: `cue.hit.fire`.
-    pub tag: Id<Tag>,
+    pub tag: TagKey,
     /// How much: what was dealt.
     pub magnitude: f32,
     /// What it changed each attribute's base by.
@@ -52,7 +52,7 @@ pub struct Cue {
 impl Cue {
     /// The cue `tag`, of no magnitude, at level 1, from no one.
     #[must_use]
-    pub fn new(tag: impl Into<Id<Tag>>) -> Self {
+    pub fn new(tag: impl Into<TagKey>) -> Self {
         Self {
             tag: tag.into(),
             magnitude: 0.0,
@@ -70,13 +70,10 @@ impl Cue {
         self
     }
 
-    /// Having changed `A`'s base by `delta`.
+    /// Having changed `attribute`'s base by `delta`.
     #[must_use]
-    pub fn change<A: Attribute>(mut self, delta: f32) -> Self {
-        self.changes.push(Delta {
-            attribute: A::ID,
-            delta,
-        });
+    pub fn change(mut self, attribute: AttributeId, delta: f32) -> Self {
+        self.changes.push(Delta { attribute, delta });
         self
     }
 
@@ -109,49 +106,51 @@ impl Cue {
 #[derive(Component, Debug, Clone, Default, PartialEq, Eq)]
 #[require(ServedCues)]
 pub struct CueSources {
-    served: HashMap<Id<Tag>, u32>,
-    local: HashMap<Id<Tag>, u32>,
+    served: HashMap<TagKey, u32>,
+    local: HashMap<TagKey, u32>,
 }
 
 impl CueSources {
     /// One more source of `tag`.
-    fn add(&mut self, tag: &Id<Tag>, local: bool) {
+    fn add(&mut self, tag: TagKey, local: bool) {
         let counts = if local {
             &mut self.local
         } else {
             &mut self.served
         };
-        *counts.entry(tag.clone()).or_default() += 1;
+        *counts.entry(tag).or_default() += 1;
     }
 
     /// One less source of `tag`.
-    pub(crate) fn remove(&mut self, tag: &Id<Tag>, local: bool) {
+    pub(crate) fn remove(&mut self, tag: TagKey, local: bool) {
         let counts = if local {
             &mut self.local
         } else {
             &mut self.served
         };
-        if let Some(count) = counts.get_mut(tag) {
+        if let Some(count) = counts.get_mut(&tag) {
             *count -= 1;
             if *count == 0 {
-                counts.remove(tag);
+                counts.remove(&tag);
             }
         }
     }
 
     /// The cues held, served or not.
-    pub fn iter(&self) -> impl Iterator<Item = &Id<Tag>> {
-        self.served.keys().chain(self.local.keys())
+    pub fn iter(&self) -> impl Iterator<Item = TagKey> {
+        self.served.keys().chain(self.local.keys()).copied()
     }
 
     /// The cues held that a server serves.
-    fn served(&self) -> BTreeSet<Id<Tag>> {
-        self.served.keys().cloned().collect()
+    fn served(&self) -> BTreeSet<TagKey> {
+        self.served.keys().copied().collect()
     }
 }
 
-/// On an actor: the lasting cues its server holds on it, replicated to the
-/// clients that see it.
+/// On an actor: the lasting cues its server holds on it, replicated.
+///
+/// Replicated to the clients that see it. By their numbers in the
+/// [`TagRegistry`]: a cue the tree hasn't isn't served.
 #[derive(
     Component,
     Debug,
@@ -162,13 +161,13 @@ impl CueSources {
     Serialize,
     Deserialize
 )]
-pub struct ServedCues(pub BTreeSet<Id<Tag>>);
+pub struct ServedCues(pub BTreeSet<TagId>);
 
-/// On a lasting cue's entity: which cue it is.
+/// On a lasting cue's entity: which cue it is, its tag, while it plays.
 #[derive(Component, Debug, Clone, PartialEq, Eq)]
 pub struct ActiveCue {
     /// Its tag.
-    pub tag: Id<Tag>,
+    pub tag: TagKey,
 }
 
 /// On a lasting cue's entity: the actor it plays on, as a Bevy relationship.
@@ -189,7 +188,9 @@ impl ActiveCues {
     }
 }
 
-/// A one-shot cue a server played, as it's replicated.
+/// A one-shot cue a server played, as it's replicated in [`CueBursts`].
+///
+/// Its tag by its number in the [`TagRegistry`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Burst {
     /// Its number, counting up on its actor.
@@ -197,7 +198,7 @@ pub struct Burst {
     /// The server's elapsed seconds as it played: how old it is.
     pub at: f64,
     /// Its tag.
-    pub tag: Id<Tag>,
+    pub tag: TagId,
     /// How much.
     pub magnitude: f32,
     /// What it changed each attribute's base by.
@@ -209,11 +210,12 @@ pub struct Burst {
     /// What it was played under, if an activation.
     pub activation: Option<u64>,
     /// The effect that played it, if one did.
-    pub effect: Option<Id<Effect>>,
+    pub effect: Option<EffectId>,
 }
 
-/// On an actor: the one-shot cues its server played lately, replicated to the
-/// clients that see it, which play those they haven't.
+/// On an actor: the one-shot cues its server played lately, replicated.
+///
+/// Replicated to the clients that see it, which play those they haven't.
 #[derive(Component, Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CueBursts {
     /// The next one's number.
@@ -248,18 +250,18 @@ pub(crate) struct Played(u64);
 /// server's copies aren't played again; each as often as it was played, with
 /// the client's seconds it was played at.
 #[derive(Resource, Debug, Default)]
-pub(crate) struct Predicted(HashMap<(Entity, u64, Id<Tag>), Vec<f64>>);
+pub(crate) struct Predicted(HashMap<(Entity, u64, TagKey), Vec<f64>>);
 
 impl Predicted {
     /// Notes `tag` played on `actor` under `activation` at `at`.
-    fn note(&mut self, actor: Entity, activation: u64, tag: Id<Tag>, at: f64) {
+    fn note(&mut self, actor: Entity, activation: u64, tag: TagKey, at: f64) {
         self.0.entry((actor, activation, tag)).or_default().push(at);
     }
 
     /// Takes one play of `tag` on `actor` under `activation`: whether there
     /// was one, the server's copy of it.
-    fn take(&mut self, actor: Entity, activation: u64, tag: &Id<Tag>) -> bool {
-        let key = (actor, activation, tag.clone());
+    fn take(&mut self, actor: Entity, activation: u64, tag: TagKey) -> bool {
+        let key = (actor, activation, tag);
         let Some(plays) = self.0.get_mut(&key) else {
             return false;
         };
@@ -285,7 +287,7 @@ impl Predicted {
     }
 }
 
-/// Told on an actor as a lasting cue starts on it.
+/// Told on an actor as a lasting cue starts on it, or comes into view.
 #[derive(EntityEvent, Debug, Clone, PartialEq, Eq)]
 pub struct CueAdded {
     /// The actor.
@@ -293,7 +295,7 @@ pub struct CueAdded {
     /// The cue's entity.
     pub cue: Entity,
     /// Its tag.
-    pub tag: Id<Tag>,
+    pub tag: TagKey,
     /// Whether it was going already as this world came to see the actor: a
     /// client the actor came into view of, rather than one that saw it start.
     pub joined: bool,
@@ -307,16 +309,16 @@ pub struct CueRemoved {
     /// The cue's entity, despawned after.
     pub cue: Entity,
     /// Its tag.
-    pub tag: Id<Tag>,
+    pub tag: TagKey,
 }
 
-/// Told on an actor as a one-shot cue plays on it.
+/// Told on an actor as a one-shot cue plays on it, with what it dealt.
 #[derive(EntityEvent, Debug, Clone, PartialEq)]
 pub struct CueExecuted {
     /// The actor.
     pub entity: Entity,
     /// Its tag.
-    pub tag: Id<Tag>,
+    pub tag: TagKey,
     /// How much: what was dealt to the first attribute it changed, the one
     /// it's about (a fireball's life).
     pub magnitude: f32,
@@ -330,10 +332,10 @@ pub struct CueExecuted {
     /// What it was played under, if an activation.
     pub activation: Option<u64>,
     /// The effect that played it, if one did.
-    pub effect: Option<Id<Effect>>,
+    pub effect: Option<EffectId>,
 }
 
-/// What a cue handler is run with.
+/// What a cue handler is run with: a cue started, ended, or played.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CueEvent {
     /// A lasting cue started.
@@ -347,31 +349,32 @@ pub enum CueEvent {
 impl CueEvent {
     /// Its cue's tag.
     #[must_use]
-    pub fn tag(&self) -> &Id<Tag> {
+    pub fn tag(&self) -> TagKey {
         match self {
-            Self::Added(added) => &added.tag,
-            Self::Removed(removed) => &removed.tag,
-            Self::Executed(executed) => &executed.tag,
+            Self::Added(added) => added.tag,
+            Self::Removed(removed) => removed.tag,
+            Self::Executed(executed) => executed.tag,
         }
     }
 }
 
 /// The handlers there are, by the tag they're for.
 #[derive(Resource, Debug, Default)]
-pub(crate) struct CueHandlers(HashMap<Id<Tag>, SystemId<In<CueEvent>>>);
+pub(crate) struct CueHandlers(HashMap<TagKey, SystemId<In<CueEvent>>>);
 
-/// The system set lasting cues are shown in, and one-shots from the server
-/// played, in `PostUpdate`.
+/// The system set cues are shown and played in, in `PostUpdate`.
+///
+/// Lasting cues are shown in it, and one-shots from the server played.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CueSystems;
 
-/// Adding cue handlers to an app.
+/// Adding cue handlers to an app: systems run for the cues under a tag.
 pub trait CueApp {
     /// Runs `handler`, a system, for each cue tagged `tag`, or under it, that
     /// no handler for a more specific tag takes: as it starts, ends, or plays.
     fn add_cue_handler<M>(
         &mut self,
-        tag: impl Into<Id<Tag>>,
+        tag: impl Into<TagKey>,
         handler: impl IntoSystem<In<CueEvent>, (), M> + 'static,
     ) -> &mut Self;
 }
@@ -379,7 +382,7 @@ pub trait CueApp {
 impl CueApp for App {
     fn add_cue_handler<M>(
         &mut self,
-        tag: impl Into<Id<Tag>>,
+        tag: impl Into<TagKey>,
         handler: impl IntoSystem<In<CueEvent>, (), M> + 'static,
     ) -> &mut Self {
         let id = self.world_mut().register_system(handler);
@@ -391,7 +394,7 @@ impl CueApp for App {
     }
 }
 
-/// Playing cues on actors, as commands.
+/// Playing cues on actors, as commands: one-shots, and lasting cues held.
 pub trait CueCommands {
     /// Plays the one-shot `cue` on this actor.
     fn execute_cue(&mut self, cue: Cue) -> &mut Self;
@@ -418,20 +421,20 @@ impl CueCommands for EntityCommands<'_> {
                 .entry::<CueSources>()
                 .or_default()
                 .get_mut()
-                .add(&cue.tag, cue.local);
+                .add(cue.tag, cue.local);
         })
     }
 
     fn remove_cue(&mut self, cue: Cue) -> &mut Self {
         self.queue(move |mut entity: EntityWorldMut| {
             if let Some(mut sources) = entity.get_mut::<CueSources>() {
-                sources.remove(&cue.tag, cue.local);
+                sources.remove(cue.tag, cue.local);
             }
         })
     }
 }
 
-/// Playing cues on actors on the world, at once.
+/// Playing cues on actors on the world at once, not as commands.
 pub trait CueWorld {
     /// Plays the one-shot `cue` on `actor`.
     fn execute_cue(&mut self, actor: Entity, cue: &Cue);
@@ -449,16 +452,16 @@ impl CueWorld for World {
     }
 
     fn add_cue(&mut self, actor: Entity, cue: &Cue) {
-        add(self, actor, &cue.tag, cue.local);
+        add(self, actor, cue.tag, cue.local);
     }
 
     fn remove_cue(&mut self, actor: Entity, cue: &Cue) {
-        remove(self, actor, &cue.tag, cue.local);
+        remove(self, actor, cue.tag, cue.local);
     }
 }
 
 /// One more source of the lasting `tag` on `actor`.
-pub(crate) fn add(world: &mut World, actor: Entity, tag: &Id<Tag>, local: bool) {
+pub(crate) fn add(world: &mut World, actor: Entity, tag: TagKey, local: bool) {
     if let Ok(mut entity) = world.get_entity_mut(actor) {
         entity
             .entry::<CueSources>()
@@ -469,7 +472,7 @@ pub(crate) fn add(world: &mut World, actor: Entity, tag: &Id<Tag>, local: bool) 
 }
 
 /// One less source of the lasting `tag` on `actor`.
-pub(crate) fn remove(world: &mut World, actor: Entity, tag: &Id<Tag>, local: bool) {
+pub(crate) fn remove(world: &mut World, actor: Entity, tag: TagKey, local: bool) {
     if let Some(mut sources) = world.get_mut::<CueSources>(actor) {
         sources.remove(tag, local);
     }
@@ -484,7 +487,7 @@ pub(crate) fn execute(
     actor: Entity,
     cue: &Cue,
     activation: Option<u64>,
-    effect: Option<Id<Effect>>,
+    effect: Option<EffectId>,
 ) {
     if world.get_entity(actor).is_err() {
         return;
@@ -492,17 +495,14 @@ pub(crate) fn execute(
     let role = world.get_resource::<NetRole>().copied().unwrap_or_default();
     if !cue.local {
         match (role, activation) {
-            (NetRole::Server, _) => burst(world, actor, cue, activation, effect.clone()),
+            (NetRole::Server, _) => burst(world, actor, cue, activation, effect),
             (NetRole::Client, Some(activation)) => {
                 let at = world
                     .get_resource::<Time>()
                     .map_or(0.0, Time::elapsed_secs_f64);
-                world.get_resource_or_init::<Predicted>().note(
-                    actor,
-                    activation,
-                    cue.tag.clone(),
-                    at,
-                );
+                world
+                    .get_resource_or_init::<Predicted>()
+                    .note(actor, activation, cue.tag, at);
             }
             _ => {}
         }
@@ -511,7 +511,7 @@ pub(crate) fn execute(
         world,
         CueExecuted {
             entity: actor,
-            tag: cue.tag.clone(),
+            tag: cue.tag,
             magnitude: cue.magnitude,
             changes: cue.changes.clone(),
             level: cue.level,
@@ -535,8 +535,15 @@ fn burst(
     actor: Entity,
     cue: &Cue,
     activation: Option<u64>,
-    effect: Option<Id<Effect>>,
+    effect: Option<EffectId>,
 ) {
+    let Some(tag) = world
+        .get_resource::<TagRegistry>()
+        .and_then(|tags| tags.id(cue.tag))
+    else {
+        warn!("cue `{}` isn't in the tag tree: not replicated", cue.tag);
+        return;
+    };
     let at = world
         .get_resource::<Time>()
         .map_or(0.0, Time::elapsed_secs_f64);
@@ -551,7 +558,7 @@ fn burst(
     bursts.recent.push(Burst {
         seq,
         at,
-        tag: cue.tag.clone(),
+        tag,
         magnitude: cue.magnitude,
         changes: cue.changes.clone(),
         level: cue.level,
@@ -580,53 +587,63 @@ pub(crate) fn show(
     mut actors: Query<Showing, Restated>,
     cues: Query<&ActiveCue>,
     role: Res<NetRole>,
+    tree: Option<Res<TagRegistry>>,
     handlers: Res<CueHandlers>,
     mut commands: Commands,
 ) {
+    let tree = tree.as_deref().cloned().unwrap_or_default();
     let serving = *role == NetRole::Server;
     for (actor, sources, mut served, shown, spawned) in &mut actors {
         // A client just come to see the actor joins the cues it's served.
         let joining = spawned.is_spawned() && !serving;
         // Served at once, in place: replicated the same frame.
         if serving && let (Some(sources), Some(served)) = (sources, served.as_mut()) {
-            let now = sources.served();
+            let now: BTreeSet<TagId> = sources
+                .served()
+                .into_iter()
+                .filter_map(|tag| {
+                    let id = tree.id(tag);
+                    if id.is_none() {
+                        warn!("cue `{tag}` isn't in the tag tree: not served");
+                    }
+                    id
+                })
+                .collect();
             if served.0 != now {
                 served.0 = now;
             }
         }
-        let none = BTreeSet::new();
-        let served = served.as_deref().map_or(&none, |served| &served.0);
-        let mut wanted: BTreeSet<Id<Tag>> = sources
+        let served: BTreeSet<TagKey> = served
+            .as_deref()
             .into_iter()
-            .flat_map(CueSources::iter)
-            .cloned()
+            .flat_map(|served| &served.0)
+            .filter_map(|&id| tree.key(id))
             .collect();
-        wanted.extend(served.iter().cloned());
-        let shown: Vec<(Entity, &Id<Tag>)> = shown
+        let mut wanted: BTreeSet<TagKey> = sources.into_iter().flat_map(CueSources::iter).collect();
+        wanted.extend(served.iter().copied());
+        let shown: Vec<(Entity, TagKey)> = shown
             .into_iter()
             .flat_map(ActiveCues::iter)
-            .filter_map(|cue| Some((cue, &cues.get(cue).ok()?.tag)))
+            .filter_map(|cue| Some((cue, cues.get(cue).ok()?.tag)))
             .collect();
         for &(cue, tag) in &shown {
-            if wanted.contains(tag) {
+            if wanted.contains(&tag) {
                 continue;
             }
             let removed = CueRemoved {
                 entity: actor,
                 cue,
-                tag: tag.clone(),
+                tag,
             };
             commands.trigger(removed.clone());
             run(&mut commands, &handlers, CueEvent::Removed(removed));
             commands.entity(cue).despawn();
         }
         for tag in wanted {
-            if shown.iter().any(|(_, shown)| **shown == tag) {
+            if shown.iter().any(|(_, shown)| *shown == tag) {
                 continue;
             }
-            let cue = commands
-                .spawn((ActiveCue { tag: tag.clone() }, CueOf(actor)))
-                .id();
+            let cue = commands.spawn((ActiveCue { tag }, CueOf(actor))).id();
             let added = CueAdded {
                 entity: actor,
                 cue,
@@ -645,10 +662,12 @@ pub(crate) fn show(
 pub(crate) fn play(
     mut actors: Query<(Entity, &CueBursts, Option<&mut Played>), Changed<CueBursts>>,
     mut predicted: ResMut<Predicted>,
+    tree: Option<Res<TagRegistry>>,
     handlers: Res<CueHandlers>,
     time: Res<Time>,
     mut commands: Commands,
 ) {
+    let tree = tree.as_deref().cloned().unwrap_or_default();
     predicted.forget(time.elapsed_secs_f64() - REMEMBERED);
     for (actor, bursts, played) in &mut actors {
         let from = if let Some(mut played) = played {
@@ -658,20 +677,24 @@ pub(crate) fn play(
             0
         };
         for burst in bursts.recent.iter().filter(|burst| burst.seq >= from) {
+            let Some(tag) = tree.key(burst.tag) else {
+                warn!("cue {:?} isn't in the tag tree: not played", burst.tag);
+                continue;
+            };
             if let Some(activation) = burst.activation
-                && predicted.take(actor, activation, &burst.tag)
+                && predicted.take(actor, activation, tag)
             {
                 continue;
             }
             let executed = CueExecuted {
                 entity: actor,
-                tag: burst.tag.clone(),
+                tag,
                 magnitude: burst.magnitude,
                 changes: burst.changes.clone(),
                 level: burst.level,
                 source: burst.source,
                 activation: burst.activation,
-                effect: burst.effect.clone(),
+                effect: burst.effect,
             };
             commands.trigger(executed.clone());
             run(&mut commands, &handlers, CueEvent::Executed(executed));
@@ -691,7 +714,7 @@ pub(crate) fn prune(mut actors: Query<&mut CueBursts>, time: Res<Time>) {
 }
 
 /// The most specific handler for `tag`, if there's one.
-fn handler(handlers: &CueHandlers, tag: &Id<Tag>) -> Option<SystemId<In<CueEvent>>> {
+fn handler(handlers: &CueHandlers, tag: TagKey) -> Option<SystemId<In<CueEvent>>> {
     tag.lineage().find_map(|tag| handlers.0.get(&tag).copied())
 }
 

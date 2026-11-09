@@ -14,16 +14,75 @@ Mettle splits a game's gameplay in two:
   is named by an [`Id`], such as `"burning"` or `"fireball"`, so a designer
   or a mod can add one without code.
 
+Code names things by type, never by string. A tag code uses is a
+`#[derive(Tag)]` type, an effect it applies a `#[derive(Effect)]` type, an
+ability it grants a `#[derive(Ability)]` type. A misspelled one doesn't
+compile. Each type carries its content's name, checked once, as content
+loads.
+
 Code is added to the app: attributes with `add_attribute`, behaviours with
-`add_behaviour`, effect code with `add_execution` and `add_calculation`.
+`add_behaviour`, effect code with `add_execution`, `add_calculation` and
+`add_route`, and the tags, effects and abilities code names with `add_tag`,
+`add_effect` and `add_ability`.
 Data is handed over as one resource, [`MettleContent`], and checked as a
-whole against the code and itself: an effect naming a tag that isn't in the
-tree, an attribute that wasn't added, or a curve that doesn't exist is an
-error, all of them at once. Content that holds becomes a [`TagTree`], a
-[`CurveTable`], an [`EffectRegistry`] and an [`AbilityRegistry`]; content
+whole against the code and itself: an effect naming a tag that isn't
+defined, an attribute that wasn't added, a curve that doesn't exist, or an
+effect code names that content doesn't define is an error, all of them at
+once. Content that holds becomes a [`TagRegistry`], a
+[`CurveRegistry`], an [`EffectRegistry`] and an [`AbilityRegistry`]; content
 that doesn't is rejected, and the content before stays. Mettle doesn't load
-files. Your game reads them however it likes, and hands the content over.
-[Loading data](loading-data.md) shows one way.
+files. Your game reads them however it likes, and hands the content over:
+see [Loading data](loading-data.md).
+
+## Names and numbers
+
+Everything mettle runs on is known by a number, as Bevy knows a component by
+its `ComponentId`. Names are for people: what data files are written in,
+what's shown in debug output, and what a client keys icons and translations
+by.
+
+- **Code is numbered as it's added.** `add_attribute::<Life>()` gives `Life`
+  the next [`AttributeId`]; behaviours, routes, executions and calculations
+  get theirs the same way. Ask for one with `world.attribute_id::<Life>()`,
+  as Bevy has `world.component_id::<T>()`. Typed reads, such as
+  `value::<Life>()` and `Current<Life>`, find it for you.
+- **Content is numbered as it's checked.** Tags, curves, effects and
+  abilities get a [`TagId`], a [`CurveId`], an [`EffectId`] and an
+  [`AbilityId`], in order of name. A reload keeps the numbers things had,
+  and numbers new ones after them.
+- **Data names code by name.** An effect names the attribute `"life"`, an
+  ability the behaviour `"cast_fireball"`. Checking the content resolves
+  each name to its number, once: an effect or an ability as the app runs it,
+  its `EffectDef` or `AbilityDef`, holds numbers, not names. Code names
+  content by type, and the type is resolved to its number the same way.
+- **The network carries numbers.** A server and its clients run the same
+  code and the same content. Adding the same attributes, behaviours and
+  routes in the same order numbers them alike, and content numbered in
+  order of name is numbered alike wherever it's checked. Replication already
+  asks the same of components.
+
+Each kind of thing has a registry, a resource that keeps the names beside
+the numbers: [`AttributeRegistry`], `BehaviourRegistry`,
+`ExecutionRegistry`, `CalculationRegistry` and `RouteRegistry` for code;
+[`TagRegistry`], [`CurveRegistry`], [`EffectRegistry`] and
+[`AbilityRegistry`] for content. The registries of code, effects and
+abilities read the same way: `get(id)` for what's numbered `id`,
+`id("name")` for a name's number, `id_of::<T>()` for a type's, `name(id)`
+for a number's name, and `iter()` for all of them. `TagRegistry` goes
+between a tag and its number with `id` and `key`, and `CurveRegistry` with
+`id` and `name`.
+
+```rust
+# use bevy::prelude::*;
+# use bevy_mettle::prelude::*;
+# #[derive(Attribute)] #[attribute(base = 100.0)] struct Life;
+# let mut app = App::new();
+# app.add_plugins((MinimalPlugins, MettlePlugins)).add_attribute::<Life>();
+let attributes = app.world().resource::<AttributeRegistry>();
+let life = attributes.id_of::<Life>().unwrap();
+assert_eq!(attributes.id("life"), Some(life));
+assert_eq!(attributes.name(life), Some("life"));
+```
 
 ## Who writes what
 
@@ -93,8 +152,8 @@ blocked by one. [Gameplay tags](tags.md) covers them.
 
 [`Id`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.Id.html
 [`MettleContent`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleContent.html
-[`TagTree`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagTree.html
-[`CurveTable`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveTable.html
+[`TagRegistry`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagRegistry.html
+[`CurveRegistry`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveRegistry.html
 [`OwnedTags`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.OwnedTags.html
 [`EffectRegistry`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectRegistry.html
 [`AbilityRegistry`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilityRegistry.html
@@ -102,3 +161,9 @@ blocked by one. [Gameplay tags](tags.md) covers them.
 [`AttributeSystems`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/struct.AttributeSystems.html
 [`EffectSystems`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectSystems.html
 [`MettleSystems`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleSystems.html
+[`TagId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagId.html
+[`CurveId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveId.html
+[`EffectId`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectId.html
+[`AbilityId`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilityId.html
+[`AttributeRegistry`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/registry/struct.AttributeRegistry.html
+[`AttributeId`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/registry/struct.AttributeId.html

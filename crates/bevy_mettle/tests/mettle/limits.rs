@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use bevy_harness::TestApp;
 use bevy_mettle::prelude::*;
 
-use crate::common::{Life, MaxLife, actor, app, get};
+use crate::common::{Life, MaxLife, actor, app, get, id};
 
 /// A ward kept at the same fraction of its maximum.
 #[derive(Attribute)]
@@ -32,7 +32,7 @@ fn modify(app: &mut TestApp, actor: Entity, modifiers: impl IntoIterator<Item = 
 fn a_base_comes_down_with_its_limit_and_stays_down() {
     let mut app = app();
     let mage = actor(&mut app, []);
-    modify(&mut app, mage, [Modifier::flat::<MaxLife>(-20.0)]);
+    modify(&mut app, mage, [Modifier::flat(id::<MaxLife>(), -20.0)]);
     assert_eq!(
         base::<Life>(&app, mage),
         30.0,
@@ -53,7 +53,8 @@ fn a_base_on_ratio_keeps_its_fraction_of_its_maximum() {
         .build();
     let mage = app.spawn((Base::<Ward>::default(), Base::<MaxWard>::default()));
     app.tick();
-    modify(&mut app, mage, [Modifier::flat::<MaxWard>(100.0)]);
+    let max_ward = app.world().attribute_id::<MaxWard>().unwrap();
+    modify(&mut app, mage, [Modifier::flat(max_ward, 100.0)]);
     assert_eq!(base::<Ward>(&app, mage), 100.0, "half of 200");
     assert_eq!(get::<Ward>(&app, mage), 100.0, "the frame it rose");
     modify(&mut app, mage, []);
@@ -66,7 +67,7 @@ fn a_remote_actors_base_is_left_to_its_authority() {
     let mage = actor(&mut app, []);
     app.entity_mut(mage).insert(Remote);
     app.tick();
-    modify(&mut app, mage, [Modifier::flat::<MaxLife>(-20.0)]);
+    modify(&mut app, mage, [Modifier::flat(id::<MaxLife>(), -20.0)]);
     assert_eq!(
         base::<Life>(&app, mage),
         50.0,

@@ -9,9 +9,8 @@ mod show;
 mod tick;
 
 use bevy::prelude::*;
-use bevy_mettle_core::Id;
 use bevy_mettle_core::condition::Context;
-use bevy_mettle_core::tag::{OwnedTags, Tag, TagCounts, Tags};
+use bevy_mettle_core::tag::{OwnedTags, TagCounts, TagKey, Tags};
 
 pub(crate) use self::apply::apply;
 pub(crate) use self::execution::preview;
@@ -35,23 +34,23 @@ pub(crate) struct Check<'a> {
 }
 
 impl Context for Check<'_> {
-    fn tag(&self, tag: &Id<Tag>) -> bool {
+    fn tag(&self, tag: TagKey) -> bool {
         self.tags.contains(tag)
     }
 
-    fn has(&self, tag: &Id<Tag>) -> bool {
+    fn has(&self, tag: TagKey) -> bool {
         self.owner.contains(tag)
     }
 
-    fn target(&self, tag: &Id<Tag>) -> bool {
+    fn target(&self, tag: TagKey) -> bool {
         self.owner.contains(tag)
     }
 
-    fn source(&self, tag: &Id<Tag>) -> bool {
+    fn source(&self, tag: TagKey) -> bool {
         self.source.contains(tag)
     }
 
-    fn fact(&self, _fact: &Id<Tag>) -> Option<f32> {
+    fn fact(&self, _fact: TagKey) -> Option<f32> {
         None
     }
 }

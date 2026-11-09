@@ -9,28 +9,25 @@ use bevy::app::plugin_group;
 mod content;
 mod order;
 
-/// Abilities: granted, activated, paid for and cooled down, with
-/// behaviours in code.
+/// Abilities: granted, activated, paid for, cooled down and ended.
 #[cfg(feature = "ability")]
 #[cfg_attr(docsrs, doc(cfg(feature = "ability")))]
 #[doc(inline)]
 pub use bevy_mettle_ability as ability;
-/// Attributes: `Base` and `Current`, modifiers, and reads in context.
+/// Attributes: bases, current values, modifiers, reads in context.
 #[cfg(feature = "attribute")]
 #[cfg_attr(docsrs, doc(cfg(feature = "attribute")))]
 #[doc(inline)]
 pub use bevy_mettle_attribute as attribute;
-/// Gameplay tags and owned tags, curve tables, and conditions.
+/// What every part shares: tags, curves, conditions and registries.
 #[doc(inline)]
 pub use bevy_mettle_core as core;
-/// Effects: instant, timed, infinite and periodic, stacking, granting
-/// tags.
+/// Effects: instant, lasting and periodic, stacking and granting tags.
 #[cfg(feature = "effect")]
 #[cfg_attr(docsrs, doc(cfg(feature = "effect")))]
 #[doc(inline)]
 pub use bevy_mettle_effect as effect;
-/// Prediction over lightyear: replicas replicated, requests and replies
-/// sent.
+/// Prediction over lightyear: replicas, requests and replies sent.
 #[cfg(feature = "lightyear")]
 #[cfg_attr(docsrs, doc(cfg(feature = "lightyear")))]
 #[doc(inline)]
@@ -40,7 +37,9 @@ pub use self::content::{ContentLoaded, ContentRejected, MettleContent, MettleCon
 pub use self::order::{MettleSystems, MettleSystemsPlugin};
 
 pub mod prelude {
-    //! What using the enabled parts takes: `use bevy_mettle::prelude::*`.
+    //! What using the enabled parts takes: the preludes of every crate enabled.
+    //!
+    //! `use bevy_mettle::prelude::*`.
 
     #[cfg(feature = "ability")]
     #[doc(no_inline)]
@@ -62,7 +61,7 @@ pub mod prelude {
 }
 
 plugin_group! {
-    /// The plugin of every part its features enable.
+    /// The plugin of every part its features enable, each with its defaults.
     ///
     /// Add it before any `add_attribute`, which adds `AttributePlugin` itself
     /// if it isn't there yet. With `lightyear`, add it after lightyear's own

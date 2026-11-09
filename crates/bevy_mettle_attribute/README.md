@@ -58,6 +58,7 @@ bevy_mettle_attribute = "0.1"
 ```rust,no_run
 use bevy::prelude::*;
 use bevy_mettle_attribute::prelude::*;
+use bevy_mettle_core::prelude::*;
 
 #[derive(Attribute)]
 #[attribute(base = 100.0, min = 0.0, max = MaxLife)]
@@ -75,6 +76,17 @@ struct Resistance;
 #[attribute(base = 0.75)]
 struct MaxResistance;
 
+#[derive(Tag)]
+struct Damage;
+
+#[derive(Tag)]
+#[tag(parent = Damage)]
+struct Elemental;
+
+#[derive(Tag)]
+#[tag(parent = Elemental)]
+struct Fire;
+
 fn spawn(mut commands: Commands) {
     let mage = commands
         .spawn((
@@ -85,17 +97,14 @@ fn spawn(mut commands: Commands) {
         ))
         .id();
     // A ring it wears: +20% resistance to elemental damage.
-    commands.spawn((
-        ModifierOf(mage),
-        Modifiers(vec![
-            Modifier::flat::<Resistance>(0.2).read_tagged("damage.elemental"),
-        ]),
-    ));
+    commands
+        .spawn(ModifierOf(mage))
+        .modifiers([ModifierSpec::flat::<Resistance>(0.2).read_tagged(Elemental)]);
 }
 
 /// What a fire hit is resisted by.
 fn resist(mages: Query<Entity, With<Base<Life>>>, attributes: AttributeReader) {
-    let fire = AttributeContext::new().tag("damage.elemental.fire");
+    let fire = AttributeContext::new().tag(Fire);
     for mage in &mages {
         let _resisted = attributes.value::<Resistance>(mage, &fire);
     }

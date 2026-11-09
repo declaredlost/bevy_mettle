@@ -19,28 +19,30 @@ often.
 
 ## Overview
 
-- An [`Effect`] is data, named by an id: its duration, period, modifiers,
-  executions in code, the tags it grants, what it needs to apply or to
-  count, what it removes or keeps off, how it stacks, and the effects it
-  chains into.
-- An [`EffectRegistry`] is built from them, checked against the tag tree,
-  the curves, the attributes the app added and your [`EffectCode`]: every
-  error at once. Insert a new one and active effects take their new
-  definitions.
-- An [`EffectSpec`] is what's applied: the effect, its level, its params
-  and its source. `apply_effect` checks it, then executes it, stacks it, or
-  spawns it as an entity [`EffectOf`] its target.
+- An [`EffectData`] is content, named by its name: its duration, period,
+  modifiers, executions in code, the tags it grants, what it needs to apply
+  or to count, what it removes or keeps off, how it stacks, and the effects
+  it chains into.
+- An [`EffectRegistry`] is built from them, checked against the tags, the
+  curves, the attributes the app added and its executions, calculations and
+  routes: every error at once. Each effect is numbered, an `EffectId`, and a
+  reload keeps the numbers. Insert a new one and active effects take their
+  new definitions.
+- Code names an effect by an [`Effect`] type, which is its spec: its level,
+  its params and its source (`Burning.level(3.0)`), an [`EffectSpec`].
+  `apply_effect` checks it, then executes it, stacks it, or spawns it as an
+  entity [`EffectOf`] its target.
 - While it counts, a lasting effect's modifiers count for its target and
   the target owns what it grants; while inhibited, neither, and its time
   stands still.
-- Meta attributes are amounts no actor has, such as incoming damage: dealt
-  by effects, then routed by one router per meta attribute into the
-  attributes actors have, through shields into life, the same on a server
-  and a predicting client.
+- Routes are amounts no actor holds, such as incoming damage: dealt by
+  effects, then routed by one router per route into the attributes actors
+  have, through shields into life, the same on a server and a predicting
+  client.
 - [`EffectApplied`], [`EffectStacked`], [`EffectBlocked`],
   [`EffectExecuted`] and [`EffectRemoved`] are triggered on the target, for
   abilities and the game. [`EffectExecuted`] says what changed, on the
-  target and its source, and what each meta attribute was dealt.
+  target and its source, and what each route was dealt.
 - Cues are what's shown of effects and abilities: lasting ones as entities
   on the actor while they hold, one-shots as they execute, run by the
   handler for their most specific tag, and replicated to every client that
@@ -78,23 +80,37 @@ use bevy_mettle_effect::prelude::*;
 #[attribute(base = 100.0, min = 0.0)]
 struct Life;
 
+/// Burning, as code names it: content defines it as `"burning"`.
+#[derive(Effect)]
+struct Burning;
+
 /// Burning: 5 fire damage every half second, for 4 seconds.
-fn load(mut commands: Commands, attributes: Res<AttributeRegistry>, code: Res<EffectCode>) {
-    let tags: Vec<Tag> = ["state", "state.burning"]
+fn load(
+    mut commands: Commands,
+    effects: Res<EffectRegistry>,
+    attributes: Res<AttributeRegistry>,
+    executions: Res<ExecutionRegistry>,
+    calculations: Res<CalculationRegistry>,
+    routes: Res<RouteRegistry>,
+) {
+    let tags: Vec<TagKey> = ["state", "state.burning"]
         .into_iter()
-        .map(|id| Tag { id: Id::new(id) })
+        .map(TagKey::named)
         .collect();
-    let burning = Effect::lasting("burning", 4.0)
+    let burning = EffectData::lasting("burning", 4.0)
         .period(0.5, true)
         .modifier(EffectModifier::new::<Life>(Operation::Flat, -5.0))
         .grant("state.burning");
     let checks = EffectChecks {
-        tags: &TagTree::build(&tags).unwrap(),
-        curves: &CurveTable::default(),
+        tags: &TagRegistry::build(tags).unwrap(),
+        curves: &CurveRegistry::default(),
         attributes: &attributes,
-        code: &code,
+        executions: &executions,
+        calculations: &calculations,
+        routes: &routes,
     };
-    commands.insert_resource(EffectRegistry::check(&[burning], checks).unwrap());
+    // Checked from the app's registry, which knows `Burning` is code's.
+    commands.insert_resource(effects.recheck(&[burning], checks).unwrap());
 }
 
 #[derive(Component)]
@@ -107,7 +123,7 @@ fn spawn(mut commands: Commands) {
 /// Sets every mage alight.
 fn ignite(mages: Query<Entity, Added<Mage>>, mut commands: Commands) {
     for mage in &mages {
-        commands.entity(mage).apply_effect(EffectSpec::new("burning"));
+        commands.entity(mage).apply_effect(Burning);
     }
 }
 
@@ -115,6 +131,7 @@ fn main() {
     App::new()
         .add_plugins((MinimalPlugins, EffectPlugin::default()))
         .add_attribute::<Life>()
+        .add_effect::<Burning>()
         .add_systems(Startup, (load, spawn))
         .add_systems(Update, ignite)
         .run();
@@ -144,9 +161,9 @@ for development setup and guidelines.
 Licensed under either of [Apache License, Version 2.0](https://github.com/declaredlost/bevy_mettle/blob/main/LICENSE-APACHE)
 or [MIT license](https://github.com/declaredlost/bevy_mettle/blob/main/LICENSE-MIT) at your option.
 
-[`Effect`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/struct.Effect.html
+[`Effect`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/trait.Effect.html
 [`EffectRegistry`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectRegistry.html
-[`EffectCode`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/code/struct.EffectCode.html
+[`EffectData`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/struct.EffectData.html
 [`EffectSpec`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectSpec.html
 [`EffectOf`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/active/struct.EffectOf.html
 [`EffectApplied`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/events/struct.EffectApplied.html

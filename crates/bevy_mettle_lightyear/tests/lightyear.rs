@@ -33,6 +33,20 @@ const SERVER: SocketAddr = SocketAddr::new(core::net::IpAddr::V4(Ipv4Addr::LOCAL
 #[attribute(base = 30.0, min = 0.0)]
 struct Mana;
 
+#[derive(Ability)]
+struct Fireball;
+
+#[derive(Ability)]
+struct Shot;
+
+#[derive(Effect)]
+#[effect(name = "fireball.cost")]
+struct FireballCost;
+
+#[derive(Effect)]
+#[effect(name = "fireball.cooldown")]
+struct FireballCooldown;
+
 #[derive(Component, Default, Behaviour)]
 struct Cast;
 
@@ -70,14 +84,15 @@ fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
         .add_behaviour::<Cast>()
         .add_behaviour::<Shoot>()
         .check_input::<Aim, _>(in_reach)
+        .add_ability::<Fireball>()
+        .add_ability::<Shot>()
+        .add_effect::<FireballCost>()
+        .add_effect::<FireballCooldown>()
         .insert_resource(Reach(if role == NetRole::Server { 10.0 } else { 100.0 }))
         .add_plugins(MettleNetPlugin { replicas })
         .replicate_attribute::<Mana>()
         .replicate_input::<Aim>();
-    // A game replicating its items' modifiers, as they're rolled.
-    app.component::<Modifiers>().replicate();
-    app.component::<ModifierOf>().replicate();
-    let tags: Vec<Tag> = [
+    let tags: Vec<TagKey> = [
         "state",
         "state.stunned",
         "cooldown",
@@ -87,47 +102,52 @@ fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
         "cue.hit",
     ]
     .into_iter()
-    .map(|id| Tag {
-        id: Id::from_static(id),
-    })
+    .map(TagKey::named)
     .collect();
-    let tags = TagTree::build(&tags).unwrap();
+    let tags = TagRegistry::build(tags).unwrap();
     let world = app.world_mut();
-    let effects = EffectRegistry::check(
-        &[
-            Effect::instant("fireball.cost")
-                .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0))
-                .cue("cue.hit"),
-            Effect::lasting("fireball.cooldown", 1.0)
-                .grant("cooldown.fireball")
-                .cue("cue.cooling"),
-        ],
-        EffectChecks {
-            tags: &tags,
-            curves: &CurveTable::default(),
-            attributes: world.resource::<AttributeRegistry>(),
-            code: &EffectCode::new(),
-        },
-    )
-    .unwrap();
-    let fireball = Ability::new("fireball", "cast")
+    let effects = world
+        .resource::<EffectRegistry>()
+        .recheck(
+            &[
+                EffectData::instant("fireball.cost")
+                    .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0))
+                    .cue("cue.hit"),
+                EffectData::lasting("fireball.cooldown", 1.0)
+                    .grant("cooldown.fireball")
+                    .cue("cue.cooling"),
+            ],
+            EffectChecks {
+                tags: &tags,
+                curves: &CurveRegistry::default(),
+                attributes: world.resource(),
+                executions: world.resource(),
+                calculations: world.resource(),
+                routes: world.resource(),
+            },
+        )
+        .unwrap();
+    let fireball = AbilityData::new("fireball", "cast")
         .cost("fireball.cost")
         .cooldown("fireball.cooldown")
         .blocked_by("state.stunned")
         .cancel_if(Condition::owner_has("state.stunned"));
-    let shot = Ability::new("shot", "shoot").cost("fireball.cost");
-    let abilities = AbilityRegistry::check(
-        &[fireball, shot],
-        &[],
-        AbilityChecks {
-            tags: &tags,
-            effects: &effects,
-            behaviours: world.resource::<Behaviours>(),
-        },
-    )
-    .unwrap();
+    let shot = AbilityData::new("shot", "shoot").cost("fireball.cost");
+    let abilities = world
+        .resource::<AbilityRegistry>()
+        .recheck(
+            &[fireball, shot],
+            &[],
+            AbilityChecks {
+                tags: &tags,
+                effects: &effects,
+                behaviours: world.resource(),
+            },
+        )
+        .unwrap();
     world.insert_resource(effects);
     world.insert_resource(abilities);
+    world.insert_resource(tags);
 }
 
 /// The app of one side, `role`, on `plugins`: lightyear's, with mettle.
@@ -243,7 +263,7 @@ fn mage(world: &mut TestWorld, controlled: bool) -> (Entity, Entity) {
             lifetime: Lifetime::default(),
         });
     }
-    server.world_mut().grant_ability(there, "fireball", 1.0);
+    server.world_mut().grant_ability(there, Fireball);
     world
         .until(|world| {
             let client = &world["client"];
@@ -266,7 +286,11 @@ fn mage(world: &mut TestWorld, controlled: bool) -> (Entity, Entity) {
 /// `mage`'s mana, as `app` reads it.
 fn mana(app: &TestApp, mage: Entity) -> f32 {
     app.world()
-        .value_at(mage, &Mana::ID, &AttributeContext::new())
+        .value_at(
+            mage,
+            app.world().attribute_id::<Mana>().unwrap(),
+            &AttributeContext::new(),
+        )
         .unwrap()
 }
 
@@ -298,7 +322,7 @@ fn a_client_predicts_and_the_servers_own_replaces_it() {
     let (there, here) = mage(&mut world, true);
     world["client"]
         .world_mut()
-        .activate_ability(here, "fireball")
+        .activate_ability(here, Fireball)
         .unwrap();
     world.tick();
     assert!(same(mana(&world["client"], here), 10.0), "paid, predicted");
@@ -328,10 +352,10 @@ fn a_rejected_prediction_is_undone() {
         .entity_mut(there)
         .get_mut::<OwnedTags>()
         .unwrap()
-        .add(&Id::from_static("state.stunned"));
+        .add("state.stunned");
     world["client"]
         .world_mut()
-        .activate_ability(here, "fireball")
+        .activate_ability(here, Fireball)
         .unwrap();
     world.ticks(20);
     assert!(same(mana(&world["server"], there), 30.0), "refused");
@@ -350,7 +374,7 @@ fn a_client_cant_ask_for_a_mage_it_doesnt_control() {
     let (there, here) = mage(&mut world, false);
     world["client"]
         .world_mut()
-        .activate_ability(here, "fireball")
+        .activate_ability(here, Fireball)
         .unwrap();
     world.ticks(20);
     assert!(same(mana(&world["server"], there), 30.0), "ignored");
@@ -365,14 +389,18 @@ fn a_client_cant_ask_for_a_mage_it_doesnt_control() {
 fn an_items_modifiers_replicate_and_count_on_the_client() {
     let mut world = net();
     let (there, here) = mage(&mut world, true);
+    // The server's numbers: the client, adding the same attributes in the same
+    // order, means the same by them.
+    let id = world["server"].world().attribute_id::<Mana>().unwrap();
     let modifiers = Modifiers(vec![
-        Modifier::flat::<Mana>(5.0),
-        Modifier::additive::<Mana>(1.0).owner_has("state.stunned"),
-        Modifier::flat::<Mana>(100.0).local(),
+        Modifier::flat(id, 5.0),
+        Modifier::additive(id, 1.0).owner_has("state.stunned"),
+        Modifier::flat(id, 100.0).local(),
     ]);
     let ring = world["server"].spawn((
         ModifierOf(there),
         modifiers.clone(),
+        ModifiersReplica::default(),
         Replicate::to_clients(NetworkTarget::All),
     ));
     world.ticks(20);
@@ -383,6 +411,50 @@ fn an_items_modifiers_replicate_and_count_on_the_client() {
 }
 
 #[test]
+fn a_sources_modifiers_go_by_number_and_count_in_the_clients_own_fold() {
+    let mut world = net();
+    let (there, here) = mage(&mut world, true);
+    let id = world["server"].world().attribute_id::<Mana>().unwrap();
+    // Counted for reads tagged `state` alone: the client's own fold, not the
+    // value the server sends.
+    let ring = world["server"].spawn((
+        ModifierOf(there),
+        Modifiers(vec![Modifier::flat(id, 7.0).read_tagged("state")]),
+        ModifiersReplica::default(),
+        Replicate::to_clients(NetworkTarget::All),
+    ));
+    world.ticks(20);
+    let state = world["server"]
+        .resource::<TagRegistry>()
+        .id("state")
+        .unwrap();
+    let client = &world["client"];
+    let ring = mapped(client, ring).expect("the ring replicated");
+    assert_eq!(
+        client
+            .entity(ring)
+            .get::<ModifiersReplica>()
+            .modifiers
+            .iter()
+            .map(|modifier| modifier.condition.clone())
+            .collect::<Vec<_>>(),
+        [Some(ConditionOver::ReadTagged(state))],
+        "sent by number"
+    );
+    client.entity(ring).assert_eq(Modifiers(vec![
+        Modifier::flat(id, 7.0).read_tagged("state"),
+    ]));
+    let read = AttributeContext::new().tag("state");
+    let tagged = client.world().value_at(here, id, &read).unwrap();
+    assert!(same(tagged, 37.0), "counting in a tagged read: {tagged}");
+    let plain = client
+        .world()
+        .value_at(here, id, &AttributeContext::new().tag("cue"))
+        .unwrap();
+    assert!(same(plain, 30.0), "and not in another: {plain}");
+}
+
+#[test]
 fn a_confirm_waits_for_the_servers_state_as_of_it() {
     let mut world = net();
     // Replication lags the reply: the server's state goes out every 50ms.
@@ -390,7 +462,7 @@ fn a_confirm_waits_for_the_servers_state_as_of_it() {
     let (there, here) = mage(&mut world, true);
     world["client"]
         .world_mut()
-        .activate_ability(here, "fireball")
+        .activate_ability(here, Fireball)
         .unwrap();
     for step in 0..30 {
         world.tick();
@@ -409,16 +481,23 @@ fn a_shown_effects_source_is_the_clients_own() {
     let (_, here) = mage(&mut world, true);
     world["client"]
         .world_mut()
-        .activate_ability(here, "fireball")
+        .activate_ability(here, Fireball)
         .unwrap();
     world.ticks(20);
     let client = &world["client"];
-    let shown = client
-        .entity(here)
-        .get::<ActiveEffects>()
-        .iter()
-        .next()
-        .unwrap();
+    let effects: Vec<Entity> = client.entity(here).get::<ActiveEffects>().iter().collect();
+    // The cooldown alone lasts: the cost is instant.
+    let [shown] = effects[..] else {
+        panic!("the cooldown alone, shown: {effects:?}");
+    };
+    assert_eq!(
+        client.entity(shown).get::<ActiveEffect>().id(),
+        client
+            .resource::<EffectRegistry>()
+            .id_of::<FireballCooldown>()
+            .unwrap(),
+        "the cooldown"
+    );
     assert_eq!(
         client.entity(shown).get::<ActiveEffect>().spec().source,
         Some(here),
@@ -433,9 +512,7 @@ fn an_actor_not_replicated_has_its_effects_kept_back_too() {
     let server = &mut world["server"];
     let hidden = server.spawn(Base::<Mana>::default());
     server.tick();
-    server
-        .world_mut()
-        .apply_effect(hidden, EffectSpec::new("fireball.cooldown"));
+    server.world_mut().apply_effect(hidden, FireballCooldown);
     world.ticks(20);
     world["client"].query::<&EffectReplica, ()>().assert_len(0);
     world["client"].entity(here).assert_has::<Abilities>();
@@ -450,10 +527,12 @@ fn current(app: &TestApp, here: Entity) -> f32 {
 fn a_client_shows_the_servers_override_whatever_order_its_sources_came_in() {
     let mut world = net();
     let (there, here) = mage(&mut world, true);
-    let ring = |world: &mut TestWorld, value: f32| {
+    let id = world["server"].world().attribute_id::<Mana>().unwrap();
+    let ring = move |world: &mut TestWorld, value: f32| {
         world["server"].spawn((
             ModifierOf(there),
-            Modifiers(vec![Modifier::overriding::<Mana>(value)]),
+            Modifiers(vec![Modifier::overriding(id, value)]),
+            ModifiersReplica::default(),
             Replicate::to_clients(NetworkTarget::All),
         ))
     };
@@ -471,7 +550,7 @@ fn a_client_shows_the_servers_override_whatever_order_its_sources_came_in() {
     world.ticks(2);
     let client = &world["client"];
     let read = AttributeContext::new().tag("state");
-    let local = client.world().value_at(here, &Mana::ID, &read).unwrap();
+    let local = client.world().value_at(here, id, &read).unwrap();
     assert!(same(local, 5.0), "its own fold would say {local}");
     assert!(same(mana(client, here), 15.0), "but it shows the server's");
     assert!(same(current(client, here), 15.0));
@@ -483,15 +562,16 @@ fn a_prediction_shows_until_answered_then_the_served_value() {
     world["server"].insert_resource(ReplicationMetadata::new(Duration::from_millis(50)));
     let (there, here) = mage(&mut world, true);
     // A source only the server has: what the client can't work out itself.
+    let id = world["server"].world().attribute_id::<Mana>().unwrap();
     world["server"].spawn((
         ModifierOf(there),
-        Modifiers(vec![Modifier::flat::<Mana>(100.0)]),
+        Modifiers(vec![Modifier::flat(id, 100.0)]),
     ));
     world.ticks(20);
     assert!(same(current(&world["client"], here), 130.0), "served");
     world["client"]
         .world_mut()
-        .activate_ability(here, "fireball")
+        .activate_ability(here, Fireball)
         .unwrap();
     let mut answered = false;
     for step in 0..30 {
@@ -522,9 +602,7 @@ fn marksman(world: &mut TestWorld) -> (Entity, Entity) {
             lifetime: Lifetime::default(),
         },
     ));
-    world["server"]
-        .world_mut()
-        .grant_ability(there, "shot", 1.0);
+    world["server"].world_mut().grant_ability(there, Shot);
     world
         .until(|world| {
             let client = &world["client"];
@@ -555,7 +633,7 @@ fn a_shot_is_sent_with_its_aim_and_the_server_fires_the_same() {
     let (there, here) = marksman(&mut world);
     world["client"]
         .world_mut()
-        .activate_ability_with::<Shoot>(here, "shot", Aim(4.0))
+        .activate_ability_with::<Shoot>(here, Shot, Aim(4.0))
         .unwrap();
     world
         .until(|world| world["server"].count::<With<Shoot>>() == 1)
@@ -574,7 +652,7 @@ fn a_shot_aimed_past_what_the_server_knows_is_undone() {
     let (there, here) = marksman(&mut world);
     world["client"]
         .world_mut()
-        .activate_ability_with::<Shoot>(here, "shot", Aim(40.0))
+        .activate_ability_with::<Shoot>(here, Shot, Aim(40.0))
         .unwrap();
     world.ticks(20);
     assert!(same(mana(&world["server"], there), 30.0), "never fired");
@@ -588,7 +666,7 @@ fn a_shot_aimed_again_past_reach_is_cancelled_on_both_sides() {
     let (there, here) = marksman(&mut world);
     let shooting = world["client"]
         .world_mut()
-        .activate_ability_with::<Shoot>(here, "shot", Aim(4.0))
+        .activate_ability_with::<Shoot>(here, Shot, Aim(4.0))
         .unwrap();
     world.ticks(20);
     world["client"]
@@ -640,7 +718,7 @@ fn another_clients_actor_shows_its_cues_but_not_its_effects() {
     ));
     world["server"]
         .world_mut()
-        .grant_ability(there, "fireball", 1.0)
+        .grant_ability(there, Fireball)
         .unwrap();
     world
         .until(|world| mapped(&world["client"], there).is_some())
@@ -651,8 +729,8 @@ fn another_clients_actor_shows_its_cues_but_not_its_effects() {
     world["client"].entity(here).assert_lacks::<Abilities>();
     world["client"].watch_triggered::<CueExecuted>();
     let server = world["server"].world_mut();
-    server.apply_effect(there, EffectSpec::new("fireball.cooldown"));
-    server.apply_effect(there, EffectSpec::new("fireball.cost"));
+    server.apply_effect(there, FireballCooldown);
+    server.apply_effect(there, FireballCost);
     world
         .until(|world| cues(&world["client"], here) == ["cue.cooling"])
         .describe("the client shows the cooldown's cue")
@@ -662,7 +740,7 @@ fn another_clients_actor_shows_its_cues_but_not_its_effects() {
     assert_eq!(effects(client, here), [], "its effects stay the server's");
     let played = client.read_triggered::<CueExecuted>();
     assert_eq!(played.len(), 1, "the hit, once");
-    assert_eq!(played[0].tag.as_str(), "cue.hit");
+    assert_eq!(played[0].tag.name(), "cue.hit");
     assert!(same(played[0].magnitude, -20.0));
 }
 
@@ -673,13 +751,13 @@ fn a_one_shot_a_client_predicted_plays_once() {
     world["client"].watch_triggered::<CueExecuted>();
     world["client"]
         .world_mut()
-        .activate_ability(here, "fireball")
+        .activate_ability(here, Fireball)
         .unwrap();
     world.ticks(30);
     let played: Vec<_> = world["client"]
         .read_triggered::<CueExecuted>()
         .into_iter()
-        .filter(|executed| executed.tag.as_str() == "cue.hit")
+        .filter(|executed| executed.tag.name() == "cue.hit")
         .collect();
     assert_eq!(
         played.len(),
@@ -699,7 +777,7 @@ fn a_client_coming_to_see_an_actor_joins_its_cues() {
     ));
     world["server"]
         .world_mut()
-        .apply_effect(there, EffectSpec::new("fireball.cooldown"));
+        .apply_effect(there, FireballCooldown);
     world
         .until(|world| {
             mapped(&world["client"], there)
@@ -731,7 +809,7 @@ fn replicas_follow_control_as_it_comes_and_goes() {
     ));
     world["server"]
         .world_mut()
-        .grant_ability(there, "fireball", 1.0)
+        .grant_ability(there, Fireball)
         .unwrap();
     world
         .until(|world| mapped(&world["client"], there).is_some())
@@ -768,7 +846,7 @@ fn owner_only_replicas_go_and_come_back_with_their_actor() {
     let (there, here) = mage(&mut world, true);
     world["server"]
         .world_mut()
-        .apply_effect(there, EffectSpec::new("fireball.cooldown"));
+        .apply_effect(there, FireballCooldown);
     world
         .until(|world| effects(&world["client"], here).len() == 1)
         .describe("the cooldown reaches its owner")
@@ -818,7 +896,7 @@ fn a_cast_the_server_interrupts_ends_on_the_client() {
     let (there, here) = mage(&mut world, true);
     world["client"]
         .world_mut()
-        .activate_ability(here, "fireball")
+        .activate_ability(here, Fireball)
         .unwrap();
     world
         .until(|world| casting(&world["server"], there))
@@ -830,7 +908,7 @@ fn a_cast_the_server_interrupts_ends_on_the_client() {
         .entity_mut(there)
         .get_mut::<OwnedTags>()
         .unwrap()
-        .add(&Id::from_static("state.stunned"));
+        .add("state.stunned");
     world
         .until(|world| !casting(&world["server"], there) && !casting(&world["client"], here))
         .describe("the cast ends on both sides")
@@ -847,7 +925,7 @@ fn a_cast_the_client_cancels_is_cancelled_on_the_server() {
     let (there, here) = mage(&mut world, true);
     let cast = world["client"]
         .world_mut()
-        .activate_ability(here, "fireball")
+        .activate_ability(here, Fireball)
         .unwrap();
     world
         .until(|world| casting(&world["server"], there))
@@ -867,7 +945,7 @@ fn a_cast_cancelled_as_its_asked_for_never_runs_on_the_server() {
     world["server"].watch_triggered::<AbilityEnded>();
     let cast = world["client"]
         .world_mut()
-        .activate_ability(here, "fireball")
+        .activate_ability(here, Fireball)
         .unwrap();
     world["client"].world_mut().cancel_ability(cast);
     world
@@ -880,4 +958,105 @@ fn a_cast_cancelled_as_its_asked_for_never_runs_on_the_server() {
         .within_ticks(20);
     world["server"]
         .assert_triggered::<AbilityEnded>(|ended| ended.entity == there && ended.cancelled);
+}
+
+/// Every content mismatch a client was told of.
+#[derive(Resource, Default)]
+struct Mismatches(Vec<ContentMismatch>);
+
+fn watch_mismatches(app: &mut TestApp) {
+    app.world_mut().init_resource::<Mismatches>();
+    app.world_mut().add_observer(
+        |mismatch: On<ContentMismatch>, mut seen: ResMut<Mismatches>| {
+            seen.0.push(*mismatch);
+        },
+    );
+}
+
+/// Rechecks `world`'s effects with `effects` added, as a reload does: the
+/// numbers effects had kept, new ones after.
+fn reload_with(world: &mut World, effects: &[EffectData]) {
+    let mut all = vec![
+        EffectData::instant("fireball.cost")
+            .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0))
+            .cue("cue.hit"),
+        EffectData::lasting("fireball.cooldown", 1.0)
+            .grant("cooldown.fireball")
+            .cue("cue.cooling"),
+    ];
+    all.extend_from_slice(effects);
+    let reloaded = world
+        .resource::<EffectRegistry>()
+        .recheck(
+            &all,
+            EffectChecks {
+                tags: world.resource(),
+                curves: &CurveRegistry::default(),
+                attributes: world.resource(),
+                executions: world.resource(),
+                calculations: world.resource(),
+                routes: world.resource(),
+            },
+        )
+        .unwrap();
+    world.insert_resource(reloaded);
+}
+
+#[test]
+fn a_client_numbering_content_as_its_server_does_is_told_nothing() {
+    let mut world = net();
+    watch_mismatches(&mut world["client"]);
+    world.ticks(20);
+    assert_eq!(world["client"].resource::<Mismatches>().0, []);
+    assert_eq!(
+        ContentFingerprint::of(world["client"].world()),
+        ContentFingerprint::of(world["server"].world())
+    );
+}
+
+#[test]
+fn a_server_reloading_alone_tells_its_clients_they_number_content_otherwise() {
+    let mut world = net();
+    watch_mismatches(&mut world["client"]);
+    world.ticks(20);
+    // `aura` sorts first, but a reload numbers it after what's there.
+    reload_with(
+        world["server"].world_mut(),
+        &[EffectData::lasting("aura", 1.0)],
+    );
+    world.ticks(20);
+    let server = ContentFingerprint::of(world["server"].world());
+    let seen = world["client"].resource::<Mismatches>().0.clone();
+    assert_eq!(seen.len(), 1, "told once: {seen:?}");
+    assert_eq!(seen[0].server, server);
+    assert_ne!(seen[0].client, server);
+
+    // Reloaded alike, the client numbers it as its server does.
+    reload_with(
+        world["client"].world_mut(),
+        &[EffectData::lasting("aura", 1.0)],
+    );
+    world.ticks(20);
+    assert_eq!(
+        world["client"].resource::<Mismatches>().0.len(),
+        1,
+        "and isn't told again"
+    );
+    assert_eq!(ContentFingerprint::of(world["client"].world()), server);
+}
+
+#[test]
+fn a_client_with_other_content_is_told_as_it_connects() {
+    let mut world = net();
+    watch_mismatches(&mut world["client"]);
+    reload_with(
+        world["client"].world_mut(),
+        &[EffectData::lasting("aura", 1.0)],
+    );
+    world.ticks(20);
+    assert_ne!(
+        world["client"].resource::<Mismatches>().0,
+        [],
+        "its content isn't its server's"
+    );
 }
