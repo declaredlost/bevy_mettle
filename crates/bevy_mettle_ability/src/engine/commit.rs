@@ -1,11 +1,12 @@
 //! Committing abilities: paying their cost, starting their cooldown, or both.
 
 use bevy::prelude::*;
-use bevy_mettle_effect::{EffectId, EffectSpec, EffectWorld};
+use bevy_mettle_core::registry::EffectId;
+use bevy_mettle_effect::{EffectSpec, EffectWorld};
 
 use super::check::affords;
 use super::end::end;
-use crate::active::{ActiveAbility, GrantedAbility};
+use crate::active::{ActiveAbility, GrantedAbility, outgoing};
 
 /// Which of an ability's commitments to make.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,7 +84,7 @@ pub(super) fn pay(
     if pay && !affords(world, actor, granted) {
         return Committed::Unaffordable;
     }
-    let level = granted.level;
+    let (id, level) = (granted.def.id, granted.level);
     let effects: Vec<EffectId> = granted
         .def
         .cost
@@ -95,10 +96,13 @@ pub(super) fn pay(
     for effect in effects {
         world.apply_effect(
             actor,
-            EffectSpec::from_id(effect)
-                .level(level)
-                .source(actor)
-                .activation(activation),
+            outgoing(
+                EffectSpec::from_id(effect),
+                actor,
+                id,
+                level,
+                Some(activation),
+            ),
         );
     }
     if let Some(mut granted) = world.get_mut::<GrantedAbility>(ability) {

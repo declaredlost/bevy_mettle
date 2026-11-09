@@ -5,10 +5,10 @@ use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use bevy_mettle_ability::events::Failure;
-use bevy_mettle_ability::net::end::{AbilityCancelRequest, AbilityEnd};
-use bevy_mettle_ability::net::input::AbilityInput;
-use bevy_mettle_ability::net::request::{AbilityReply, AbilityRequest, AbilityRequestWith};
-use bevy_mettle_ability::net::start::{AbilityStarted, AbilityStartedWith};
+use bevy_mettle_ability::net::{
+    AbilityCancelRequest, AbilityEnd, AbilityInput, AbilityReply, AbilityRequest,
+    AbilityRequestWith, AbilityStarted, AbilityStartedWith,
+};
 use bevy_replicon::prelude::RepliconTick;
 use bevy_replicon::server::server_tick::ServerTick;
 use lightyear::prelude::server::ClientOf;

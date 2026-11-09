@@ -6,16 +6,9 @@ use bevy_app::App;
 use bevy_ecs::resource::Resource;
 use bevy_platform::collections::HashSet;
 
-use super::{AnyTag, Tag, TagKey};
+use super::{Tag, TagKey};
 use crate::error::{Error, Errors};
-use crate::registry::{Key, Registry};
-
-/// A tag's number in the [`TagRegistry`]: what the network sends for it.
-///
-/// The same on a server and its clients, as they check the same tags. A
-/// [`TagKey`] is a tag as this process knows it; a `TagId` is its place in
-/// the registry, shared.
-pub type TagId = Key<AnyTag>;
+use crate::registry::{AnyTag, Registry, TagId};
 
 /// The tags there are, checked and numbered: a tree of paths, with no gaps.
 ///

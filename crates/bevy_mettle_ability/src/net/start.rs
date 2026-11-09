@@ -8,12 +8,13 @@ use std::any::TypeId;
 use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::prelude::*;
 use bevy_mettle_core::net::NetRole;
+use bevy_mettle_core::registry::AbilityId;
 use serde::{Deserialize, Serialize};
 
 use super::role;
 use crate::behaviour::NoInput;
 use crate::data::{AbilityDef, NetExecution};
-use crate::{AbilityId, engine};
+use crate::engine;
 
 /// The server's telling the owning client a server-initiated ability started.
 ///

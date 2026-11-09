@@ -8,6 +8,7 @@ mod spec;
 use bevy::prelude::*;
 use bevy_mettle_core::Error;
 use bevy_mettle_core::condition::{Condition, ConditionOver};
+use bevy_mettle_core::registry::AttributeId;
 use bevy_mettle_core::tag::{TagKey, TagRegistry};
 use serde::{Deserialize, Serialize};
 
@@ -16,7 +17,7 @@ pub use self::replica::ModifiersReplica;
 pub(crate) use self::replica::{show_replicas, sync_replicas};
 pub use self::sources::{ModifierOf, ModifierSources, Modifiers, Provisional};
 pub use self::spec::{ModifierCommands, ModifierSpec};
-use crate::registry::{AttributeId, AttributeRegistry};
+use crate::registry::AttributeRegistry;
 
 /// A modifier: one line on an item, a passive or an effect.
 ///

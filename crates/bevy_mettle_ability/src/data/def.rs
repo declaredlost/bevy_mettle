@@ -2,13 +2,11 @@
 //! numbers.
 
 use bevy_mettle_core::condition::Condition;
-use bevy_mettle_core::registry::Name;
+use bevy_mettle_core::registry::{AbilityId, AnyAbility, EffectId, Name};
 use bevy_mettle_core::tag::Tags;
-use bevy_mettle_effect::EffectId;
 
-use super::{AnyAbility, Commit, NetExecution, Trigger};
+use super::{Commit, NetExecution, Trigger};
 use crate::behaviour::BehaviourId;
-use crate::registry::AbilityId;
 
 /// An ability as an app has it: its data checked, and what it names numbered.
 ///

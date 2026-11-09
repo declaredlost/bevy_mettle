@@ -150,7 +150,11 @@ From the server to its clients:
   [`replicate_attribute`]. `Base<A>` is what the client works predictions out
   on. `Served<A>` is what it shows. On the server, every actor with `Base<A>`
   serves `A`;
-- an effect's source, mapped to the client's entity;
+- an effect's [context](applying-effects.md#context), with its replica and
+  its one-shot cues: its entities mapped to the client's, those in the
+  game's own types too. One the client isn't sent (an arrow only the server
+  has) is an empty entity there, the one it becomes if it's sent later:
+  check it has what you read;
 - each modifier source's [`ModifiersReplica`], carrying the actor it's
   [`ModifierOf`], for the sources your game replicates and opts in (below).
 
@@ -232,9 +236,11 @@ messages and replication, and before [`AbilitySystems`].
 Effects, abilities and tags go as their numbers, so a client has to number
 content as its server does. The server tells each client how it numbers its
 content, a [`ContentFingerprint`] of every registry, as it connects, and again
-whenever its content changes (a hot reload). A client numbering it otherwise
-logs an error and triggers [`ContentMismatch`]: load the server's content the
-way the server did, or leave.
+whenever its content changes (a hot reload). The game's context data types
+are in it too: they go by number, in order of name, so add the same ones on
+both. A client numbering anything otherwise logs an error and
+triggers [`ContentMismatch`]: load the server's content the way the server
+did, or leave.
 
 ```rust
 # use bevy::prelude::*;
@@ -271,9 +277,9 @@ tells every client it no longer matches; reloaded alike, they match again.
   cast for: every request is rejected.
 
 [`AbilityOf`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.AbilityOf.html
-[`AbilityReplica`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/replica/struct.AbilityReplica.html
-[`AbilityReply`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/request/struct.AbilityReply.html
-[`AbilityRequest`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/request/struct.AbilityRequest.html
+[`AbilityReplica`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityReplica.html
+[`AbilityReply`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityReply.html
+[`AbilityRequest`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityRequest.html
 [`AbilitySystems`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilitySystems.html
 [`ControlledBy`]: https://docs.rs/lightyear_replication/latest/lightyear_replication/control/struct.ControlledBy.html
 [`EffectOf`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/active/struct.EffectOf.html
@@ -283,9 +289,9 @@ tells every client it no longer matches; reloaded alike, they match again.
 [`MettlePlugins`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettlePlugins.html
 [`ModifiersReplica`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.ModifiersReplica.html
 [`ModifierOf`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.ModifierOf.html
-[`EffectId`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectId.html
-[`AbilityId`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilityId.html
-[`TagId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagId.html
+[`EffectId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.EffectId.html
+[`AbilityId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.AbilityId.html
+[`TagId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.TagId.html
 [`ContentFingerprint`]: https://docs.rs/bevy_mettle_lightyear/latest/bevy_mettle_lightyear/struct.ContentFingerprint.html
 [`ContentMismatch`]: https://docs.rs/bevy_mettle_lightyear/latest/bevy_mettle_lightyear/struct.ContentMismatch.html
 [`NetRole`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/net/enum.NetRole.html

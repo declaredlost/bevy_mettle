@@ -24,12 +24,12 @@ use bevy::ecs::query::SpawnDetails;
 use bevy::ecs::system::SystemId;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
-use bevy_mettle_attribute::registry::AttributeId;
 use bevy_mettle_core::net::NetRole;
-use bevy_mettle_core::tag::{TagId, TagKey, TagRegistry};
+use bevy_mettle_core::registry::{AttributeId, EffectId, TagId};
+use bevy_mettle_core::tag::{TagKey, TagRegistry};
 use serde::{Deserialize, Serialize};
 
-use crate::EffectId;
+use crate::context::{ContextDataRegistry, ContextReplica, EffectContext};
 use crate::events::Delta;
 
 /// A cue to play: its tag, and what it's played with, such as its magnitude.
@@ -43,8 +43,8 @@ pub struct Cue {
     pub changes: Vec<Delta>,
     /// The level of what played it.
     pub level: f32,
-    /// Who caused it.
-    pub source: Option<Entity>,
+    /// What played it carried: who caused it, what struck, where.
+    pub context: EffectContext,
     /// Whether it's this world's alone: a server doesn't serve it to clients.
     pub local: bool,
 }
@@ -58,7 +58,7 @@ impl Cue {
             magnitude: 0.0,
             changes: Vec::new(),
             level: 1.0,
-            source: None,
+            context: EffectContext::default(),
             local: false,
         }
     }
@@ -87,7 +87,14 @@ impl Cue {
     /// Caused by `source`.
     #[must_use]
     pub fn source(mut self, source: Entity) -> Self {
-        self.source = Some(source);
+        self.context.source = Some(source);
+        self
+    }
+
+    /// Played with `context`: who caused it, what struck, where.
+    #[must_use]
+    pub fn context(mut self, context: EffectContext) -> Self {
+        self.context = context;
         self
     }
 
@@ -205,8 +212,8 @@ pub struct Burst {
     pub changes: Vec<Delta>,
     /// The level of what played it.
     pub level: f32,
-    /// Who caused it.
-    pub source: Option<Entity>,
+    /// What played it carried: who caused it, what struck, where.
+    pub context: ContextReplica,
     /// What it was played under, if an activation.
     pub activation: Option<u64>,
     /// The effect that played it, if one did.
@@ -217,6 +224,7 @@ pub struct Burst {
 ///
 /// Replicated to the clients that see it, which play those they haven't.
 #[derive(Component, Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[component(map_entities)]
 pub struct CueBursts {
     /// The next one's number.
     pub next: u64,
@@ -227,9 +235,7 @@ pub struct CueBursts {
 impl MapEntities for CueBursts {
     fn map_entities<M: EntityMapper>(&mut self, mapper: &mut M) {
         for burst in &mut self.recent {
-            if let Some(source) = &mut burst.source {
-                *source = mapper.get_mapped(*source);
-            }
+            burst.context.map_entities(mapper);
         }
     }
 }
@@ -327,12 +333,27 @@ pub struct CueExecuted {
     pub changes: Vec<Delta>,
     /// The level of what played it.
     pub level: f32,
-    /// Who caused it.
-    pub source: Option<Entity>,
+    /// What played it carried: who caused it, what struck, where.
+    pub context: EffectContext,
     /// What it was played under, if an activation.
     pub activation: Option<u64>,
     /// The effect that played it, if one did.
     pub effect: Option<EffectId>,
+}
+
+impl CueExecuted {
+    /// Where it hit, if what played it said: where its spark goes.
+    #[must_use]
+    pub fn location(&self) -> Option<Vec3> {
+        self.context.hit.map(|hit| hit.point)
+    }
+
+    /// The surface's normal where it hit, if what played it said: which way
+    /// its spark faces.
+    #[must_use]
+    pub fn normal(&self) -> Option<Vec3> {
+        self.context.hit.map(|hit| hit.normal)
+    }
 }
 
 /// What a cue handler is run with: a cue started, ended, or played.
@@ -515,7 +536,7 @@ pub(crate) fn execute(
             magnitude: cue.magnitude,
             changes: cue.changes.clone(),
             level: cue.level,
-            source: cue.source,
+            context: cue.context.clone(),
             activation,
             effect,
         },
@@ -544,6 +565,10 @@ fn burst(
         warn!("cue `{}` isn't in the tag tree: not replicated", cue.tag);
         return;
     };
+    let data = world
+        .get_resource::<ContextDataRegistry>()
+        .cloned()
+        .unwrap_or_default();
     let at = world
         .get_resource::<Time>()
         .map_or(0.0, Time::elapsed_secs_f64);
@@ -562,7 +587,7 @@ fn burst(
         magnitude: cue.magnitude,
         changes: cue.changes.clone(),
         level: cue.level,
-        source: cue.source,
+        context: ContextReplica::of(&cue.context, &data),
         activation,
         effect,
     });
@@ -663,11 +688,13 @@ pub(crate) fn play(
     mut actors: Query<(Entity, &CueBursts, Option<&mut Played>), Changed<CueBursts>>,
     mut predicted: ResMut<Predicted>,
     tree: Option<Res<TagRegistry>>,
+    data: Option<Res<ContextDataRegistry>>,
     handlers: Res<CueHandlers>,
     time: Res<Time>,
     mut commands: Commands,
 ) {
     let tree = tree.as_deref().cloned().unwrap_or_default();
+    let data = data.as_deref().cloned().unwrap_or_default();
     predicted.forget(time.elapsed_secs_f64() - REMEMBERED);
     for (actor, bursts, played) in &mut actors {
         let from = if let Some(mut played) = played {
@@ -692,7 +719,7 @@ pub(crate) fn play(
                 magnitude: burst.magnitude,
                 changes: burst.changes.clone(),
                 level: burst.level,
-                source: burst.source,
+                context: burst.context.context(&data),
                 activation: burst.activation,
                 effect: burst.effect,
             };

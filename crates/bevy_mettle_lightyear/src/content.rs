@@ -6,6 +6,7 @@ use bevy_mettle_ability::AbilityRegistry;
 use bevy_mettle_core::curve::CurveRegistry;
 use bevy_mettle_core::tag::TagRegistry;
 use bevy_mettle_effect::EffectRegistry;
+use bevy_mettle_effect::context::ContextDataRegistry;
 use lightyear::prelude::server::ClientOf;
 use lightyear::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -16,7 +17,8 @@ use crate::MettleChannel;
 /// [`fingerprint`](bevy_mettle_core::registry::Registry::fingerprint).
 ///
 /// The same on a client and its server when they number content the same, so
-/// what one sends by number names the same thing to the other. A server sends
+/// what one sends by number names the same thing to the other. With the types
+/// effects' contexts carry, numbered in order of name. A server sends
 /// its own to each client as it connects, and again as its content changes.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContentFingerprint {
@@ -28,6 +30,8 @@ pub struct ContentFingerprint {
     pub effects: u64,
     /// The abilities'.
     pub abilities: u64,
+    /// The context data types'.
+    pub context_data: u64,
 }
 
 impl ContentFingerprint {
@@ -45,6 +49,7 @@ impl ContentFingerprint {
             curves: fingerprint(world, |curves: &CurveRegistry| curves.fingerprint()),
             effects: fingerprint(world, |effects: &EffectRegistry| effects.fingerprint()),
             abilities: fingerprint(world, |abilities: &AbilityRegistry| abilities.fingerprint()),
+            context_data: fingerprint(world, |data: &ContextDataRegistry| data.fingerprint()),
         }
     }
 }
@@ -73,11 +78,13 @@ pub(crate) fn content_changed(
     curves: Option<Res<CurveRegistry>>,
     effects: Option<Res<EffectRegistry>>,
     abilities: Option<Res<AbilityRegistry>>,
+    data: Option<Res<ContextDataRegistry>>,
 ) -> bool {
     tags.is_some_and(|tags| tags.is_changed())
         || curves.is_some_and(|curves| curves.is_changed())
         || effects.is_some_and(|effects| effects.is_changed())
         || abilities.is_some_and(|abilities| abilities.is_changed())
+        || data.is_some_and(|data| data.is_changed())
 }
 
 /// On a server: tells each client connecting how its content is numbered, and

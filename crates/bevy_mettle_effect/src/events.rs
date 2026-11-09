@@ -3,11 +3,11 @@
 //! What cues and abilities observe.
 
 use bevy::prelude::*;
-use bevy_mettle_attribute::registry::AttributeId;
+use bevy_mettle_core::registry::{AttributeId, EffectId};
 use serde::{Deserialize, Serialize};
 
-use crate::EffectId;
 use crate::code::RouteId;
+use crate::context::EffectContext;
 
 /// An effect applied to an actor, lasting: its active effect spawned.
 #[derive(EntityEvent, Debug, Clone, PartialEq, Eq)]
@@ -87,8 +87,8 @@ pub struct EffectExecuted {
     pub entity: Entity,
     /// Which effect.
     pub id: EffectId,
-    /// Who applied it, if anyone.
-    pub source: Option<Entity>,
+    /// What it was applied with: who applied it, what struck, where.
+    pub context: EffectContext,
     /// What it changed the actor's bases by, each attribute once, in the
     /// order it first changed them.
     pub changes: Vec<Delta>,

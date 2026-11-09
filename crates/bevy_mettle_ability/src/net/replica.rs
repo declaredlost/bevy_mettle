@@ -1,10 +1,11 @@
 //! What a client sees of the server's abilities: replicas, shown as granted.
 
 use bevy::prelude::*;
+use bevy_mettle_core::registry::AbilityId;
 use serde::{Deserialize, Serialize};
 
+use crate::AbilityRegistry;
 use crate::active::GrantedAbility;
-use crate::{AbilityId, AbilityRegistry};
 
 /// On a server's granted ability: what a client needs to have it too.
 ///

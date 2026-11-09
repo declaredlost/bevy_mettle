@@ -127,7 +127,7 @@ assert_eq!(graph.len(), 20);
 [`LevelCurve`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.LevelCurve.html
 [`MettleContent`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleContent.html
 [`CurveRegistry::build`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveRegistry.html#method.build
-[`CurveId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveId.html
+[`CurveId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.CurveId.html
 [`CurveRegistry::id`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveRegistry.html#method.id
 [`CurveRegistry::rebuild`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveRegistry.html#method.rebuild
 [`CurveRegistry::curve`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveRegistry.html#method.curve

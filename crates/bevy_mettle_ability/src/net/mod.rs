@@ -9,32 +9,33 @@
 //! what a client mirrors, [`AbilityEnd`]s as the server ends what a client
 //! runs and [`AbilityCancelRequest`]s as a client cancels it, and
 //! [`AbilityReplica`]s with their [`AbilityOf`](crate::active::AbilityOf).
-//!
-//! [`AbilityRequest`]: request::AbilityRequest
-//! [`AbilityReply`]: request::AbilityReply
-//! [`AbilityStarted`]: start::AbilityStarted
-//! [`AbilityEnd`]: end::AbilityEnd
-//! [`AbilityCancelRequest`]: end::AbilityCancelRequest
-//! [`AbilityReplica`]: replica::AbilityReplica
+//! An ability given input goes as [`AbilityRequestWith`] and
+//! [`AbilityStartedWith`], and new input while it runs as [`AbilityInput`].
 
-pub mod end;
-pub mod input;
-pub mod replica;
-pub mod request;
-pub mod start;
+mod end;
+mod input;
+mod replica;
+mod request;
+mod start;
 
 use bevy::prelude::*;
 use bevy_mettle_core::net::NetRole;
+use bevy_mettle_core::registry::AbilityId;
 
+pub use self::end::{AbilityCancelRequest, AbilityEnd};
 pub(crate) use self::end::{EarlyCancels, ask_cancel, hear_cancels, hear_ends, tell_end};
+pub use self::input::AbilityInput;
 pub(crate) use self::input::{add_input, send_input};
+pub use self::replica::AbilityReplica;
 pub(crate) use self::replica::{show_replicas, sync_replicas};
+pub use self::request::{AbilityReply, AbilityRequest, AbilityRequestWith};
 pub(crate) use self::request::{
     Pending, answer, predict, predict_granted, predict_tagged, predict_with, reject, resolve, serve,
 };
+pub use self::start::{AbilityStarted, AbilityStartedWith};
 pub(crate) use self::start::{hear_started, hear_started_with, started, tells_start};
 use crate::active::ActiveAbility;
-use crate::{AbilityId, engine};
+use crate::engine;
 
 /// On a server: the systems activating what clients ask for, with input and
 /// without. Their cancels are heard after them, so a cancel arriving with
@@ -84,8 +85,9 @@ pub(crate) fn derived(parent: u64, ability: AbilityId) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use bevy_mettle_core::registry::AbilityId;
+
     use super::{DERIVED, SERVERS, derived};
-    use crate::AbilityId;
 
     #[test]
     fn a_derived_activation_is_the_same_wherever_its_derived() {

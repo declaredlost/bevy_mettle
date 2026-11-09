@@ -2,12 +2,12 @@
 
 use bevy::prelude::*;
 use bevy_mettle_core::condition::Condition;
+use bevy_mettle_core::registry::AttributeId;
 use bevy_mettle_core::tag::TagCounts;
 use serde::{Deserialize, Serialize};
 
 use crate::modifier::{Modifier, Operation};
 use crate::read::{AttributeContext, Read};
-use crate::registry::AttributeId;
 
 /// When a modifier counts, and how much: its expression, and whether it's local
 /// to its source.

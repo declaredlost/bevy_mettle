@@ -9,6 +9,7 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 use bevy_mettle::core::condition::Context;
+use bevy_mettle::core::registry::AttributeId;
 use bevy_mettle::prelude::*;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 

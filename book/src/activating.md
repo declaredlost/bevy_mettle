@@ -182,8 +182,43 @@ fn cast_fireball(
 }
 ```
 
-[`ActiveAbility`] says who it's active for (`actor`), at what level, under
-which activation, and the gameplay event that triggered it, if one did.
+[`ActiveAbility`] says which ability it is, who it's active for (`actor`),
+at what level, under which activation, and the gameplay event that triggered
+it, if one did.
+
+A behaviour applies effects through it, with `effect_spec`, Unreal's
+`MakeOutgoingGameplayEffectSpec`. The spec it makes is from the actor,
+struck by it, at the ability's level, under this activation, its
+[context](applying-effects.md#context) told the ability. A projectile says
+it struck instead, with `.causer(..)`:
+
+```rust
+# use bevy::prelude::*;
+# use bevy_mettle::prelude::*;
+# #[derive(Effect)] struct FireballHit;
+#[derive(Component, Default, Behaviour)]
+struct Fireball {
+    target: Option<Entity>,
+    projectile: Option<Entity>,
+}
+
+fn hit(fireballs: Query<(&ActiveAbility, &Fireball)>, mut commands: Commands) {
+    for (active, fireball) in &fireballs {
+        if let (Some(target), Some(projectile)) = (fireball.target, fireball.projectile) {
+            commands
+                .entity(target)
+                .apply_effect(active.effect_spec(FireballHit).causer(projectile));
+        }
+    }
+}
+```
+
+It takes the effect, by type or number, and the builders set more after:
+another level, params, what struck. Apply what an ability does this way, not
+with a spec of your own. Under the
+activation, a client's prediction of it is taken back if the server rejects
+the activation ([Prediction](prediction.md)); one applied without it stays.
+The ability's cost and cooldown are applied the same way.
 
 Add it like any other system:
 
@@ -370,7 +405,7 @@ fn out_of_mana(failed: On<AbilityFailed>, registry: Res<AbilityRegistry>) {
 [`Ability`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/trait.Ability.html
 [`AbilitySpec`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilitySpec.html
 [`IntoAbilityId`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/trait.IntoAbilityId.html
-[`AbilityId`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilityId.html
+[`AbilityId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.AbilityId.html
 [`Abilities`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.Abilities.html
 [`AbilityOf`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.AbilityOf.html
 [`AbilityActivated`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityActivated.html

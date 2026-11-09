@@ -2,15 +2,12 @@
 //! numbers.
 
 use bevy_mettle_attribute::modifier::{Operation, Per};
-use bevy_mettle_attribute::registry::AttributeId;
 use bevy_mettle_core::condition::Condition;
-use bevy_mettle_core::curve::CurveId;
-use bevy_mettle_core::registry::Name;
+use bevy_mettle_core::registry::{AnyEffect, AttributeId, CurveId, EffectId, Name};
 use bevy_mettle_core::tag::{TagKey, Tags};
 
-use super::{AnyEffect, Capture, EffectDuration, Period, Stacking};
+use super::{Capture, EffectDuration, Period, Stacking};
 use crate::code::{CalculationId, Changes, ExecutionId};
-use crate::registry::EffectId;
 
 /// An effect as an app has it: its data checked, and what it names numbered.
 ///

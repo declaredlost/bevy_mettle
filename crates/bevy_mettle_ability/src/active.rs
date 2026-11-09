@@ -5,9 +5,11 @@ use std::sync::Arc;
 use bevy::ecs::lifecycle::HookContext;
 use bevy::ecs::world::DeferredWorld;
 use bevy::prelude::*;
+use bevy_mettle_core::registry::AbilityId;
 use bevy_mettle_core::tag::{OwnedTags, Tags};
+use bevy_mettle_effect::context::AbilityRef;
+use bevy_mettle_effect::{EffectSpec, IntoEffectId};
 
-use crate::AbilityId;
 use crate::behaviour::BehaviourId;
 use crate::data::AbilityDef;
 use crate::events::GameplayEvent;
@@ -136,8 +138,14 @@ impl GrantedAbilities {
 }
 
 /// On a granted ability: that it's active, and how; its behaviour reads it.
+///
+/// Its behaviour applies effects through it, with
+/// [`effect_spec`](Self::effect_spec): from its actor, under this activation,
+/// at its level, told which ability applied them.
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct ActiveAbility {
+    /// Which ability it is.
+    pub ability: AbilityId,
     /// Who it's active for.
     pub actor: Entity,
     /// This activation: what its cost and cooldown are applied under, and what
@@ -147,6 +155,49 @@ pub struct ActiveAbility {
     pub level: f32,
     /// The gameplay event that activated it, if one did.
     pub event: Option<GameplayEvent>,
+}
+
+impl ActiveAbility {
+    /// A spec of `effect`, as this activation applies it: from its actor,
+    /// struck by it, under this activation, at its level, its context told
+    /// this ability.
+    ///
+    /// Unreal's `MakeOutgoingGameplayEffectSpec`. What a behaviour applies,
+    /// so a rejected prediction takes it back, and what it applies says which
+    /// ability did. Set more on it after: another level, params, what struck
+    /// in its actor's place (a projectile).
+    /// An effect applied on another's behalf (a summon's, a reflected
+    /// projectile's) is theirs: make its spec yourself.
+    #[must_use]
+    pub fn effect_spec(&self, effect: impl IntoEffectId) -> EffectSpec {
+        outgoing(
+            effect.into_spec(),
+            self.actor,
+            self.ability,
+            self.level,
+            Some(self.activation),
+        )
+    }
+}
+
+/// `spec`, as an ability applies it: from `actor`, struck by it, at `level`,
+/// under `activation` if it's given, its context told `ability` at `level`.
+pub(crate) fn outgoing(
+    spec: EffectSpec,
+    actor: Entity,
+    ability: AbilityId,
+    level: f32,
+    activation: Option<u64>,
+) -> EffectSpec {
+    let spec = spec
+        .level(level)
+        .source(actor)
+        .causer(actor)
+        .ability(AbilityRef { id: ability, level });
+    match activation {
+        Some(activation) => spec.activation(activation),
+        None => spec,
+    }
 }
 
 /// On a granted ability: the actor it's granted to, as a Bevy relationship.

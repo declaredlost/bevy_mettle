@@ -1,7 +1,8 @@
 //! Registries: entries of each kind by number, and numbers by name and type.
 //!
 //! What an app has of each kind, by number, and its numbers by name and by
-//! type.
+//! type; and content's kinds, with their ids: what content is numbered by,
+//! shared over a network.
 
 use std::any::TypeId;
 use std::fmt;
@@ -12,10 +13,15 @@ use bevy_platform::collections::HashMap;
 use fnv::FnvHasher;
 use smol_str::SmolStr;
 
+pub use self::id::{
+    AbilityId, AnyAbility, AnyAttribute, AnyCurve, AnyEffect, AnyTag, AttributeId, CurveId,
+    EffectId, TagId,
+};
 pub use self::key::Key;
 pub use self::name::{Kind, Name};
 use self::numbering::Numbering;
 
+mod id;
 mod key;
 mod name;
 mod numbering;
@@ -197,6 +203,43 @@ impl<K: Kind, T: Clone> Registry<K, T> {
         id
     }
 
+    /// The same, numbered in order of name: as content is, so the same
+    /// entries are numbered the same wherever they're added, in whatever
+    /// order. Each keeps its type; names numbered but empty are let go.
+    #[must_use]
+    pub fn sorted(&self) -> Self {
+        let mut named: Vec<(SmolStr, Option<T>)> = self
+            .numbering
+            .iter()
+            .map(|(number, name)| {
+                let entry = self.entries.get(number as usize).cloned().flatten();
+                (name.clone(), entry)
+            })
+            .collect();
+        named.sort_by(|(a, _), (b, _)| a.cmp(b));
+        let mut numbering = Numbering::default();
+        let mut entries = Vec::with_capacity(named.len());
+        for (name, entry) in named {
+            numbering.push(name);
+            entries.push(entry);
+        }
+        let by_type = self
+            .by_type
+            .iter()
+            .filter_map(|(&type_id, &id)| {
+                let name = self.name(id)?;
+                Some((type_id, Key::new(numbering.number(name)?)))
+            })
+            .collect();
+        Self {
+            numbering: Arc::new(numbering),
+            entries: Arc::new(entries),
+            named: Arc::clone(&self.named),
+            by_type: Arc::new(by_type),
+            added_by: Arc::clone(&self.added_by),
+        }
+    }
+
     /// Notes that code names what content calls `name` by the type `type_id`:
     /// resolved to its number as content's numbered.
     pub fn name_type(&mut self, type_id: TypeId, name: &'static str) {
@@ -274,6 +317,25 @@ mod tests {
         assert_eq!(registry.id("shield"), Some(shield));
         assert_eq!(registry.id_of::<Shield>(), Some(shield));
         assert_eq!(registry.name(sword), Some("sword"));
+    }
+
+    #[test]
+    fn sorted_numbers_by_name_whatever_order_they_were_added_in() {
+        let mut one = Registry::<AnyThing, u8>::default();
+        one.add::<Sword>("sword", 1);
+        one.add::<Shield>("shield", 2);
+        let mut other = Registry::<AnyThing, u8>::default();
+        other.add::<Shield>("shield", 2);
+        other.add::<Sword>("sword", 1);
+        let (one, other) = (one.sorted(), other.sorted());
+        for registry in [&one, &other] {
+            let shield = registry.id_of::<Shield>().unwrap();
+            let sword = registry.id_of::<Sword>().unwrap();
+            assert_eq!((shield.index(), sword.index()), (0, 1), "in order of name");
+            assert_eq!(registry.get(sword), Some(&1), "each keeps its entry");
+            assert_eq!(registry.id("shield"), Some(shield));
+        }
+        assert_eq!(one.fingerprint(), other.fingerprint());
     }
 
     #[test]

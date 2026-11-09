@@ -17,7 +17,7 @@ which effect, and these fields:
 |---|---|
 | `level` | What [curves](curves.md) are read at: 1 unless it says |
 | `params` | Numbers the applying code sets, for `Param` magnitudes |
-| `source` | Who applied it: the caster, the attacker |
+| `context` | What else it carries: who applied it, what struck, where. See [Context](#context) |
 | `activation` | The ability activation it's applied under, if any: see [Prediction](prediction.md) |
 
 An effect type is its own spec, at level 1 from no one: `Burning` is
@@ -41,7 +41,7 @@ struct DamageParam; // "param.damage"
 let spec = Burning.level(3.0).param(DamageParam, -5.0).source(caster);
 assert_eq!(spec.level, 3.0);
 assert_eq!(spec.param_value(DamageParam), Some(-5.0));
-assert_eq!(spec.source, Some(caster));
+assert_eq!(spec.context.source, Some(caster));
 assert_eq!(EffectSpec::from(Burning), EffectSpec::of::<Burning>());
 ```
 
@@ -50,6 +50,63 @@ doesn't know an effect's type, such as a tool listing every effect, names it
 by its number, `EffectSpec::from_id(id)`, found with
 `registry.id("burning")`. Which effect a spec applies is resolved to its
 number as it's applied.
+
+## Context
+
+A spec's [`EffectContext`] is what the applying code knew beyond numbers.
+It's Unreal's `FGameplayEffectContext`:
+
+| Field | What it is |
+|---|---|
+| `source` | Who's responsible: the archer. Source tags, attribute captures and stacking by source read it |
+| `causer` | What struck: the arrow, the trap |
+| `object` | What it came from: the bow, an item |
+| `ability` | The ability that applied it, an [`AbilityRef`]: its id, and its level as it was activated. Set by abilities for their costs and cooldowns |
+| `hit` | Where it hit, a [`Hit`]: the point, and the surface's normal |
+| `origin` | Where it came from: what knockback pushes away from |
+
+The spec's builders set each: `.source(archer)`, `.causer(arrow)`,
+`.object(bow)`, `.hit(hit)`, `.origin(at)`. Which run of an ability applied
+it is the spec's `activation`.
+
+A game adds its own with a [`ContextData`] type, Unreal's context
+subclassed: one of each type on a context, read by type.
+
+```rust
+# use bevy::prelude::*;
+# use bevy::ecs::entity::MapEntities;
+# use bevy_mettle::prelude::*;
+# use serde::{Deserialize, Serialize};
+# let (archer, arrow) = (Entity::PLACEHOLDER, Entity::PLACEHOLDER);
+#[derive(Effect)]
+struct Pierce;
+
+#[derive(ContextData, Clone, Debug, PartialEq, Serialize, Deserialize, MapEntities)]
+struct Shot {
+    headshot: bool,
+}
+
+# let mut app = App::new();
+app.add_context_data::<Shot>();
+
+let spec = Pierce
+    .source(archer)
+    .causer(arrow)
+    .hit(Hit { point: Vec3::new(2.0, 1.5, 0.0), normal: Vec3::NEG_X })
+    .with(Shot { headshot: true });
+assert_eq!(spec.context.causer, Some(arrow));
+assert_eq!(spec.context.get::<Shot>(), Some(&Shot { headshot: true }));
+```
+
+Executions and calculations read it from their [view](effect-code.md#what-code-sees):
+`effect.context().causer`, `effect.context().hit`, `effect.get::<Shot>()`. An effect it
+chains carries it too, and the cues it plays are told it. It goes with an
+effect's replica to clients, and with a one-shot cue's, entities mapped,
+those in a game's type too: a type goes by its number, in order of name, so
+a server and its clients number it the same. A type that isn't added stays
+in the world that applied it. A game type is serialized compactly, as
+lightyear's messages are, so serde's `skip_serializing_if`, `flatten` and
+`untagged` don't round-trip in it.
 
 ## Applying
 
@@ -337,7 +394,7 @@ would do.
   [`OwnedTags`]. Every `Base` brings them; on an actor without one, add
   `OwnedTags` yourself.
 
-[`EffectId`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectId.html
+[`EffectId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.EffectId.html
 [`EffectSpec`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectSpec.html
 [`EffectWorld`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/trait.EffectWorld.html
 [`EffectWorld::preview_effect`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/trait.EffectWorld.html#tymethod.preview_effect
@@ -358,3 +415,7 @@ would do.
 [`ModifierOf`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.ModifierOf.html
 [`MettlePlugins`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettlePlugins.html
 [`MettleSystems`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleSystems.html
+[`EffectContext`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/context/struct.EffectContext.html
+[`AbilityRef`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/context/struct.AbilityRef.html
+[`Hit`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/context/struct.Hit.html
+[`ContextData`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/context/trait.ContextData.html

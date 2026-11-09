@@ -2,30 +2,10 @@
 
 use std::any::TypeId;
 
-use bevy_mettle_core::registry::{Key, Kind};
+use bevy_mettle_core::registry::AttributeId;
 use serde::{Deserialize, Serialize};
 
 use crate::Attribute;
-
-/// The attribute kind: what data names, and an [`AttributeId`] numbers.
-///
-/// An attribute's name in data is a `Name<AnyAttribute>`, until it's resolved
-/// to an [`AttributeId`].
-#[derive(Kind)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum AnyAttribute {}
-
-/// An attribute's number in an app: what state, modifiers and the network use.
-///
-/// Dense, and given as it's added.
-///
-/// As Bevy's `ComponentId` is to a component: look one up from its type in
-/// the [`AttributeRegistry`](super::AttributeRegistry), with
-/// [`id_of`](bevy_mettle_core::registry::Registry::id_of), or with
-/// [`AttributeWorld::attribute_id`](crate::read::AttributeWorld::attribute_id),
-/// and its name and rules with
-/// [`get`](bevy_mettle_core::registry::Registry::get).
-pub type AttributeId = Key<AnyAttribute>;
 
 /// What an attribute is kept within: a value, or another attribute's value.
 ///

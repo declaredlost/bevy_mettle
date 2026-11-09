@@ -13,11 +13,10 @@ use bevy::prelude::*;
 use bevy::reflect::TypePath;
 use bevy_mettle_ability::AbilitySystems;
 use bevy_mettle_ability::active::AbilityOf;
-use bevy_mettle_ability::net::end::{AbilityCancelRequest, AbilityEnd};
-use bevy_mettle_ability::net::input::AbilityInput;
-use bevy_mettle_ability::net::replica::AbilityReplica;
-use bevy_mettle_ability::net::request::{AbilityRequest, AbilityRequestWith};
-use bevy_mettle_ability::net::start::{AbilityStarted, AbilityStartedWith};
+use bevy_mettle_ability::net::{
+    AbilityCancelRequest, AbilityEnd, AbilityInput, AbilityReplica, AbilityRequest,
+    AbilityRequestWith, AbilityStarted, AbilityStartedWith,
+};
 use bevy_mettle_attribute::authority::Served;
 use bevy_mettle_attribute::modifier::ModifiersReplica;
 use bevy_mettle_attribute::{Attribute, Base};
@@ -64,8 +63,8 @@ pub struct MettleChannel;
 /// - A client's [`AbilityRequest`]s are sent to the server, which takes one
 ///   only for an actor [`ControlledBy`] the client asking (rejecting any other
 ///   back to it, as `NotGranted`), and sends its
-///   [`AbilityReply`](bevy_mettle_ability::net::request::AbilityReply) back to
-///   that client.
+///   [`AbilityReply`](bevy_mettle_ability::net::AbilityReply) back to that
+///   client.
 /// - Endings go both ways: a client's [`AbilityCancelRequest`]s to the server,
 ///   taken only for actors it controls; the server's [`AbilityEnd`]s to the
 ///   client controlling the actor.

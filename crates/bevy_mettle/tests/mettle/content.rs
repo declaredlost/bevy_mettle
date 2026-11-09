@@ -45,7 +45,7 @@ fn code(app: &mut App) -> &mut App {
     app.add_behaviour::<Cast>()
         .add_ability::<Fireball>()
         .add_effect::<Burn>()
-        .add_execution::<Burn>(|_: &EffectContext| {
+        .add_execution::<Burn>(|_: &ExecutionContext| {
             vec![BaseChange::new(id::<Life>(), Operation::Flat, -5.0)]
         })
 }

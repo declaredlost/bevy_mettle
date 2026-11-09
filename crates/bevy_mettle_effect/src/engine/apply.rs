@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use bevy::prelude::*;
 use bevy_mettle_attribute::modifier::Provisional;
+use bevy_mettle_core::registry::EffectId;
 use bevy_mettle_core::tag::{OwnedTags, TagCounts, Tags};
 
 use super::count::{activate, holds_ongoing, refresh};
@@ -11,11 +12,10 @@ use super::execution::{execute, resolve};
 use super::remove::remove_tagged;
 use super::{Check, DEPTH, effects_on, source_tags};
 use crate::active::{ActiveEffect, EffectOf};
-use crate::code::EffectContext;
+use crate::code::ExecutionContext;
 use crate::data::{EffectDef, EffectDuration, MagnitudeDef, Reapply, StackBy, Stacking};
 use crate::events::{Blocked, EffectApplied, EffectBlocked, EffectStacked};
-use crate::net::{self};
-use crate::{EffectId, EffectRegistry, EffectSpec};
+use crate::{EffectRegistry, EffectSpec, net};
 
 /// Applies `spec` to `target`, its effect resolved to its number.
 pub(crate) fn apply(world: &mut World, target: Entity, spec: &EffectSpec) {
@@ -63,7 +63,7 @@ pub(super) fn apply_at(
     if net::answered(world, &spec) {
         return;
     }
-    let source_tags = source_tags(world, spec.source);
+    let source_tags = source_tags(world, spec.context.source);
     if world.get::<OwnedTags>(target).is_none() {
         warn!(
             "effect `{}` isn't applied to {target}: it owns no tags",
@@ -88,7 +88,7 @@ pub(super) fn apply_at(
         return;
     }
     if let Some(stacking) = &def.stacking
-        && let Some(existing) = stack_of(world, target, def.id, stacking.by, spec.source)
+        && let Some(existing) = stack_of(world, target, def.id, stacking.by, spec.context.source)
     {
         stack(world, &registry, existing, stacking, &spec, depth);
         return;
@@ -145,7 +145,7 @@ pub(super) fn spawn(
     source_tags: TagCounts,
 ) -> Option<Entity> {
     let (duration, period, captured) = {
-        let context = EffectContext {
+        let context = ExecutionContext {
             world: &*world,
             target,
             def,
@@ -222,7 +222,7 @@ pub(super) fn spawn(
 
 /// `def`'s modifiers' attribute magnitudes, as they are now: what it keeps.
 pub(super) fn capture(
-    context: &EffectContext,
+    context: &ExecutionContext,
     registry: &EffectRegistry,
     def: &EffectDef,
 ) -> Vec<Option<f32>> {
@@ -255,7 +255,7 @@ pub(super) fn stack_of(
 ) -> Option<Entity> {
     effects_on(world, target).into_iter().find(|effect| {
         world.get::<ActiveEffect>(*effect).is_some_and(|active| {
-            active.def.id == id && (by == StackBy::Target || active.spec.source == source)
+            active.def.id == id && (by == StackBy::Target || active.spec.context.source == source)
         })
     })
 }

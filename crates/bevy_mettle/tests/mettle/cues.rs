@@ -4,7 +4,8 @@
 
 use bevy::prelude::*;
 use bevy_harness::TestApp;
-use bevy_mettle::core::tag::TagId;
+use bevy_mettle::core::registry::{AttributeId, TagId};
+use bevy_mettle::effect::context::ContextReplica;
 use bevy_mettle::effect::cue::{Burst, CueBursts, ServedCues};
 use bevy_mettle::prelude::*;
 
@@ -200,7 +201,7 @@ fn an_effect_executing_plays_its_cue_with_what_it_dealt() {
         executed.tag.name() == "cue.hit.fire"
             && close(executed.magnitude, -15.0)
             && close(executed.level, 3.0)
-            && executed.source == Some(caster)
+            && executed.context.source == Some(caster)
             && hit.is_some()
             && executed.effect == hit
     });
@@ -434,7 +435,7 @@ fn bursts(tag: TagId, activation: u64, n: u64) -> CueBursts {
                 magnitude: -15.0,
                 changes: Vec::new(),
                 level: 1.0,
-                source: None,
+                context: ContextReplica::default(),
                 activation: Some(activation),
                 effect: None,
             })

@@ -1,9 +1,8 @@
 //! Gameplay events, and what's told as abilities activate and end.
 
 use bevy::prelude::*;
+use bevy_mettle_core::registry::AbilityId;
 use bevy_mettle_core::tag::TagKey;
-
-use crate::AbilityId;
 
 /// A gameplay event sent to an actor: a tag, and who and how much.
 ///
@@ -83,7 +82,7 @@ pub struct AbilityFailed {
 ///
 /// [`ServerOnly`]: crate::data::NetExecution::ServerOnly
 /// [`ServerInitiated`]: crate::data::NetExecution::ServerInitiated
-/// [`AbilityStarted`]: crate::net::start::AbilityStarted
+/// [`AbilityStarted`]: crate::net::AbilityStarted
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Activated {
     /// Running here: the granted ability, active.

@@ -2,7 +2,8 @@
 
 use bevy::prelude::*;
 use bevy_mettle_core::net::NetRole;
-use bevy_mettle_core::tag::{TagId, TagRegistry};
+use bevy_mettle_core::registry::TagId;
+use bevy_mettle_core::tag::TagRegistry;
 use serde::{Deserialize, Serialize};
 
 use super::{Modifier, ModifierOf, Modifiers};

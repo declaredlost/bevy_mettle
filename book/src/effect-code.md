@@ -70,7 +70,7 @@ fn code(app: &mut App) {
 
 /// The spec's damage, more with the caster's spell power, less with the
 /// target's fire resistance, scaled by the stacks of it.
-fn fire_damage(effect: &EffectContext) -> Vec<BaseChange> {
+fn fire_damage(effect: &ExecutionContext) -> Vec<BaseChange> {
     let damage = effect.param(DamageParam).unwrap_or_default();
     let power = effect
         .source()
@@ -87,7 +87,7 @@ fn fire_damage(effect: &EffectContext) -> Vec<BaseChange> {
 }
 
 /// Two seconds, and one more for every 25 spell power.
-fn burn_time(effect: &EffectContext) -> f32 {
+fn burn_time(effect: &ExecutionContext) -> f32 {
     let power = effect
         .source()
         .and_then(|caster| effect.value::<SpellPower>(caster, &AttributeContext::new()))
@@ -143,10 +143,10 @@ A caster with 25 spell power hits a mage with 50% fire resistance for 20:
 #         .add_effect::<FireballHit>()
 #         .add_effect::<Burning>();
 # }
-# fn power(effect: &EffectContext) -> f32 {
+# fn power(effect: &ExecutionContext) -> f32 {
 #     effect.source().and_then(|caster| effect.value::<SpellPower>(caster, &AttributeContext::new())).unwrap_or_default()
 # }
-# fn fire_damage(effect: &EffectContext) -> Vec<BaseChange> {
+# fn fire_damage(effect: &ExecutionContext) -> Vec<BaseChange> {
 #     let damage = effect.param(DamageParam).unwrap_or_default();
 #     let fire = AttributeContext::new().tag(Fire);
 #     let resisted = effect.value::<Resistance>(effect.target, &fire).unwrap_or_default();
@@ -154,7 +154,7 @@ A caster with 25 spell power hits a mage with 50% fire resistance for 20:
 #     let Some(life) = effect.attribute_id::<Life>() else { return Vec::new() };
 #     vec![BaseChange::new(life, Operation::Flat, -dealt)]
 # }
-# fn burn_time(effect: &EffectContext) -> f32 {
+# fn burn_time(effect: &ExecutionContext) -> f32 {
 #     2.0 + power(effect) / 25.0
 # }
 # fn tags() -> Vec<TagKey> {
@@ -218,7 +218,7 @@ assert_eq!(remaining, Some(3.0), "two seconds, and one for 25 spell power");
 
 ## What code sees
 
-An execution or a calculation gets an [`EffectContext`]: the world, read
+An execution or a calculation gets an [`ExecutionContext`]: the world, read
 only, and what's being applied.
 
 | | What it is |
@@ -229,7 +229,9 @@ only, and what's being applied.
 | `effect()` | The effect's number, an `EffectId` |
 | `spec` | The [`EffectSpec`] applied |
 | `stacks` | How many stacks of it there are: 1 unless it stacks |
-| `level()`, `param(..)`, `source()` | The spec's level, a param it set, and its source |
+| `level()`, `param(..)` | The spec's level, and a param it set |
+| `context()`, `source()` | What the spec carries, and its source: see [Context](applying-effects.md#context) |
+| `get::<C>()` | What the game put on the context of type `C`, a [`ContextData`] |
 | `owned(entity)` | What an entity owns: its [`OwnedTags`] |
 | `attribute_id::<A>()`, `route_id::<R>()` | An attribute's or a route's number, for a change to name |
 | `value::<A>(entity, read)` | An entity's attribute, read in context |
@@ -269,7 +271,7 @@ the target, add up to 50% more, as they would if they were one attribute's:
 # #[derive(Tag)] #[tag(name = "damage")] struct DamageTag;
 # #[derive(Tag)] #[tag(parent = DamageTag)] struct Elemental;
 # #[derive(Tag)] #[tag(parent = Elemental)] struct Fire;
-fn strike(effect: &EffectContext) -> Vec<BaseChange> {
+fn strike(effect: &ExecutionContext) -> Vec<BaseChange> {
     let read = AttributeContext::new().tag(Fire);
     let (Some(caster), Some(taken)) = (
         effect.source().and_then(|caster| effect.breakdown::<Damage>(caster, &read)),
@@ -313,7 +315,7 @@ struct Hit;
 
 /// The shield takes what it can and life the rest; the attacker steals back a
 /// fifth of what life lost.
-fn route_damage(effect: &EffectContext, damage: f32) -> Vec<BaseChange> {
+fn route_damage(effect: &ExecutionContext, damage: f32) -> Vec<BaseChange> {
     let (Some(shield), Some(life)) = (effect.attribute_id::<Shield>(), effect.attribute_id::<Life>())
     else {
         return Vec::new();
@@ -426,7 +428,7 @@ them.
   use to check a cost, runs executions and calculations without applying
   anything.
 
-[`EffectContext`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/code/struct.EffectContext.html
+[`ExecutionContext`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/code/struct.ExecutionContext.html
 [`BaseChange`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/code/struct.BaseChange.html
 [`Execution`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/code/trait.Execution.html
 [`Calculation`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/code/trait.Calculation.html
@@ -443,3 +445,4 @@ them.
 [`Magnitude`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/enum.Magnitude.html
 [`Operation`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/enum.Operation.html
 [`OwnedTags`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.OwnedTags.html
+[`ContextData`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/context/trait.ContextData.html

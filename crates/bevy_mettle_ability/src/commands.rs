@@ -1,13 +1,14 @@
 //! Granting, activating and ending abilities: as commands, or on the world.
 
 use bevy::prelude::*;
+use bevy_mettle_core::registry::AbilityId;
 use bevy_mettle_core::tag::Tags;
 
+use crate::AbilityRegistry;
 use crate::ability::{AbilitySpec, IntoAbilityId};
 use crate::behaviour::{Behaviour, BehaviourId, BehaviourRegistry};
 use crate::engine::{self, Commitment};
 use crate::events::{Activated, Failure, GameplayEvent};
-use crate::{AbilityId, AbilityRegistry};
 
 /// Granting, activating, committing and ending abilities, as commands.
 pub trait AbilityCommands {

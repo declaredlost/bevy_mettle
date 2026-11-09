@@ -8,21 +8,25 @@
 //! [`AnyCalculation`](crate::code::AnyCalculation) too.
 
 #[doc(no_inline)]
+pub use bevy_mettle_core::registry::{AnyEffect, EffectId};
+
+#[doc(no_inline)]
 pub use crate::active::{ActiveEffect, ActiveEffects, EffectOf};
 #[doc(no_inline)]
 pub use crate::code::{
-    BaseChange, Calculation, CalculationRegistry, EffectApp, EffectContext, Execution,
+    BaseChange, Calculation, CalculationRegistry, EffectApp, Execution, ExecutionContext,
     ExecutionRegistry, Route, RouteRegistry, Whose,
 };
 #[doc(no_inline)]
+pub use crate::context::{AbilityRef, ContextData, EffectContext, Hit};
 pub use crate::cue::{
     ActiveCue, ActiveCues, Cue, CueAdded, CueApp, CueCommands, CueEvent, CueExecuted, CueOf,
     CueRemoved, CueSystems, CueWorld,
 };
 #[doc(no_inline)]
 pub use crate::data::{
-    AnyEffect, Capture, EffectData, EffectDuration, EffectModifier, Expire, Magnitude, Reapply,
-    StackBy, Stacking,
+    Capture, EffectData, EffectDuration, EffectModifier, Expire, Magnitude, Reapply, StackBy,
+    Stacking,
 };
 #[doc(no_inline)]
 pub use crate::events::{
@@ -32,6 +36,6 @@ pub use crate::events::{
 pub use crate::net::{EffectReplica, PredictedUnder, Proxy};
 #[doc(no_inline)]
 pub use crate::{
-    Effect, EffectChecks, EffectCommands, EffectId, EffectPlugin, EffectRegistry, EffectSpec,
-    EffectSystems, EffectWorld,
+    Effect, EffectChecks, EffectCommands, EffectPlugin, EffectRegistry, EffectSpec, EffectSystems,
+    EffectWorld, IntoEffectId,
 };

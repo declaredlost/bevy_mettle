@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
 use crate::error::{Error, Errors};
-use crate::registry::{Key, Kind, Name, Registry};
+use crate::registry::{AnyCurve, CurveId, Kind, Name, Registry};
 
 /// How a curve goes between its keys: held, straight, or eased.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
@@ -26,14 +26,6 @@ pub enum Interpolation {
     /// to 1: `Ease(SineInOut)`, `Ease(ExponentialIn)`.
     Ease(EaseFunction),
 }
-
-/// The curve kind: what a `Name<AnyCurve>` names and a [`CurveId`] numbers.
-///
-/// A curve's name in content is a `Name<AnyCurve>`, until it's resolved to a
-/// [`CurveId`].
-#[derive(Kind)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum AnyCurve {}
 
 /// A curve: a value by level, from keys `(level, value)` with levels rising.
 ///
@@ -104,11 +96,6 @@ impl LevelCurve {
         Ok(built)
     }
 }
-
-/// A curve's number in the [`CurveRegistry`]: what magnitudes scale by.
-///
-/// Magnitudes name a curve by number once content is checked.
-pub type CurveId = Key<AnyCurve>;
 
 /// The curves there are, checked, built as Bevy's curves, and numbered.
 ///

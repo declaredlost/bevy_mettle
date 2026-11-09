@@ -188,7 +188,7 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::curve::AnyCurve;
+    use crate::registry::AnyCurve;
 
     #[test]
     fn a_name_looks_up_by_its_str() {

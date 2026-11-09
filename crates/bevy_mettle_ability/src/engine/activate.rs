@@ -4,6 +4,7 @@
 use std::any::TypeId;
 
 use bevy::prelude::*;
+use bevy_mettle_core::registry::AbilityId;
 use bevy_mettle_core::tag::OwnedTags;
 use bevy_mettle_effect::cue::{Cue, CueWorld};
 
@@ -11,7 +12,6 @@ use super::check::can_activate;
 use super::commit::{Commitment, Committed, pay};
 use super::end::{end, end_quietly, interrupt};
 use super::{abilities_of, next_activation};
-use crate::AbilityId;
 use crate::active::{AbilityOf, ActiveAbility, GrantedAbility};
 use crate::behaviour::{BehaviourId, BehaviourRegistry, InputChecks, NoInput};
 use crate::data::{AbilityDef, Commit};
@@ -212,6 +212,7 @@ fn start<I: Component + Clone>(
         .and_then(|behaviours| behaviours.get(def.behaviour).copied());
     let mut entity = world.entity_mut(ability);
     entity.insert(ActiveAbility {
+        ability: def.id,
         actor,
         activation,
         level,
