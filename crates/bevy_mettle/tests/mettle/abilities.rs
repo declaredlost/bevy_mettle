@@ -285,6 +285,38 @@ fn activating_runs_the_behaviour_pays_and_cools_down() {
 }
 
 #[test]
+fn an_abilitys_cost_and_cooldown_carry_it_and_its_caster() {
+    let mut app = app(&[fireball()]);
+    app.watch_triggered::<EffectExecuted>();
+    let mage = actor(&mut app, []);
+    app.world_mut()
+        .grant_ability(mage, Fireball.level(2.0))
+        .expect("granted");
+    activate(&mut app, mage, Fireball).unwrap();
+    let applied_by = Some(AbilityRef {
+        id: app
+            .resource::<AbilityRegistry>()
+            .id_of::<Fireball>()
+            .unwrap(),
+        level: 2.0,
+    });
+    let paid = app.read_triggered::<EffectExecuted>();
+    let [cost] = &paid[..] else {
+        panic!("the cost, once: {paid:?}");
+    };
+    assert_eq!(cost.context.ability, applied_by, "the cost");
+    assert_eq!(cost.context.source, Some(mage));
+    let effects: Vec<Entity> = app.entity(mage).get::<ActiveEffects>().iter().collect();
+    let [cooldown] = effects[..] else {
+        panic!("the cooldown alone lasts: {effects:?}");
+    };
+    let cooldown = app.entity(cooldown).get::<ActiveEffect>().spec().clone();
+    assert_eq!(cooldown.context.ability, applied_by, "the cooldown");
+    assert_eq!(cooldown.context.source, Some(mage));
+    assert!(close(cooldown.level, 2.0), "at the ability's level");
+}
+
+#[test]
 fn an_ability_is_blocked_by_its_owners_tags_and_active_abilities() {
     let mut app = app(&[fireball(), channel()]);
     let mage = caster(&mut app, &[&Fireball, &Channel]);
@@ -455,6 +487,31 @@ fn an_ability_left_out_is_as_new() {
             Token::Str("fireball"),
             Token::Str("behaviour"),
             Token::Str("cast"),
+            Token::StructEnd,
+        ],
+    );
+}
+
+#[test]
+fn an_abilitys_optional_fields_read_as_serde_reads_them() {
+    use serde_test::{Token, assert_de_tokens};
+
+    assert_de_tokens(
+        &AbilityData::new("fireball", "cast").cost("fireball.cost"),
+        &[
+            Token::Struct {
+                name: "AbilityData",
+                len: 4,
+            },
+            Token::Str("name"),
+            Token::Str("fireball"),
+            Token::Str("behaviour"),
+            Token::Str("cast"),
+            Token::Str("cost"),
+            Token::Some,
+            Token::Str("fireball.cost"),
+            Token::Str("cooldown"),
+            Token::None,
             Token::StructEnd,
         ],
     );

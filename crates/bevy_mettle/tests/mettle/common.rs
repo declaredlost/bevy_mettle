@@ -5,6 +5,7 @@ use std::sync::OnceLock;
 use bevy::app::PluginGroupBuilder;
 use bevy::prelude::*;
 use bevy_harness::TestApp;
+use bevy_mettle::core::registry::AttributeId;
 use bevy_mettle::prelude::*;
 
 #[derive(Attribute)]

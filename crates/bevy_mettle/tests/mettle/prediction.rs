@@ -6,6 +6,7 @@ use bevy::ecs::entity::{EntityHashMap, MapEntities};
 use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use bevy_harness::TestApp;
+use bevy_mettle::effect::context::ContextReplica;
 use bevy_mettle::prelude::*;
 
 use crate::common::{Mana, Strength, actor, attributes, close, get, id, own};
@@ -24,6 +25,21 @@ struct Shot;
 
 #[derive(Ability)]
 struct Bolt;
+
+#[derive(Ability)]
+struct Kindle;
+
+/// Sets its caster burning as it starts, through its activation.
+#[derive(Component, Default, Behaviour)]
+struct Kindling;
+
+fn kindle(add: On<Add<Kindling>>, active: Query<&ActiveAbility>, mut commands: Commands) {
+    if let Ok(active) = active.get(add.entity) {
+        commands
+            .entity(active.actor)
+            .apply_effect(active.effect_spec(Burn));
+    }
+}
 
 #[derive(Effect)]
 #[effect(name = "fireball.cooldown")]
@@ -45,7 +61,7 @@ struct Cast;
 #[derive(Route)]
 struct Price;
 
-fn route_price(_: &EffectContext, price: f32) -> Vec<BaseChange> {
+fn route_price(_: &ExecutionContext, price: f32) -> Vec<BaseChange> {
     vec![
         BaseChange::new(id::<Mana>(), Operation::Flat, -price),
         BaseChange::new(id::<Strength>(), Operation::Flat, 1.0).on_source(),
@@ -94,6 +110,9 @@ fn world(role: NetRole) -> TestApp {
             let reach = if role == NetRole::Server { 10.0 } else { 100.0 };
             app.add_behaviour::<Cast>()
                 .add_behaviour::<Shoot>()
+                .add_behaviour::<Kindling>()
+                .add_observer(kindle)
+                .add_ability::<Kindle>()
                 .check_input::<Aim, _>(in_reach)
                 .insert_resource(Reach(reach))
                 .add_ability::<Fireball>()
@@ -161,10 +180,11 @@ fn world(role: NetRole) -> TestApp {
     let bolt = AbilityData::new("bolt", "cast")
         .cost("bolt.cost")
         .blocked_by("state.stunned");
+    let kindle = AbilityData::new("kindle", "kindling").blocked_by("state.stunned");
     let abilities = world
         .resource::<AbilityRegistry>()
         .recheck(
-            &[fireball, charge, focus, shot, bolt],
+            &[fireball, charge, focus, shot, bolt, kindle],
             &[],
             AbilityChecks {
                 tags: world.resource(),
@@ -496,6 +516,83 @@ fn a_rejected_prediction_is_undone() {
     assert!(!game.client.entity(ability).has::<ActiveAbility>(), "ended");
 }
 
+/// The client's effects on its mage of `E`.
+fn effects_here<E: Effect>(game: &Game) -> Vec<Entity> {
+    let id = game
+        .client
+        .world()
+        .resource::<EffectRegistry>()
+        .id_of::<E>()
+        .unwrap();
+    game.client
+        .entity(game.here)
+        .try_get::<ActiveEffects>()
+        .map(|effects| effects.iter().collect::<Vec<_>>())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|effect| game.client.entity(*effect).get::<ActiveEffect>().id() == id)
+        .collect()
+}
+
+#[test]
+fn what_a_behaviour_applies_through_its_activation_is_its_and_undone_with_it() {
+    let mut game = Game::with(Kindle.level(2.0), &[]);
+    own(&mut game.server, game.there, "state.stunned", true);
+    let kindled = game
+        .client
+        .world_mut()
+        .activate_ability(game.here, Kindle)
+        .unwrap()
+        .ability();
+    let active = game.client.entity(kindled).get::<ActiveAbility>().clone();
+    let kindle = game
+        .client
+        .world()
+        .resource::<AbilityRegistry>()
+        .id_of::<Kindle>()
+        .unwrap();
+    assert_eq!(active.ability, kindle);
+    game.client.tick();
+    let [burn] = effects_here::<Burn>(&game)[..] else {
+        panic!("predicted burning")
+    };
+    let spec = game
+        .client
+        .entity(burn)
+        .get::<ActiveEffect>()
+        .spec()
+        .clone();
+    assert_eq!(spec.context.source, Some(game.here), "from its caster");
+    assert_eq!(
+        spec.context.ability,
+        Some(AbilityRef {
+            id: kindle,
+            level: 2.0
+        }),
+        "told its ability"
+    );
+    assert_eq!(spec.activation, Some(active.activation), "under it");
+    assert!(close(spec.level, 2.0), "at its level");
+    let burn_id = game
+        .client
+        .world()
+        .resource::<EffectRegistry>()
+        .id_of::<Burn>()
+        .unwrap();
+    assert_eq!(
+        active
+            .effect_spec(burn_id)
+            .effect_id(game.client.world().resource()),
+        active
+            .effect_spec(Burn)
+            .effect_id(game.client.world().resource()),
+        "named by number as by type"
+    );
+    game.ask();
+    game.answer();
+    assert_eq!(effects_here::<Burn>(&game), [], "undone with it");
+}
+
 #[test]
 fn a_shown_effect_takes_its_tags_with_it_as_it_goes() {
     let mut game = Game::new();
@@ -639,7 +736,7 @@ fn a_shown_effect_counts_its_source_as_it_was() {
     let mut mapping = EntityHashMap::default();
     mapping.insert(server_caster, client_caster);
     replica.map_entities(&mut mapping);
-    assert_eq!(replica.source, Some(client_caster), "mapped");
+    assert_eq!(replica.context.source, Some(client_caster), "mapped");
     game.client.spawn((replica, EffectOf(game.here)));
     game.client.ticks(2);
     assert!(
@@ -689,7 +786,10 @@ fn another_sources_effect_under_the_same_activation_isnt_taken_for_mine() {
             effect: cooldown,
             level: 1.0,
             params: Vec::new(),
-            source: Some(elsewhere),
+            context: ContextReplica {
+                source: Some(elsewhere),
+                ..default()
+            },
             activation: Some(activation),
             stacks: 1,
             duration: Some(1.0),

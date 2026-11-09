@@ -1,8 +1,6 @@
 //! How much: a number in an effect's definition.
 
-use bevy_mettle_attribute::registry::AnyAttribute;
-use bevy_mettle_core::curve::AnyCurve;
-use bevy_mettle_core::registry::Name;
+use bevy_mettle_core::registry::{AnyAttribute, AnyCurve, Name};
 use bevy_mettle_core::tag::TagKey;
 use serde::{Deserialize, Serialize};
 

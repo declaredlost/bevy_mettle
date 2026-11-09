@@ -15,7 +15,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub use self::counts::TagCounts;
 pub use self::key::TagKey;
 pub use self::owned::{OwnedTags, TagAdded, TagRemoved, owns, publish_tags};
-pub use self::registry::{TagApp, TagId, TagRegistry};
+pub use self::registry::{TagApp, TagRegistry};
 
 /// A gameplay tag: a label in a tree, as a marker type its place is on.
 ///
@@ -52,13 +52,6 @@ pub trait Tag: Send + Sync + 'static {
     /// Its key: made once, from its parent's key and its segment.
     fn key() -> TagKey;
 }
-
-/// The tag kind: what a [`TagId`] numbers, as the [`TagRegistry`] holds them.
-///
-/// Tags themselves are named by [`TagKey`], by type or by name.
-#[derive(crate::registry::Kind)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum AnyTag {}
 
 pub use bevy_mettle_macros::Tag;
 

@@ -10,11 +10,12 @@
 #[doc(no_inline)]
 pub use crate::condition::{Condition, ConditionOver};
 #[doc(no_inline)]
-pub use crate::curve::{CurveId, CurveRegistry, Interpolation, LevelCurve};
+pub use crate::curve::{CurveRegistry, Interpolation, LevelCurve};
 #[doc(no_inline)]
 pub use crate::net::NetRole;
 #[doc(no_inline)]
+pub use crate::registry::{CurveId, TagId};
+#[doc(no_inline)]
 pub use crate::tag::{
-    OwnedTags, Root, Tag, TagAdded, TagApp, TagCounts, TagId, TagKey, TagRegistry, TagRemoved,
-    Tags, owns,
+    OwnedTags, Root, Tag, TagAdded, TagApp, TagCounts, TagKey, TagRegistry, TagRemoved, Tags, owns,
 };

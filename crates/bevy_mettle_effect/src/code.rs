@@ -8,18 +8,18 @@ use bevy::prelude::*;
 use bevy_mettle_attribute::Attribute;
 use bevy_mettle_attribute::modifier::Operation;
 use bevy_mettle_attribute::read::{AttributeContext, AttributeWorld, Breakdown};
-use bevy_mettle_attribute::registry::AttributeId;
 use bevy_mettle_core::Error;
-use bevy_mettle_core::registry::{Key, Kind, Name, Registry};
+use bevy_mettle_core::registry::{AttributeId, EffectId, Key, Kind, Name, Registry};
 use bevy_mettle_core::tag::{OwnedTags, TagKey};
 
+use crate::context::{ContextData, ContextDataRegistry, EffectContext};
 use crate::data::EffectDef;
-use crate::{Effect, EffectId, EffectRegistry, EffectSpec};
+use crate::{Effect, EffectRegistry, EffectSpec};
 
 /// What an execution or a calculation sees: the world, target, effect and spec.
 ///
 /// The world read only, and how many stacks there are.
-pub struct EffectContext<'a> {
+pub struct ExecutionContext<'a> {
     /// The world.
     pub world: &'a World,
     /// Who it's applied to.
@@ -32,7 +32,7 @@ pub struct EffectContext<'a> {
     pub stacks: u32,
 }
 
-impl EffectContext<'_> {
+impl ExecutionContext<'_> {
     /// The effect's number.
     #[must_use]
     pub fn effect(&self) -> EffectId {
@@ -51,10 +51,22 @@ impl EffectContext<'_> {
         self.spec.param_value(param)
     }
 
+    /// What it carries: who applied it, what struck, where.
+    #[must_use]
+    pub fn context(&self) -> &EffectContext {
+        &self.spec.context
+    }
+
     /// Who applied it, if anyone.
     #[must_use]
     pub fn source(&self) -> Option<Entity> {
-        self.spec.source
+        self.spec.context.source
+    }
+
+    /// What the game added of type `C`, if it did.
+    #[must_use]
+    pub fn get<C: ContextData>(&self) -> Option<&C> {
+        self.spec.context.get::<C>()
     }
 
     /// `entity`'s owned tags, if it has any.
@@ -300,16 +312,16 @@ pub enum AnyCalculation {}
 pub type CalculationId = Key<AnyCalculation>;
 
 /// The function an execution runs: what it changes, worked out from context.
-pub type ExecutionFn = Arc<dyn Fn(&EffectContext) -> Vec<BaseChange> + Send + Sync>;
+pub type ExecutionFn = Arc<dyn Fn(&ExecutionContext) -> Vec<BaseChange> + Send + Sync>;
 
 /// The function a calculation runs: a magnitude, worked out from its context.
-pub type CalculationFn = Arc<dyn Fn(&EffectContext) -> f32 + Send + Sync>;
+pub type CalculationFn = Arc<dyn Fn(&ExecutionContext) -> f32 + Send + Sync>;
 
 /// The function a router runs: what a route's amount changes in attributes.
 ///
 /// The amount is all an execution dealt the route; the changes, to attributes
 /// actors have.
-pub type RouterFn = Arc<dyn Fn(&EffectContext, f32) -> Vec<BaseChange> + Send + Sync>;
+pub type RouterFn = Arc<dyn Fn(&ExecutionContext, f32) -> Vec<BaseChange> + Send + Sync>;
 
 /// The executions an app has: named by data, and run by number.
 ///
@@ -326,7 +338,7 @@ impl ExecutionRegistry {
     #[must_use]
     pub fn with<E: Execution>(
         mut self,
-        execution: impl Fn(&EffectContext) -> Vec<BaseChange> + Send + Sync + 'static,
+        execution: impl Fn(&ExecutionContext) -> Vec<BaseChange> + Send + Sync + 'static,
     ) -> Self {
         self.add::<E>(Arc::new(execution));
         self
@@ -367,7 +379,7 @@ impl CalculationRegistry {
     #[must_use]
     pub fn with<C: Calculation>(
         mut self,
-        calculation: impl Fn(&EffectContext) -> f32 + Send + Sync + 'static,
+        calculation: impl Fn(&ExecutionContext) -> f32 + Send + Sync + 'static,
     ) -> Self {
         self.add::<C>(Arc::new(calculation));
         self
@@ -408,7 +420,7 @@ impl RouteRegistry {
     #[must_use]
     pub fn with<R: Route>(
         mut self,
-        router: impl Fn(&EffectContext, f32) -> Vec<BaseChange> + Send + Sync + 'static,
+        router: impl Fn(&ExecutionContext, f32) -> Vec<BaseChange> + Send + Sync + 'static,
     ) -> Self {
         self.add::<R>(Arc::new(router));
         self
@@ -439,32 +451,36 @@ pub trait EffectApp {
     /// naming it executes, such as damage.
     fn add_execution<E: Execution>(
         &mut self,
-        execution: impl Fn(&EffectContext) -> Vec<BaseChange> + Send + Sync + 'static,
+        execution: impl Fn(&ExecutionContext) -> Vec<BaseChange> + Send + Sync + 'static,
     ) -> &mut Self;
 
     /// Adds the calculation `C`, working out `calculation`: a magnitude an
     /// effect naming it works out in code.
     fn add_calculation<C: Calculation>(
         &mut self,
-        calculation: impl Fn(&EffectContext) -> f32 + Send + Sync + 'static,
+        calculation: impl Fn(&ExecutionContext) -> f32 + Send + Sync + 'static,
     ) -> &mut Self;
 
     /// Adds the route `R`, routed by `router`: all an execution dealt it, into
     /// changes to attributes actors have.
     fn add_route<R: Route>(
         &mut self,
-        router: impl Fn(&EffectContext, f32) -> Vec<BaseChange> + Send + Sync + 'static,
+        router: impl Fn(&ExecutionContext, f32) -> Vec<BaseChange> + Send + Sync + 'static,
     ) -> &mut Self;
 
     /// Adds the effect `E` code names: content has to define it, or it's
     /// rejected.
     fn add_effect<E: Effect>(&mut self) -> &mut Self;
+
+    /// Adds `C`, what the game puts on effects' contexts: replicated with
+    /// them. Added in the same order on a server and its clients.
+    fn add_context_data<C: ContextData>(&mut self) -> &mut Self;
 }
 
 impl EffectApp for App {
     fn add_execution<E: Execution>(
         &mut self,
-        execution: impl Fn(&EffectContext) -> Vec<BaseChange> + Send + Sync + 'static,
+        execution: impl Fn(&ExecutionContext) -> Vec<BaseChange> + Send + Sync + 'static,
     ) -> &mut Self {
         self.world_mut()
             .get_resource_or_init::<ExecutionRegistry>()
@@ -474,7 +490,7 @@ impl EffectApp for App {
 
     fn add_calculation<C: Calculation>(
         &mut self,
-        calculation: impl Fn(&EffectContext) -> f32 + Send + Sync + 'static,
+        calculation: impl Fn(&ExecutionContext) -> f32 + Send + Sync + 'static,
     ) -> &mut Self {
         self.world_mut()
             .get_resource_or_init::<CalculationRegistry>()
@@ -484,7 +500,7 @@ impl EffectApp for App {
 
     fn add_route<R: Route>(
         &mut self,
-        router: impl Fn(&EffectContext, f32) -> Vec<BaseChange> + Send + Sync + 'static,
+        router: impl Fn(&ExecutionContext, f32) -> Vec<BaseChange> + Send + Sync + 'static,
     ) -> &mut Self {
         self.world_mut()
             .get_resource_or_init::<RouteRegistry>()
@@ -496,6 +512,13 @@ impl EffectApp for App {
         self.world_mut()
             .get_resource_or_init::<EffectRegistry>()
             .name_type::<E>();
+        self
+    }
+
+    fn add_context_data<C: ContextData>(&mut self) -> &mut Self {
+        self.world_mut()
+            .get_resource_or_init::<ContextDataRegistry>()
+            .add::<C>();
         self
     }
 }

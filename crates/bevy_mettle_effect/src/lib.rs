@@ -4,6 +4,7 @@
 pub mod active;
 pub mod code;
 mod commands;
+pub mod context;
 pub mod cue;
 pub mod data;
 mod engine;
@@ -17,5 +18,5 @@ mod systems;
 
 pub use self::commands::{EffectCommands, EffectWorld};
 pub use self::plugin::{EffectPlugin, EffectSystems};
-pub use self::registry::{EffectChecks, EffectId, EffectRegistry};
-pub use self::spec::{Effect, EffectSpec};
+pub use self::registry::{EffectChecks, EffectRegistry};
+pub use self::spec::{Effect, EffectSpec, IntoEffectId};

@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use bevy_mettle_attribute::modifier::{Operation, Per};
 use bevy_mettle_attribute::registry::AttributeRegistry;
 use bevy_mettle_core::curve::CurveRegistry;
-use bevy_mettle_core::registry::{Key, Name, Registry};
+use bevy_mettle_core::registry::{AnyEffect, EffectId, Name, Registry};
 use bevy_mettle_core::tag::TagRegistry;
 use bevy_mettle_core::{Error, Errors};
 
@@ -18,19 +18,9 @@ use crate::code::{
     ExecutionRegistry, RouteId, RouteRegistry,
 };
 use crate::data::{
-    AnyEffect, EffectData, EffectDef, EffectDuration, EffectModifier, Magnitude, MagnitudeDef,
-    ModifierDef, Period, Stacking,
+    EffectData, EffectDef, EffectDuration, EffectModifier, Magnitude, MagnitudeDef, ModifierDef,
+    Period, Stacking,
 };
-
-/// An effect's number in the [`EffectRegistry`], as the app knows it.
-///
-/// What an active effect, a replica, a chain or an event knows it by, as Bevy
-/// knows a component by its `ComponentId`.
-///
-/// Numbered in order of name as content is checked, so the same content is
-/// numbered the same on a server and its clients; a reload keeps the
-/// numbers effects had.
-pub type EffectId = Key<AnyEffect>;
 
 /// The effects there are, checked against what they name, and compiled.
 ///
@@ -497,9 +487,9 @@ impl Compile<'_> {
     /// The attribute named `name`'s number, or that there's none noted.
     fn attribute(
         &mut self,
-        name: &Name<bevy_mettle_attribute::registry::AnyAttribute>,
+        name: &Name<bevy_mettle_core::registry::AnyAttribute>,
         within: &str,
-    ) -> Option<bevy_mettle_attribute::registry::AttributeId> {
+    ) -> Option<bevy_mettle_core::registry::AttributeId> {
         let resolved = self.checks.attributes.resolve(name, Some(within));
         match resolved {
             Ok(id) => Some(id),

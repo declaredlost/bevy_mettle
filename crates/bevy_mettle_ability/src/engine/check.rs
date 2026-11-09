@@ -10,7 +10,7 @@ use bevy_mettle_effect::code::Changes;
 use bevy_mettle_effect::{EffectRegistry, EffectSpec, EffectWorld};
 
 use super::{Check, abilities_of, interrupts};
-use crate::active::{AbilityOf, ActiveAbility, GrantedAbility};
+use crate::active::{AbilityOf, ActiveAbility, GrantedAbility, outgoing};
 use crate::events::Failure;
 
 /// Whether `ability` can activate now, and if not, why.
@@ -114,7 +114,13 @@ pub(super) fn affords(world: &World, actor: Entity, granted: &GrantedAbility) ->
     let Some(cost) = granted.def.cost else {
         return true;
     };
-    let spec = EffectSpec::from_id(cost).level(granted.level).source(actor);
+    let spec = outgoing(
+        EffectSpec::from_id(cost),
+        actor,
+        granted.def.id,
+        granted.level,
+        None,
+    );
     let Some(changes) = world.preview_effect(actor, &spec) else {
         return true;
     };

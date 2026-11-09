@@ -8,10 +8,10 @@ pub(crate) mod state;
 
 use bevy::prelude::*;
 use bevy_mettle_core::Error;
-use bevy_mettle_core::registry::{Name, Registry};
+use bevy_mettle_core::registry::{AnyAttribute, AttributeId, Name, Registry};
 
 pub use self::events::AttributeChanged;
-pub use self::rules::{AnyAttribute, AttributeId, Bound, Limit, OnLimit, Rounding};
+pub use self::rules::{Bound, Limit, OnLimit, Rounding};
 pub use self::state::AttributeState;
 use crate::{Attribute, Base};
 

@@ -5,12 +5,13 @@ use std::sync::Arc;
 use bevy::ecs::lifecycle::HookContext;
 use bevy::ecs::world::DeferredWorld;
 use bevy::prelude::*;
+use bevy_mettle_core::registry::EffectId;
 use bevy_mettle_core::tag::{OwnedTags, TagCounts, Tags};
 
 use crate::cue::CueSources;
 use crate::data::EffectDef;
 use crate::net::Proxy;
-use crate::{EffectId, EffectSpec, engine};
+use crate::{EffectSpec, engine};
 
 /// An effect on its target: an entity of its own, [`EffectOf`] the target.
 ///

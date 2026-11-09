@@ -8,8 +8,6 @@ pub mod condition;
 pub mod curve;
 mod error;
 pub mod net;
-#[doc(hidden)]
-pub mod optional;
 pub mod prelude;
 pub mod registry;
 pub mod tag;

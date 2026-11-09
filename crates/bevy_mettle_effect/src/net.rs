@@ -10,13 +10,14 @@ use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 use bevy_mettle_attribute::modifier::{Modifier, ModifierOf, Modifiers, Operation, Provisional};
 use bevy_mettle_attribute::read::AttributeWorld;
-use bevy_mettle_attribute::registry::AttributeId;
 use bevy_mettle_core::net::NetRole;
-use bevy_mettle_core::tag::{TagCounts, TagId, TagRegistry};
+use bevy_mettle_core::registry::{AttributeId, EffectId, TagId};
+use bevy_mettle_core::tag::{TagCounts, TagRegistry};
 use serde::{Deserialize, Serialize};
 
 use crate::active::{ActiveEffect, EffectOf};
-use crate::{EffectId, EffectRegistry, EffectSpec, engine};
+use crate::context::{ContextDataRegistry, ContextReplica};
+use crate::{EffectRegistry, EffectSpec, engine};
 
 /// On a client's active effect: predicted under an activation, until settled.
 ///
@@ -46,9 +47,10 @@ pub struct EffectReplica {
     pub level: f32,
     /// What the applying code set, those the tree has.
     pub params: Vec<(TagId, f32)>,
-    /// Who applied it: mapped as it arrives.
+    /// What it was applied with: who applied it, what struck, where; mapped
+    /// as it arrives.
     #[entities]
-    pub source: Option<Entity>,
+    pub context: ContextReplica,
     /// The activation it was applied under, if any.
     pub activation: Option<u64>,
     /// How many stacks it has.
@@ -67,11 +69,21 @@ pub struct EffectReplica {
 }
 
 impl EffectReplica {
-    /// What a client needs to show `active`, its tags numbered in `tags`. A tag
-    /// the tree hasn't is left out: neither code nor conditions can read it.
-    fn of(active: &ActiveEffect, tags: &TagRegistry) -> Self {
+    /// What a client needs to show `active`, if `sent` doesn't say it all but
+    /// for time run down: its tags numbered in `tags`, its context's data
+    /// encoded by `data`. A tag the tree hasn't is left out: neither code nor
+    /// conditions can read it.
+    ///
+    /// An effect's context doesn't change: encoded as it's first sent, then
+    /// taken from what was.
+    fn of(
+        active: &ActiveEffect,
+        tags: &TagRegistry,
+        data: &ContextDataRegistry,
+        sent: Option<&Self>,
+    ) -> Option<Self> {
         let spec = &active.spec;
-        Self {
+        let mut now = Self {
             effect: active.def.id,
             level: spec.level,
             params: spec
@@ -79,7 +91,7 @@ impl EffectReplica {
                 .iter()
                 .filter_map(|&(param, value)| Some((tags.id(param)?, value)))
                 .collect(),
-            source: spec.source,
+            context: ContextReplica::default(),
             activation: spec.activation,
             stacks: active.stacks,
             duration: active.duration,
@@ -91,18 +103,28 @@ impl EffectReplica {
                 .filter_map(|(tag, _)| tags.id(tag))
                 .collect(),
             captured: active.captured.clone(),
+        };
+        if let Some(sent) = sent {
+            if sent.stands_as(&now) {
+                return None;
+            }
+            now.context = sent.context.clone();
+        } else {
+            now.context = ContextReplica::of(&active.spec.context, data);
         }
+        Some(now)
     }
 
-    /// What was applied, its params' tags as `tags` numbers them.
-    pub(crate) fn spec(&self, tags: &TagRegistry) -> EffectSpec {
+    /// What was applied, its params' tags as `tags` numbers them, and its
+    /// context's data as `data` decodes it.
+    pub(crate) fn spec(&self, tags: &TagRegistry, data: &ContextDataRegistry) -> EffectSpec {
         let mut spec = EffectSpec::from_id(self.effect).level(self.level);
         for &(param, value) in &self.params {
             if let Some(param) = tags.key(param) {
                 spec = spec.param(param, value);
             }
         }
-        spec.source = self.source;
+        spec.context = self.context.context(data);
         spec.activation = self.activation;
         spec
     }
@@ -118,7 +140,8 @@ impl EffectReplica {
         counts
     }
 
-    /// Whether `self`, sent before, says all `now` says but for time run down.
+    /// Whether `self`, sent before, says all `now` says but for time run down,
+    /// and its context, which doesn't change.
     #[expect(
         clippy::float_cmp,
         reason = "a level sent again only if it's changed at all"
@@ -132,7 +155,6 @@ impl EffectReplica {
             && self.effect == now.effect
             && self.level == now.level
             && self.params == now.params
-            && self.source == now.source
             && self.activation == now.activation
             && self.stacks == now.stacks
             && self.duration == now.duration
@@ -143,11 +165,9 @@ impl EffectReplica {
 }
 
 impl MapEntities for EffectReplica {
-    /// Maps its source, as it arrives from another world.
+    /// Maps its context's entities, as it arrives from another world.
     fn map_entities<M: EntityMapper>(&mut self, mapper: &mut M) {
-        if let Some(source) = &mut self.source {
-            *source = mapper.get_mapped(*source);
-        }
+        self.context.map_entities(mapper);
     }
 }
 
@@ -385,12 +405,13 @@ pub(crate) fn rollback(world: &mut World, activation: u64) {
 pub(crate) fn sync_replicas(
     mut commands: Commands,
     tags: Option<Res<TagRegistry>>,
+    data: Option<Res<ContextDataRegistry>>,
     effects: Query<(Entity, &ActiveEffect, Option<&EffectReplica>), Changed<ActiveEffect>>,
 ) {
     let tags = tags.as_deref().cloned().unwrap_or_default();
+    let data = data.as_deref().cloned().unwrap_or_default();
     for (entity, active, sent) in &effects {
-        let now = EffectReplica::of(active, &tags);
-        if !sent.is_some_and(|sent| sent.stands_as(&now)) {
+        if let Some(now) = EffectReplica::of(active, &tags, &data, sent) {
             commands.entity(entity).insert(now);
         }
     }

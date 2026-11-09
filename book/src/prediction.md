@@ -89,7 +89,7 @@ every actor a client receives.
 - **On the server**, each active effect keeps an [`EffectReplica`]: its spec,
   stacks, how long it lasts and has left, whether it's inhibited, what its
   source owned as it applied, and the attribute values it captured.
-  Replicate it with its [`EffectOf`], mapping the spec's source. The
+  Replicate it with its [`EffectOf`], mapping its context's entities. The
   effect's definition is data both sides have, so it isn't sent: the
   replica carries the effect's number, an [`EffectId`], and its params and
   its source's tags as tag numbers, [`TagId`]s. The replica is sent again as
@@ -216,7 +216,9 @@ When the client gets the reply back, as an [`AbilityReply`] message:
   way to the server's state. So hand the reply over only once the server's
   state as of its answer has arrived, or the cost shows unpaid until it does.
 - **Rejected**: the ability is cancelled, everything predicted under it is
-  undone, last first, and [`AbilityFailed`] says why.
+  undone, last first, and [`AbilityFailed`] says why. What its behaviour
+  applied is undone only if it was applied under the activation: through
+  [`ActiveAbility::effect_spec`](activating.md#running-the-behaviour).
 
 Once an activation is answered, nothing more is predicted under it. What it
 does from then on arrives from the server.
@@ -357,9 +359,9 @@ Ability requests, replies and replicas are handled in [`AbilitySystems`], in
   else comes from the server, so don't trigger abilities on a client and
   expect them to run.
 
-[`EffectId`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectId.html
-[`AbilityId`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilityId.html
-[`TagId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagId.html
+[`EffectId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.EffectId.html
+[`AbilityId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.AbilityId.html
+[`TagId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.TagId.html
 [`AbilityOf`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.AbilityOf.html
 [`AbilityFailed`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityFailed.html
 [`AbilityReplica`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/replica/struct.AbilityReplica.html

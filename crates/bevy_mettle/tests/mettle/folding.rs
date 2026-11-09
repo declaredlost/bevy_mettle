@@ -1,5 +1,6 @@
 //! Folding: sources added, changed, moved and taken away.
 
+use bevy_mettle::core::registry::AttributeId;
 use bevy_mettle::prelude::*;
 
 use crate::common::{

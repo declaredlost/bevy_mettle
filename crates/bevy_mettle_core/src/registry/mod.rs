@@ -1,7 +1,8 @@
 //! Registries: entries of each kind by number, and numbers by name and type.
 //!
 //! What an app has of each kind, by number, and its numbers by name and by
-//! type.
+//! type; and content's kinds, with their ids: what content is numbered by,
+//! shared over a network.
 
 use std::any::TypeId;
 use std::fmt;
@@ -12,10 +13,15 @@ use bevy_platform::collections::HashMap;
 use fnv::FnvHasher;
 use smol_str::SmolStr;
 
+pub use self::id::{
+    AbilityId, AnyAbility, AnyAttribute, AnyCurve, AnyEffect, AnyTag, AttributeId, CurveId,
+    EffectId, TagId,
+};
 pub use self::key::Key;
 pub use self::name::{Kind, Name};
 use self::numbering::Numbering;
 
+mod id;
 mod key;
 mod name;
 mod numbering;

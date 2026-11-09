@@ -8,6 +8,7 @@ mod react;
 
 use bevy::prelude::*;
 use bevy_mettle_core::condition::Context;
+use bevy_mettle_core::registry::AbilityId;
 use bevy_mettle_core::tag::{OwnedTags, TagCounts, TagKey, Tags};
 
 pub(crate) use self::activate::{activate, activate_id, activate_id_with, mirror, set_input};
@@ -17,8 +18,8 @@ pub(crate) use self::end::{
     Interrupting, cancel, cancel_tagged, end, end_quietly, interrupt, note_interrupt,
 };
 pub(crate) use self::react::{effect_applied, send, tag_added, tag_removed, ungranted};
+use crate::AbilityRegistry;
 use crate::active::{Abilities, AbilityOf, ActiveAbility, GrantedAbility, GrantedBy};
-use crate::{AbilityId, AbilityRegistry};
 
 /// The next activation's number.
 #[derive(Resource, Default)]

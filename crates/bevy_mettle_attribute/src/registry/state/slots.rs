@@ -1,8 +1,7 @@
 //! What an actor keeps of each attribute, by the attribute's number.
 
 use bevy::prelude::*;
-
-use crate::registry::AttributeId;
+use bevy_mettle_core::registry::AttributeId;
 
 /// Values by attribute number, kept densely: a read is an index, not a hash.
 #[derive(Debug, Clone, Reflect)]

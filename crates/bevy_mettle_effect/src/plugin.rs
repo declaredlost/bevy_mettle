@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use bevy_mettle_core::net::NetRole;
 
 use crate::code::{CalculationRegistry, ExecutionRegistry, RouteRegistry};
+use crate::context::ContextDataRegistry;
 use crate::cue::{self, CueSystems};
 use crate::{EffectRegistry, net, systems};
 
@@ -47,6 +48,7 @@ impl Plugin for EffectPlugin {
             .init_resource::<ExecutionRegistry>()
             .init_resource::<CalculationRegistry>()
             .init_resource::<RouteRegistry>()
+            .init_resource::<ContextDataRegistry>()
             .init_resource::<NetRole>()
             .init_resource::<net::Predictions>()
             .init_resource::<systems::DueEffects>()

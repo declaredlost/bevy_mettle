@@ -302,7 +302,7 @@ content: see [Loading data](loading-data.md).
 
 [`AbilityData`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/data/struct.AbilityData.html
 [`Ability`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/trait.Ability.html
-[`AbilityId`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilityId.html
+[`AbilityId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.AbilityId.html
 [`Behaviour`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/behaviour/trait.Behaviour.html
 [`MettleContent`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleContent.html
 [`AbilityRegistry`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilityRegistry.html

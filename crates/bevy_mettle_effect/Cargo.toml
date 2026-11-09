@@ -35,6 +35,8 @@ bevy = { workspace = true, features = ["bevy_log", "serialize"] }
 
 # (De)serialization
 serde = { workspace = true, features = ["derive"] }
+# What a game adds to an effect's context, as it's replicated
+postcard = { workspace = true, features = [] }
 
 [lints]
 workspace = true

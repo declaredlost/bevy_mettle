@@ -18,4 +18,4 @@ pub use self::ability::{Ability, AbilityApp, AbilitySpec, IntoAbilityId};
 pub use self::commands::{AbilityCommands, AbilityWorld};
 pub use self::plugin::{AbilityPlugin, AbilitySystems};
 pub use self::reader::AbilityReader;
-pub use self::registry::{AbilityChecks, AbilityId, AbilityRegistry};
+pub use self::registry::{AbilityChecks, AbilityRegistry};

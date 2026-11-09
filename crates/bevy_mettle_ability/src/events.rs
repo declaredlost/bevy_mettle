@@ -1,9 +1,8 @@
 //! Gameplay events, and what's told as abilities activate and end.
 
 use bevy::prelude::*;
+use bevy_mettle_core::registry::AbilityId;
 use bevy_mettle_core::tag::TagKey;
-
-use crate::AbilityId;
 
 /// A gameplay event sent to an actor: a tag, and who and how much.
 ///

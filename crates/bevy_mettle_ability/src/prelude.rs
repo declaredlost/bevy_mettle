@@ -6,13 +6,16 @@
 //! crates', each in its own prelude.
 
 #[doc(no_inline)]
+pub use bevy_mettle_core::registry::{AbilityId, AnyAbility};
+
+#[doc(no_inline)]
 pub use crate::active::{
     Abilities, AbilityOf, ActiveAbility, GrantedAbilities, GrantedAbility, GrantedBy,
 };
 #[doc(no_inline)]
 pub use crate::behaviour::{Behaviour, BehaviourApp, BehaviourRegistry, InputCheck, NoInput};
 #[doc(no_inline)]
-pub use crate::data::{AbilityData, AnyAbility, Commit, Grant, NetExecution, Trigger};
+pub use crate::data::{AbilityData, Commit, Grant, NetExecution, Trigger};
 #[doc(no_inline)]
 pub use crate::events::{
     AbilityActivated, AbilityEnded, AbilityFailed, Activated, Failure, GameplayEvent,
@@ -27,6 +30,6 @@ pub use crate::net::replica::AbilityReplica;
 pub use crate::net::request::{AbilityReply, AbilityRequest, AbilityRequestWith};
 #[doc(no_inline)]
 pub use crate::{
-    Ability, AbilityApp, AbilityChecks, AbilityCommands, AbilityId, AbilityPlugin, AbilityReader,
+    Ability, AbilityApp, AbilityChecks, AbilityCommands, AbilityPlugin, AbilityReader,
     AbilityRegistry, AbilitySpec, AbilitySystems, AbilityWorld, IntoAbilityId,
 };

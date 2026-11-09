@@ -3,10 +3,11 @@
 use std::any::TypeId;
 
 use bevy::prelude::*;
+use bevy_mettle_core::registry::EffectId;
 use bevy_mettle_core::tag::TagKey;
 
 use crate::EffectRegistry;
-use crate::registry::EffectId;
+use crate::context::{AbilityRef, ContextData, EffectContext, Hit};
 
 /// An effect code names: a marker type, its content's name on it.
 ///
@@ -73,6 +74,28 @@ pub trait Effect: Send + Sync + 'static {
 
 pub use bevy_mettle_macros::Effect;
 
+/// What names an effect, not a spec of it: an [`Effect`] type, or its number.
+///
+/// What's taken where the spec is made from it, as an ability's
+/// [`effect_spec`](https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.ActiveAbility.html#method.effect_spec)
+/// makes it: nothing set on it to be overridden.
+pub trait IntoEffectId: Send + Sync + 'static {
+    /// A spec of it, at level 1, from no one.
+    fn into_spec(self) -> EffectSpec;
+}
+
+impl<E: Effect> IntoEffectId for E {
+    fn into_spec(self) -> EffectSpec {
+        self.spec()
+    }
+}
+
+impl IntoEffectId for EffectId {
+    fn into_spec(self) -> EffectSpec {
+        EffectSpec::from_id(self)
+    }
+}
+
 impl<E: Effect> From<E> for EffectSpec {
     fn from(effect: E) -> Self {
         effect.spec()
@@ -99,8 +122,8 @@ pub struct EffectSpec {
     pub level: f32,
     /// What the applying code set, for `Param` magnitudes.
     pub params: Vec<(TagKey, f32)>,
-    /// Who applied it: the caster, the attacker.
-    pub source: Option<Entity>,
+    /// What it carries beyond them: who applied it, what struck, where.
+    pub context: EffectContext,
     /// The activation it was applied under, if any: what a rejected prediction
     /// takes back. One the server's own has its top bit set; a client's is
     /// its own, told apart from another client's by the source.
@@ -129,7 +152,7 @@ impl EffectSpec {
             effect,
             level: 1.0,
             params: Vec::new(),
-            source: None,
+            context: EffectContext::default(),
             activation: None,
         }
     }
@@ -153,10 +176,53 @@ impl EffectSpec {
         self
     }
 
-    /// From `source`.
+    /// From `source`: who's responsible, the caster.
     #[must_use]
     pub fn source(mut self, source: Entity) -> Self {
-        self.source = Some(source);
+        self.context = self.context.source(source);
+        self
+    }
+
+    /// Struck by `causer`: the arrow, the trap.
+    #[must_use]
+    pub fn causer(mut self, causer: Entity) -> Self {
+        self.context = self.context.causer(causer);
+        self
+    }
+
+    /// Come from `object`: the bow, the item.
+    #[must_use]
+    pub fn object(mut self, object: Entity) -> Self {
+        self.context = self.context.object(object);
+        self
+    }
+
+    /// Applied by `ability`, at the level it was activated at.
+    #[must_use]
+    pub fn ability(mut self, ability: AbilityRef) -> Self {
+        self.context = self.context.ability(ability);
+        self
+    }
+
+    /// Hit at `hit`.
+    #[must_use]
+    pub fn hit(mut self, hit: Hit) -> Self {
+        self.context = self.context.hit(hit);
+        self
+    }
+
+    /// Come from `origin`.
+    #[must_use]
+    pub fn origin(mut self, origin: Vec3) -> Self {
+        self.context = self.context.origin(origin);
+        self
+    }
+
+    /// With `data`, the game's own on its context: in place of any of its
+    /// type.
+    #[must_use]
+    pub fn with<C: ContextData>(mut self, data: C) -> Self {
+        self.context = self.context.with(data);
         self
     }
 

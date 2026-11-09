@@ -3,15 +3,16 @@
 
 use bevy::prelude::*;
 use bevy_mettle_core::net::NetRole;
+use bevy_mettle_core::registry::AbilityId;
 use bevy_mettle_core::tag::TagKey;
 
 use super::activate::activate;
 use super::end::end;
 use super::{abilities_of, grant, revoke};
+use crate::AbilityRegistry;
 use crate::active::GrantedAbility;
 use crate::data::{NetExecution, Trigger};
 use crate::events::GameplayEvent;
-use crate::{AbilityId, AbilityRegistry};
 
 /// Sends `event` to its actor: told, and the abilities it triggers activated
 /// with it.

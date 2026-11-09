@@ -13,7 +13,8 @@ use super::effects_on;
 use super::remove::{remove, remove_quietly};
 use crate::EffectRegistry;
 use crate::active::{ActiveEffect, EffectOf};
-use crate::code::EffectContext;
+use crate::code::ExecutionContext;
+use crate::context::ContextDataRegistry;
 use crate::net::{self, EffectReplica};
 
 /// Gives every active effect its definition from `registry`, as it's replaced:
@@ -37,7 +38,7 @@ pub(crate) fn relink(world: &mut World, registry: &EffectRegistry, effect: Entit
         .get::<ActiveEffect>(effect)
         .zip(world.get::<EffectOf>(effect))
         .map(|(active, of)| {
-            let context = EffectContext {
+            let context = ExecutionContext {
                 world,
                 target: of.0,
                 def: &def,
@@ -92,6 +93,10 @@ pub(crate) fn show(
     target: Entity,
     replica: &EffectReplica,
 ) {
+    let data = world
+        .get_resource::<ContextDataRegistry>()
+        .cloned()
+        .unwrap_or_default();
     let Some(def) = registry.get(replica.effect).cloned() else {
         warn!("there's no effect {:?} to show", replica.effect);
         return;
@@ -104,7 +109,8 @@ pub(crate) fn show(
                     && world.get::<net::PredictedUnder>(*other)
                         == Some(&net::PredictedUnder(activation))
                     && world.get::<ActiveEffect>(*other).is_some_and(|active| {
-                        active.def.id == def.id && active.spec.source == replica.source
+                        active.def.id == def.id
+                            && active.spec.context.source == replica.context.source
                     })
             })
             .collect();
@@ -114,7 +120,7 @@ pub(crate) fn show(
     }
     world.entity_mut(entity).insert((
         ActiveEffect {
-            spec: replica.spec(tags),
+            spec: replica.spec(tags, &data),
             def,
             stacks: replica.stacks,
             duration: replica.duration,

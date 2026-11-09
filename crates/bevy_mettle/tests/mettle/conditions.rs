@@ -1,6 +1,7 @@
 //! When modifiers count: the read's tags, owned tags, the target's, and facts,
 //! weighed.
 
+use bevy_mettle::core::registry::AttributeId;
 use bevy_mettle::prelude::*;
 
 use crate::common::{

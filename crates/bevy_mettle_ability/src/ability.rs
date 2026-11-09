@@ -4,9 +4,9 @@
 use std::any::TypeId;
 
 use bevy::prelude::*;
+use bevy_mettle_core::registry::AbilityId;
 
 use crate::AbilityRegistry;
-use crate::registry::AbilityId;
 
 /// An ability code names: a marker type, its content's name on it.
 ///

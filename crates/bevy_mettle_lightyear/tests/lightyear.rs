@@ -14,6 +14,7 @@ use bevy_mettle_ability::data::NetExecution;
 use bevy_mettle_ability::prelude::*;
 use bevy_mettle_attribute::prelude::*;
 use bevy_mettle_core::prelude::*;
+use bevy_mettle_effect::context::ContextDataRegistry;
 use bevy_mettle_effect::prelude::*;
 use bevy_mettle_lightyear::prelude::*;
 use bevy_replicon::shared::server_entity_map::ServerEntityMap;
@@ -136,6 +137,37 @@ fn in_reach(In(check): In<InputCheck<Aim>>, reach: Res<Reach>) -> bool {
     check.input.0.abs() <= reach.0
 }
 
+/// The game's own on an effect's context: what a shot marked, and whether
+/// it was a headshot. Added on both sides.
+#[derive(
+    ContextData,
+    Clone,
+    Debug,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    MapEntities
+)]
+struct Impact {
+    #[entities]
+    marked: Entity,
+    headshot: bool,
+}
+
+/// The game's own too, added after [`Impact`].
+#[derive(
+    ContextData,
+    Clone,
+    Debug,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    MapEntities
+)]
+struct Wound {
+    deep: bool,
+}
+
 /// What both sides have: mettle, fireball, and what's carried.
 fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
     app.insert_resource(role)
@@ -162,6 +194,8 @@ fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
         .add_ability::<Scope>()
         .add_effect::<FireballCost>()
         .add_effect::<FireballCooldown>()
+        .add_context_data::<Impact>()
+        .add_context_data::<Wound>()
         .insert_resource(Reach(if role == NetRole::Server { 10.0 } else { 100.0 }))
         .add_plugins(MettleNetPlugin { replicas })
         .replicate_attribute::<Mana>()
@@ -610,7 +644,12 @@ fn a_shown_effects_source_is_the_clients_own() {
         "the cooldown"
     );
     assert_eq!(
-        client.entity(shown).get::<ActiveEffect>().spec().source,
+        client
+            .entity(shown)
+            .get::<ActiveEffect>()
+            .spec()
+            .context
+            .source,
         Some(here),
         "mapped from the server's"
     );
@@ -1172,6 +1211,154 @@ fn a_client_with_other_content_is_told_as_it_connects() {
         world["client"].resource::<Mismatches>().0,
         [],
         "its content isn't its server's"
+    );
+}
+
+#[test]
+fn context_data_added_in_another_order_is_told_as_a_mismatch() {
+    let mut world = net();
+    watch_mismatches(&mut world["client"]);
+    world.ticks(20);
+    assert_eq!(world["client"].resource::<Mismatches>().0, [], "alike");
+    // The client adds the same types, the other way round.
+    let mut reversed = App::new();
+    reversed
+        .add_context_data::<Wound>()
+        .add_context_data::<Impact>();
+    let reversed = reversed.world().resource::<ContextDataRegistry>().clone();
+    world["client"].insert_resource(reversed);
+    world.ticks(20);
+    let seen = world["client"].resource::<Mismatches>().0.clone();
+    assert_eq!(seen.len(), 1, "told once: {seen:?}");
+    assert_ne!(seen[0].client.context_data, seen[0].server.context_data);
+    assert_eq!(
+        seen[0].client.effects, seen[0].server.effects,
+        "the rest alike"
+    );
+}
+
+/// Spawns, on the server, an entity replicated to the client: it, and what
+/// it is on the client once there.
+fn replicated(world: &mut TestWorld) -> (Entity, Entity) {
+    let there = world["server"].spawn(Replicate::to_clients(NetworkTarget::All));
+    world
+        .until(|world| mapped(&world["client"], there).is_some())
+        .describe("the entity replicates")
+        .within_ticks(50);
+    (there, mapped(&world["client"], there).unwrap())
+}
+
+/// A hit, as the server put it on a context.
+fn struck() -> Hit {
+    Hit {
+        point: Vec3::new(1.0, 2.0, 3.0),
+        normal: Vec3::Z,
+    }
+}
+
+/// `effect` from `source`, struck by `causer`, come from `object`, marking
+/// `marked`: the server's entities.
+fn carrying(
+    effect: impl Into<EffectSpec>,
+    source: Entity,
+    causer: Entity,
+    object: Entity,
+    marked: Entity,
+) -> EffectSpec {
+    effect
+        .into()
+        .source(source)
+        .causer(causer)
+        .object(object)
+        .hit(struck())
+        .origin(Vec3::new(-5.0, 0.0, 0.0))
+        .with(Impact {
+            marked,
+            headshot: true,
+        })
+        .with(Wound { deep: true })
+}
+
+#[test]
+fn a_replicated_effects_context_names_the_clients_entities() {
+    let mut world = net();
+    let (there, here) = mage(&mut world, true);
+    let (arrow, arrow_here) = replicated(&mut world);
+    let (bow, bow_here) = replicated(&mut world);
+    let (marked, marked_here) = replicated(&mut world);
+    world["server"]
+        .world_mut()
+        .apply_effect(there, carrying(FireballCooldown, there, arrow, bow, marked));
+    world
+        .until(|world| {
+            world["client"]
+                .entity(here)
+                .try_get::<ActiveEffects>()
+                .is_some_and(|effects| effects.iter().count() == 1)
+        })
+        .describe("the cooldown replicates")
+        .within_ticks(20);
+    let client = &world["client"];
+    let shown = client
+        .entity(here)
+        .get::<ActiveEffects>()
+        .iter()
+        .next()
+        .unwrap();
+    let replica = &client.entity(shown).get::<EffectReplica>().context;
+    assert_eq!(replica.source, Some(here), "the replica, mapped");
+    assert_eq!(replica.causer, Some(arrow_here));
+    assert_eq!(replica.object, Some(bow_here));
+    assert_eq!(replica.data[0].entities, [marked_here]);
+    let context = &client.entity(shown).get::<ActiveEffect>().spec().context;
+    assert_eq!(context.source, Some(here), "the effect shown, mapped");
+    assert_eq!(context.causer, Some(arrow_here));
+    assert_eq!(context.object, Some(bow_here));
+    assert_eq!(context.hit, Some(struck()));
+    assert_eq!(context.origin, Some(Vec3::new(-5.0, 0.0, 0.0)));
+    assert_eq!(
+        context.get::<Impact>(),
+        Some(&Impact {
+            marked: marked_here,
+            headshot: true,
+        })
+    );
+    assert_eq!(context.get::<Wound>(), Some(&Wound { deep: true }));
+}
+
+#[test]
+fn a_one_shot_the_server_plays_is_told_its_context_on_the_client() {
+    let mut world = net();
+    let there = world["server"].spawn((
+        Base::<Mana>::default(),
+        Replicate::to_clients(NetworkTarget::All),
+    ));
+    let (archer, archer_here) = replicated(&mut world);
+    let (arrow, arrow_here) = replicated(&mut world);
+    let (bow, bow_here) = replicated(&mut world);
+    let here = mapped(&world["client"], there).expect("the actor replicated");
+    world["client"].watch_triggered::<CueExecuted>();
+    world["server"]
+        .world_mut()
+        .apply_effect(there, carrying(FireballCost, archer, arrow, bow, there));
+    world.ticks(20);
+    let played = world["client"].read_triggered::<CueExecuted>();
+    let [played] = &played[..] else {
+        panic!("the hit, once: {played:?}");
+    };
+    assert_eq!(played.tag.name(), "cue.hit");
+    let context = &played.context;
+    assert_eq!(context.source, Some(archer_here), "mapped");
+    assert_eq!(context.causer, Some(arrow_here));
+    assert_eq!(context.object, Some(bow_here));
+    assert_eq!(context.hit, Some(struck()));
+    assert_eq!(context.origin, Some(Vec3::new(-5.0, 0.0, 0.0)));
+    assert_eq!(
+        context.get::<Impact>(),
+        Some(&Impact {
+            marked: here,
+            headshot: true,
+        })
     );
 }
 

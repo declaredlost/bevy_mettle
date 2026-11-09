@@ -11,7 +11,7 @@ Mettle splits a game's gameplay in two:
   `Life` and `Mana`, so a system asks for `Current<Life>`. What an ability
   does is a component of yours, run by your systems.
 - **Data** is content: gameplay tags, curves, effects and abilities. Each
-  is named by an [`Id`], such as `"burning"` or `"fireball"`, so a designer
+  is named by a [`Name`], such as `"burning"` or `"fireball"`, so a designer
   or a mod can add one without code.
 
 Code names things by type, never by string. A tag code uses is a
@@ -150,7 +150,7 @@ blocked by one. [Gameplay tags](tags.md) covers them.
 - **A change made after attributes ran.** A base changed after
   `AttributeSystems` reaches `Current` the next time they run.
 
-[`Id`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.Id.html
+[`Name`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/struct.Name.html
 [`MettleContent`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleContent.html
 [`TagRegistry`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagRegistry.html
 [`CurveRegistry`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveRegistry.html
@@ -161,9 +161,9 @@ blocked by one. [Gameplay tags](tags.md) covers them.
 [`AttributeSystems`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/struct.AttributeSystems.html
 [`EffectSystems`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectSystems.html
 [`MettleSystems`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleSystems.html
-[`TagId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagId.html
-[`CurveId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveId.html
-[`EffectId`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectId.html
-[`AbilityId`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilityId.html
+[`TagId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.TagId.html
+[`CurveId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.CurveId.html
+[`EffectId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.EffectId.html
+[`AbilityId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.AbilityId.html
 [`AttributeRegistry`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/registry/struct.AttributeRegistry.html
-[`AttributeId`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/registry/struct.AttributeId.html
+[`AttributeId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.AttributeId.html

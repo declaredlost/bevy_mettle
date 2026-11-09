@@ -3,22 +3,12 @@
 mod def;
 
 use bevy_mettle_core::condition::Condition;
-use bevy_mettle_core::registry::{Kind, Name};
+use bevy_mettle_core::registry::{AnyAbility, AnyEffect, Name};
 use bevy_mettle_core::tag::{TagKey, Tags};
-use bevy_mettle_effect::data::AnyEffect;
 use serde::{Deserialize, Serialize};
 
 pub use self::def::AbilityDef;
 use crate::behaviour::AnyBehaviour;
-
-/// The ability kind: what content names, and an [`AbilityId`](crate::AbilityId)
-/// numbers.
-///
-/// An ability's name in content is a `Name<AnyAbility>`, until it's resolved
-/// to an [`AbilityId`](crate::AbilityId).
-#[derive(Kind)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum AnyAbility {}
 
 /// An ability, as data: what runs it, what it costs, and what activates it.
 ///
@@ -53,35 +43,19 @@ pub struct AbilityData {
     pub behaviour: Name<AnyBehaviour>,
     /// An instant effect it costs, applied to its owner as it commits: it can't
     /// activate if paying would take an attribute below 0.
-    #[serde(
-        default,
-        with = "bevy_mettle_core::optional",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost: Option<Name<AnyEffect>>,
     /// A lasting effect applied to its owner as it commits: it can't activate
     /// while its owner owns what that effect grants.
-    #[serde(
-        default,
-        with = "bevy_mettle_core::optional",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cooldown: Option<Name<AnyEffect>>,
     /// What has to hold for it to activate: weighed in its own tags
     /// (`ReadTagged`) and its owner's (`OwnerHas`).
-    #[serde(
-        default,
-        with = "bevy_mettle_core::optional",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub require: Option<Condition>,
     /// What interrupts it: while active, it's cancelled as soon as this holds,
     /// weighed as `require` is; holding already, it can't activate.
-    #[serde(
-        default,
-        with = "bevy_mettle_core::optional",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cancel_if: Option<Condition>,
     /// It can't activate while its owner owns any of these.
     #[serde(default, skip_serializing_if = "Tags::is_empty")]

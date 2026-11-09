@@ -9,6 +9,7 @@ use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use bevy_mettle_core::net::NetRole;
+use bevy_mettle_core::registry::AbilityId;
 use bevy_mettle_core::tag::Tags;
 use bevy_mettle_effect::EffectWorld;
 use serde::{Deserialize, Serialize};
@@ -17,8 +18,8 @@ use super::{DERIVED, SERVERS, role, running};
 use crate::active::{AbilityOf, ActiveAbility, GrantedAbility};
 use crate::behaviour::{Behaviour, BehaviourId, BehaviourRegistry, NoInput};
 use crate::data::NetExecution;
+use crate::engine;
 use crate::events::{AbilityFailed, Activated, Failure};
-use crate::{AbilityId, engine};
 
 /// A client's ask that the server activate an ability it already predicts.
 ///

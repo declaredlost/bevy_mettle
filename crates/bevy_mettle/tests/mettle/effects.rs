@@ -4,7 +4,7 @@
 use bevy::prelude::*;
 use bevy_harness::TestApp;
 use bevy_mettle::core::Error;
-use bevy_mettle::core::registry::Name;
+use bevy_mettle::core::registry::{EffectId, Name};
 use bevy_mettle::prelude::*;
 
 use crate::common::{
@@ -464,7 +464,7 @@ fn magnitudes_come_from_curves_params_attributes_and_code() {
         Magnitude::Custom(Name::from_static("level_squared")),
     ));
     let mut app = app(&[curve, param, captured, custom], |app| {
-        app.add_calculation::<LevelSquared>(|context: &EffectContext| {
+        app.add_calculation::<LevelSquared>(|context: &ExecutionContext| {
             context.level() * context.level()
         })
         .add_effect::<Curve>()
@@ -491,7 +491,7 @@ fn an_execution_works_damage_out_from_both_sides() {
     let strike = EffectData::instant("strike").execution("strike");
     let mut app = app(&[strike], |app| {
         app.add_effect::<Strike>()
-            .add_execution::<StrikeDamage>(|context: &EffectContext| {
+            .add_execution::<StrikeDamage>(|context: &ExecutionContext| {
                 let query = AttributeContext::new();
                 let damage = context
                     .source()
@@ -720,7 +720,7 @@ fn a_registry_reports_everything_wrong_at_once() {
 
 #[test]
 fn executions_need_an_instant_effect_or_a_period() {
-    let executions = ExecutionRegistry::default().with::<Burn>(|_: &EffectContext| Vec::new());
+    let executions = ExecutionRegistry::default().with::<Burn>(|_: &ExecutionContext| Vec::new());
     let build = |effect: EffectData| {
         EffectRegistry::check(
             &[effect],
@@ -755,7 +755,7 @@ fn an_effect_whose_duration_cant_be_isnt_applied() {
     let numb = EffectData::lasting("numb", Magnitude::Custom(Name::from_static("nan")))
         .modifier(flat::<Damage>(5.0));
     let mut app = app(&[numb], |app| {
-        app.add_calculation::<Nan>(|_: &EffectContext| f32::NAN)
+        app.add_calculation::<Nan>(|_: &ExecutionContext| f32::NAN)
             .add_effect::<Numb>();
     });
     watch(&mut app);

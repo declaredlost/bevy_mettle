@@ -62,15 +62,18 @@ held until both let go.
 
 [`CueAdded`] and [`CueRemoved`] are told on the actor as a lasting cue starts
 and ends, with its entity. [`CueExecuted`] is told as a one-shot plays, with
-how much it dealt, the level of what played it, who caused it, the
-activation it was played under, and the effect, if one did.
+how much it dealt, the level of what played it, what played it carried
+(its [context](applying-effects.md#context): who caused it, what struck,
+where it hit), the activation it was played under, and the effect, if one
+did.
 
 `magnitude` is what the execution changed the first attribute it changes
 by, the one the effect is about: a fireball's hit for 15 is `-15.0`. Every
 attribute it changed is in `changes`, in the order it first changed each,
-for a drain that shows the life it took and the mana it gave. Positions
-aren't carried: read them from the actor and the source, in the world
-showing the cue, so the spark lands where that world shows the target.
+for a drain that shows the life it took and the mana it gave. Where it hit
+is carried if the applying code said, in the context's `hit`. Otherwise,
+read positions from the actor and the source in the world showing the cue,
+so the spark lands where that world shows the target.
 
 ## Handlers
 
@@ -203,5 +206,5 @@ alone, unless you say, following control as it changes hands.
 [`local`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/struct.Cue.html#method.local
 [`ServedCues`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/struct.ServedCues.html
 [`CueBursts`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/struct.CueBursts.html
-[`EffectId`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectId.html
+[`EffectId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.EffectId.html
 [`CueSystems`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/struct.CueSystems.html

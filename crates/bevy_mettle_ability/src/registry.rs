@@ -5,24 +5,15 @@ use std::sync::Arc;
 
 use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
-use bevy_mettle_core::registry::{Key, Registry};
+use bevy_mettle_core::registry::{AbilityId, AnyAbility, AnyEffect, EffectId, Registry};
 use bevy_mettle_core::tag::TagRegistry;
 use bevy_mettle_core::{Error, Errors};
-use bevy_mettle_effect::data::{AnyEffect, EffectDuration};
-use bevy_mettle_effect::{EffectId, EffectRegistry};
+use bevy_mettle_effect::EffectRegistry;
+use bevy_mettle_effect::data::EffectDuration;
 
 use crate::ability::Ability;
 use crate::behaviour::{AnyBehaviour, BehaviourRegistry};
-use crate::data::{AbilityData, AbilityDef, AnyAbility, Grant, NetExecution, Trigger};
-
-/// An ability's number in the [`AbilityRegistry`], as the app knows it.
-///
-/// What a granted ability, a request, a replica or an event knows it by.
-///
-/// Numbered in order of name as content is checked, so the same content is
-/// numbered the same on a server and its clients; a reload keeps the
-/// numbers abilities had.
-pub type AbilityId = Key<AnyAbility>;
+use crate::data::{AbilityData, AbilityDef, Grant, NetExecution, Trigger};
 
 /// The abilities there are, checked against what they name, and numbered.
 ///

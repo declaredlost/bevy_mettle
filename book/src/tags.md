@@ -282,9 +282,9 @@ mettle compares them for you as a client connects:
 [`Root`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/enum.Root.html
 [`TagKey`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagKey.html
 [`MettleContent`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleContent.html
-[`TagId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagId.html
+[`TagId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.TagId.html
 [`TagRegistry::build`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagRegistry.html#method.build
-[`TagRegistry::fingerprint`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.Registry.html#method.fingerprint
+[`TagRegistry::fingerprint`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/struct.Registry.html#method.fingerprint
 [`Tags`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.Tags.html
 [`OwnedTags`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.OwnedTags.html
 [`TagCounts`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagCounts.html

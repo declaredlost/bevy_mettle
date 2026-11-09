@@ -4,7 +4,10 @@
 //!
 //! Tags, curves and conditions are `bevy_mettle_core`'s, in its own prelude.
 //! Implementing [`Attribute`] by hand takes
-//! [`AnyAttribute`](crate::registry::AnyAttribute) too.
+//! [`AnyAttribute`](bevy_mettle_core::registry::AnyAttribute) too.
+
+#[doc(no_inline)]
+pub use bevy_mettle_core::registry::AttributeId;
 
 #[doc(no_inline)]
 pub use crate::authority::{Remote, Served};
@@ -19,7 +22,7 @@ pub use crate::read::{
 };
 #[doc(no_inline)]
 pub use crate::registry::{
-    AttributeApp, AttributeChanged, AttributeId, AttributeRegistry, Limit, OnLimit, Rounding,
+    AttributeApp, AttributeChanged, AttributeRegistry, Limit, OnLimit, Rounding,
 };
 #[doc(no_inline)]
 pub use crate::{Attribute, AttributePlugin, AttributeSystems, Base, Current};

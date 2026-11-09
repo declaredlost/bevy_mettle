@@ -1,8 +1,9 @@
 //! `#[derive(Kind)]` and `#[derive(Tag)]`, re-exported by
 //! `bevy_mettle_core`;
 //! `#[derive(Attribute)]`, by `bevy_mettle_attribute`;
-//! `#[derive(Effect)]`, `#[derive(Route)]`, `#[derive(Execution)]` and
-//! `#[derive(Calculation)]`, by `bevy_mettle_effect`; and
+//! `#[derive(Effect)]`, `#[derive(Route)]`, `#[derive(Execution)]`,
+//! `#[derive(Calculation)]` and `#[derive(ContextData)]`, by
+//! `bevy_mettle_effect`; and
 //! `#[derive(Ability)]` and `#[derive(Behaviour)]`, by `bevy_mettle_ability`:
 //! their documentation is there.
 
@@ -10,6 +11,7 @@ mod ability;
 mod attribute;
 mod behaviour;
 mod calculation;
+mod context_data;
 mod effect;
 mod execution;
 mod kind;
@@ -89,6 +91,20 @@ pub fn derive_execution(input: TokenStream) -> TokenStream {
 pub fn derive_calculation(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     calculation::expand(&input)
+        .unwrap_or_else(Error::into_compile_error)
+        .into()
+}
+
+/// Context data: a game's own type, its name on `#[context(..)]`.
+///
+/// ```ignore
+/// #[derive(ContextData, Clone, Debug, PartialEq, Serialize, Deserialize, MapEntities)]
+/// pub struct Shot { pub headshot: bool }
+/// ```
+#[proc_macro_derive(ContextData, attributes(context))]
+pub fn derive_context_data(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    context_data::expand(&input)
         .unwrap_or_else(Error::into_compile_error)
         .into()
 }

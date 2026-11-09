@@ -40,7 +40,7 @@ use crate::tag::TagKey;
 pub type Condition = ConditionOver<TagKey>;
 
 /// A [`Condition`] over tags of `T`: [`TagKey`]s, or on the wire
-/// [`TagId`](crate::tag::TagId)s.
+/// [`TagId`](crate::registry::TagId)s.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Reflect)]
 #[reflect(opaque, Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[reflect(where T: Clone + PartialEq + std::fmt::Debug + Serialize + for<'de> Deserialize<'de>)]

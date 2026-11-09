@@ -4,7 +4,7 @@
 use bevy::prelude::*;
 use bevy_harness::TestApp;
 use bevy_mettle::core::Errors;
-use bevy_mettle::core::registry::Name;
+use bevy_mettle::core::registry::{AttributeId, Name};
 use bevy_mettle::effect::events::Routed;
 use bevy_mettle::prelude::*;
 
@@ -47,7 +47,7 @@ struct Bolt;
 
 /// The shield takes what it can, life the rest, and the source steals a
 /// fifth of what life lost.
-fn route_damage(context: &EffectContext, damage: f32) -> Vec<BaseChange> {
+fn route_damage(context: &ExecutionContext, damage: f32) -> Vec<BaseChange> {
     let shield = context
         .value::<Shield>(context.target, &AttributeContext::new())
         .unwrap_or_default();
@@ -65,7 +65,7 @@ fn route_damage(context: &EffectContext, damage: f32) -> Vec<BaseChange> {
 }
 
 /// A price paid from life.
-fn route_price(_: &EffectContext, price: f32) -> Vec<BaseChange> {
+fn route_price(_: &ExecutionContext, price: f32) -> Vec<BaseChange> {
     vec![BaseChange::new(id::<Life>(), Operation::Flat, -price)]
 }
 
@@ -88,7 +88,7 @@ fn code(app: &mut App) {
         .init_resource::<CalculationRegistry>()
         .add_route::<IncomingDamage>(route_damage)
         .add_route::<BloodPrice>(route_price)
-        .add_execution::<StrikeDamage>(|context: &EffectContext| {
+        .add_execution::<StrikeDamage>(|context: &ExecutionContext| {
             let damage = context
                 .source()
                 .and_then(|source| context.value::<Damage>(source, &AttributeContext::new()))
@@ -175,7 +175,7 @@ fn damage_is_routed_through_the_shield_into_life() {
         .unwrap();
     app.assert_triggered::<EffectExecuted>(|executed| {
         executed.entity == npc
-            && executed.source == Some(caster)
+            && executed.context.source == Some(caster)
             && executed.changes == [delta(shield, -30.0), delta(id::<Life>(), -10.0)]
             && executed.source_changes == [delta(id::<Life>(), 2.0)]
             && executed.routed
@@ -213,7 +213,7 @@ fn what_an_execution_changes_is_told_as_it_was_kept() {
             .iter()
             .any(|change| change.attribute == id::<Life>() && close(change.delta, -50.0))
             && executed.source_changes.is_empty()
-            && executed.source.is_none()
+            && executed.context.source.is_none()
     });
 }
 

@@ -6,9 +6,8 @@ mod stacking;
 
 use bevy_mettle_attribute::Attribute;
 use bevy_mettle_attribute::modifier::Operation;
-use bevy_mettle_attribute::registry::AnyAttribute;
 use bevy_mettle_core::condition::Condition;
-use bevy_mettle_core::registry::{Kind, Name};
+use bevy_mettle_core::registry::{AnyAttribute, AnyEffect, Name};
 use bevy_mettle_core::tag::{TagKey, Tags};
 use serde::{Deserialize, Serialize};
 
@@ -16,15 +15,6 @@ pub use self::def::{EffectDef, MagnitudeDef, ModifierDef};
 pub use self::magnitude::{Capture, Magnitude};
 pub use self::stacking::{Expire, Reapply, StackBy, Stacking};
 use crate::code::{AnyExecution, AnyRoute, Route};
-
-/// The effect kind: what content names, and an [`EffectId`](crate::EffectId)
-/// numbers.
-///
-/// An effect's name in content is a `Name<AnyEffect>`, until it's resolved to
-/// an [`EffectId`](crate::EffectId).
-#[derive(Kind)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum AnyEffect {}
 
 /// An effect, as data: what it changes, for how long, and what it grants.
 ///
@@ -63,11 +53,7 @@ pub struct EffectData {
     pub duration: EffectDuration,
     /// That it executes every so often while it lasts, instead of its modifiers
     /// counting all along: damage over time.
-    #[serde(
-        default,
-        with = "bevy_mettle_core::optional",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub period: Option<Period>,
     /// What it changes. An instant or periodic effect changes bases as it
     /// executes; a lasting one counts as modifiers while it lasts.
@@ -84,26 +70,14 @@ pub struct EffectData {
     #[serde(default, skip_serializing_if = "Tags::is_empty")]
     pub cues: Tags,
     /// What has to hold for it to apply at all.
-    #[serde(
-        default,
-        with = "bevy_mettle_core::optional",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub require: Option<Condition>,
     /// What has to hold for it to count while it lasts: inhibited (its
     /// modifiers and tags taken back, its time paused) while it doesn't.
-    #[serde(
-        default,
-        with = "bevy_mettle_core::optional",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ongoing: Option<Condition>,
     /// What takes it off as soon as it holds.
-    #[serde(
-        default,
-        with = "bevy_mettle_core::optional",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remove_if: Option<Condition>,
     /// Active effects with any of these tags, taken off as it applies.
     #[serde(default, skip_serializing_if = "Tags::is_empty")]
@@ -113,11 +87,7 @@ pub struct EffectData {
     pub immunity: Tags,
     /// How applying it again stacks: a new active effect each time, unless it
     /// says.
-    #[serde(
-        default,
-        with = "bevy_mettle_core::optional",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stacking: Option<Stacking>,
     /// Effects applied to its target as it applies.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -174,18 +144,10 @@ pub struct Period<M = Magnitude> {
 #[serde(deny_unknown_fields)]
 pub struct EffectModifier {
     /// The attribute it changes.
-    #[serde(
-        default,
-        with = "bevy_mettle_core::optional",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attribute: Option<Name<AnyAttribute>>,
     /// The route it deals its amount, for its router.
-    #[serde(
-        default,
-        with = "bevy_mettle_core::optional",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub route: Option<Name<AnyRoute>>,
     /// How: flat, unless it says.
     #[serde(default = "flat")]
@@ -193,18 +155,10 @@ pub struct EffectModifier {
     /// By how much.
     pub value: Magnitude,
     /// When it counts, and how much, as an attribute's modifier does.
-    #[serde(
-        default,
-        with = "bevy_mettle_core::optional",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub condition: Option<Condition>,
     /// That it counts once for each whole so much of an attribute.
-    #[serde(
-        default,
-        with = "bevy_mettle_core::optional",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub per: Option<EffectPer>,
 }
 

@@ -2,12 +2,13 @@
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bevy_mettle_core::registry::AttributeId;
 use bevy_mettle_core::tag::OwnedTags;
 
 use crate::Attribute;
 use crate::modifier::Operation;
 use crate::read::{AttributeContext, Breakdown};
-use crate::registry::{AttributeId, AttributeRegistry, AttributeState};
+use crate::registry::{AttributeRegistry, AttributeState};
 
 /// A system parameter: actors' attributes, read in a context such as a hit's.
 ///

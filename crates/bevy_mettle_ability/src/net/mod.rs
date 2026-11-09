@@ -25,6 +25,7 @@ pub mod start;
 
 use bevy::prelude::*;
 use bevy_mettle_core::net::NetRole;
+use bevy_mettle_core::registry::AbilityId;
 
 pub(crate) use self::end::{EarlyCancels, ask_cancel, hear_cancels, hear_ends, tell_end};
 pub(crate) use self::input::{add_input, send_input};
@@ -34,7 +35,7 @@ pub(crate) use self::request::{
 };
 pub(crate) use self::start::{hear_started, hear_started_with, started, tells_start};
 use crate::active::ActiveAbility;
-use crate::{AbilityId, engine};
+use crate::engine;
 
 /// On a server: the systems activating what clients ask for, with input and
 /// without. Their cancels are heard after them, so a cancel arriving with
@@ -84,8 +85,9 @@ pub(crate) fn derived(parent: u64, ability: AbilityId) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use bevy_mettle_core::registry::AbilityId;
+
     use super::{DERIVED, SERVERS, derived};
-    use crate::AbilityId;
 
     #[test]
     fn a_derived_activation_is_the_same_wherever_its_derived() {

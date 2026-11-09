@@ -4,12 +4,13 @@
 use bevy::prelude::*;
 use bevy_mettle_attribute::modifier::{Modifier, Operation};
 use bevy_mettle_attribute::read::AttributeContext;
-use bevy_mettle_attribute::registry::{AttributeId, AttributeRegistry};
+use bevy_mettle_attribute::registry::AttributeRegistry;
+use bevy_mettle_core::registry::AttributeId;
 use bevy_mettle_core::tag::{OwnedTags, TagCounts};
 
 use super::{Check, count, source_tags};
 use crate::active::{ActiveEffect, EffectOf};
-use crate::code::{BaseChange, Changes, EffectContext, RouteId, Whose};
+use crate::code::{BaseChange, Changes, ExecutionContext, RouteId, Whose};
 use crate::cue::Cue;
 use crate::data::{Capture, EffectDef, MagnitudeDef};
 use crate::events::{Delta, EffectExecuted, Routed};
@@ -17,7 +18,7 @@ use crate::{EffectRegistry, EffectSpec, net};
 
 /// How much `magnitude` is: as `captured`, if it was.
 pub(super) fn magnitude(
-    context: &EffectContext,
+    context: &ExecutionContext,
     registry: &EffectRegistry,
     magnitude: &MagnitudeDef,
     captured: Option<f32>,
@@ -27,7 +28,7 @@ pub(super) fn magnitude(
 
 /// How much `magnitude` is, for `context`.
 pub(super) fn resolve(
-    context: &EffectContext,
+    context: &ExecutionContext,
     registry: &EffectRegistry,
     magnitude: &MagnitudeDef,
 ) -> f32 {
@@ -52,7 +53,7 @@ pub(super) fn resolve(
             coefficient,
         } => {
             let whose = match from {
-                Capture::Source => context.spec.source,
+                Capture::Source => context.spec.context.source,
                 Capture::Target => Some(context.target),
             };
             whose
@@ -97,7 +98,7 @@ pub(super) fn changes(
         owner: owner.counts(),
         source: source_tags,
     };
-    let context = EffectContext {
+    let context = ExecutionContext {
         world,
         target,
         def,
@@ -142,7 +143,11 @@ pub(super) fn changes(
 /// Routes what `changes` deal routes: each one's amount summed, then handed to
 /// its router, its changes after the effect's own. Single-pass: what a router
 /// deals a route is dropped.
-fn route(context: &EffectContext, registry: &EffectRegistry, changes: Vec<BaseChange>) -> Worked {
+fn route(
+    context: &ExecutionContext,
+    registry: &EffectRegistry,
+    changes: Vec<BaseChange>,
+) -> Worked {
     let registered = registry.routes();
     let name = |route: RouteId| registered.name(route).unwrap_or("?");
     let mut kept = Vec::with_capacity(changes.len());
@@ -195,7 +200,7 @@ fn route(context: &EffectContext, registry: &EffectRegistry, changes: Vec<BaseCh
 pub(crate) fn preview(world: &World, target: Entity, spec: &EffectSpec) -> Option<Vec<BaseChange>> {
     let registry = world.get_resource::<EffectRegistry>()?;
     let def = registry.get(spec.effect_id(registry)?)?;
-    let source_tags = source_tags(world, spec.source);
+    let source_tags = source_tags(world, spec.context.source);
     Some(changes(world, registry, target, spec, def, 1, &source_tags, &[]).changes)
 }
 
@@ -238,7 +243,7 @@ pub(super) fn execute(
         let (entity, deltas) = match change.on {
             Whose::Target => (target, &mut dealt),
             Whose::Source => {
-                let Some(source) = spec.source else {
+                let Some(source) = spec.context.source else {
                     warn!(
                         "effect `{}` changes its source's `{}`, but has no source: dropped",
                         def.name,
@@ -258,7 +263,7 @@ pub(super) fn execute(
     world.trigger(EffectExecuted {
         entity: target,
         id: def.id,
-        source: spec.source,
+        context: spec.context.clone(),
         changes: dealt.clone(),
         source_changes: stolen,
         routed: worked.routed,
@@ -267,7 +272,7 @@ pub(super) fn execute(
         let mut cue = Cue::new(tag)
             .magnitude(dealt.first().map_or(0.0, |first| first.delta))
             .level(spec.level);
-        cue.source = spec.source;
+        cue.context.clone_from(&spec.context);
         cue.changes.clone_from(&dealt);
         crate::cue::execute(world, target, &cue, spec.activation, Some(def.id));
     }
@@ -290,7 +295,7 @@ pub(super) fn modifiers(world: &World, registry: &EffectRegistry, effect: Entity
     ) else {
         return Vec::new();
     };
-    let context = EffectContext {
+    let context = ExecutionContext {
         world,
         target: of.0,
         def: &active.def,
