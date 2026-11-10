@@ -53,6 +53,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   game's own `Context`; generic over their tags (`map_tags`), to go over
   the wire by `TagId`.
 - `NetRole` (`Standalone`, `Server`, `Client`): what every part reads.
+- `Activation`, what an ability's run, and what's done under it, is known
+  by: a client's own (`Activation::client`), the server's own
+  (`Activation::server`), or one derived from another's for an ability it
+  triggers (`derived`), the same wherever it's derived. `is_servers` and
+  `is_derived` say which; it's sent as a plain number.
 - Checking content returns every `Error` at once, in `Errors`.
 
 #### `bevy_mettle_attribute`

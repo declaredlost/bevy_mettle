@@ -3,6 +3,7 @@
 use std::any::TypeId;
 
 use bevy::prelude::*;
+use bevy_mettle_core::Activation;
 use bevy_mettle_core::registry::{AttributeId, EffectId};
 use bevy_mettle_core::tag::{TagKey, Tags};
 
@@ -130,9 +131,9 @@ pub struct EffectSpec {
     /// [`snapshot`](crate::EffectWorld::snapshot), or as it's applied.
     pub snapshot: Vec<Snapshot>,
     /// The activation it was applied under, if any: what a rejected prediction
-    /// takes back. One the server's own has its top bit set; a client's is
-    /// its own, told apart from another client's by the source.
-    pub activation: Option<u64>,
+    /// takes back. The server's own are apart from a client's; a client's
+    /// is told apart from another client's by the source.
+    pub activation: Option<Activation>,
 }
 
 impl EffectSpec {
@@ -234,7 +235,7 @@ impl EffectSpec {
 
     /// Under `activation`.
     #[must_use]
-    pub fn activation(mut self, activation: u64) -> Self {
+    pub fn activation(mut self, activation: Activation) -> Self {
         self.activation = Some(activation);
         self
     }

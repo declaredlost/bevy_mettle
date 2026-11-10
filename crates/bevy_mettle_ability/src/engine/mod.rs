@@ -7,6 +7,7 @@ mod end;
 mod react;
 
 use bevy::prelude::*;
+use bevy_mettle_core::Activation;
 use bevy_mettle_core::condition::Context;
 use bevy_mettle_core::registry::AbilityId;
 use bevy_mettle_core::tag::{OwnedTags, TagCounts, TagKey, Tags};
@@ -21,7 +22,7 @@ pub(crate) use self::react::{effect_applied, send, tag_added, tag_removed, ungra
 use crate::AbilityRegistry;
 use crate::active::{Abilities, AbilityOf, ActiveAbility, GrantedAbility, GrantedBy};
 
-/// The next activation's number.
+/// How many activations this world has made: the next one's count.
 #[derive(Resource, Default)]
 pub(crate) struct Activations(u64);
 
@@ -112,16 +113,16 @@ pub(crate) fn revoke(world: &mut World, ability: Entity) {
     }
 }
 
-/// The next activation's number: a server's own with the top bit set, so
-/// they're apart from those its clients predict under.
-pub(crate) fn next_activation(world: &mut World) -> u64 {
+/// The next activation: a server's own, apart from those its clients
+/// predict under, or this world's own.
+pub(crate) fn next_activation(world: &mut World) -> Activation {
     let server = crate::net::role(world) == bevy_mettle_core::net::NetRole::Server;
     let mut activations = world.get_resource_or_init::<Activations>();
     activations.0 += 1;
     if server {
-        activations.0 | crate::net::SERVERS
+        Activation::server(activations.0)
     } else {
-        activations.0
+        Activation::client(activations.0)
     }
 }
 

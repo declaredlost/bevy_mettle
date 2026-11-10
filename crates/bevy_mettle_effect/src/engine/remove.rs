@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use bevy::prelude::*;
+use bevy_mettle_core::Activation;
 use bevy_mettle_core::tag::Tags;
 
 use super::apply::chain;
@@ -58,7 +59,7 @@ pub(crate) fn remove_tagged(world: &mut World, target: Entity, tags: &Tags, dept
 }
 
 /// Takes every effect applied under `activation` off `target`.
-pub(crate) fn remove_activation(world: &mut World, target: Entity, activation: u64) {
+pub(crate) fn remove_activation(world: &mut World, target: Entity, activation: Activation) {
     let applied: Vec<Entity> = effects_on(world, target)
         .into_iter()
         .filter(|effect| {

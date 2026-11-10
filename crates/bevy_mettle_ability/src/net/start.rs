@@ -7,6 +7,7 @@ use std::any::TypeId;
 
 use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::prelude::*;
+use bevy_mettle_core::Activation;
 use bevy_mettle_core::net::NetRole;
 use bevy_mettle_core::registry::AbilityId;
 use serde::{Deserialize, Serialize};
@@ -29,7 +30,7 @@ pub struct AbilityStarted {
     /// The ability.
     pub ability: AbilityId,
     /// The activation it started under on the server.
-    pub activation: u64,
+    pub activation: Activation,
 }
 
 impl MapEntities for AbilityStarted {
@@ -46,7 +47,7 @@ pub struct AbilityStartedWith<I> {
     /// The ability.
     pub ability: AbilityId,
     /// The activation it started under on the server.
-    pub activation: u64,
+    pub activation: Activation,
     /// The input it started with.
     pub input: I,
 }
@@ -70,7 +71,7 @@ pub(crate) fn started<I: Component + Clone>(
     world: &mut World,
     actor: Entity,
     def: &AbilityDef,
-    activation: u64,
+    activation: Activation,
     input: Option<I>,
 ) {
     let ability = def.id;

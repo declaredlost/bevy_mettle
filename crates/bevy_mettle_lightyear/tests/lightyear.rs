@@ -1446,12 +1446,6 @@ fn a_one_shot_the_server_plays_is_told_its_context_on_the_client() {
     );
 }
 
-/// The bit a server's own activations have set.
-const SERVERS: u64 = 1 << 63;
-
-/// The bit an activation derived from another's has set.
-const DERIVED: u64 = 1 << 62;
-
 /// An actor on the server, controlled by the client, given what `grant`
 /// grants it: it, and its actor on the client, once every ability it has
 /// replicated.
@@ -1507,7 +1501,7 @@ fn ability<A: Ability>(app: &TestApp, actor: Entity) -> Entity {
 }
 
 /// The activation `actor`'s `A` runs under in `app`, if it's active.
-fn running<A: Ability>(app: &TestApp, actor: Entity) -> Option<u64> {
+fn running<A: Ability>(app: &TestApp, actor: Entity) -> Option<Activation> {
     app.entity(ability::<A>(app, actor))
         .try_get::<ActiveAbility>()
         .map(|active| active.activation)
@@ -1667,7 +1661,7 @@ fn a_server_initiated_ability_the_server_triggers_runs_on_the_client() {
         GameplayEvent::new(there, TagKey::named("event.ward")),
     );
     let activation = running::<Ward>(&world["server"], there).expect("triggered");
-    assert_ne!(activation & SERVERS, 0, "the server's own");
+    assert!(activation.is_servers(), "the server's own");
     world
         .until(|world| running::<Ward>(&world["client"], here) == Some(activation))
         .describe("the client runs what the server triggered")
@@ -1752,7 +1746,7 @@ fn a_client_asking_for_a_local_only_ability_is_rejected() {
     world["client"].world_mut().write_message(AbilityRequest {
         actor: here,
         ability: zoom,
-        activation: 1,
+        activation: Activation::client(1),
     });
     world.ticks(20);
     assert_eq!(running::<Zoom>(&world["server"], there), None);
@@ -1776,8 +1770,8 @@ fn a_predicted_trigger_runs_at_once_under_the_activation_the_server_runs_it_unde
     let flare = running::<Flare>(client, here).expect("predicted");
     let spark = running::<Spark>(client, here).expect("triggered, predicted at once");
     assert_ne!(spark, flare);
-    assert_ne!(spark & DERIVED, 0, "derived");
-    assert_eq!(spark & SERVERS, 0, "from the client's");
+    assert!(spark.is_derived(), "derived");
+    assert!(!spark.is_servers(), "from the client's");
     client
         .entity(ability::<Spark>(client, here))
         .assert_has::<Sparking>();
@@ -1940,10 +1934,10 @@ fn a_predicted_trigger_under_the_servers_activation_runs_on_the_server_alone() {
     );
     let server = &world["server"];
     let beacon = running::<Beacon>(server, there).expect("triggered");
-    assert_ne!(beacon & SERVERS, 0, "the server's own");
+    assert!(beacon.is_servers(), "the server's own");
     let spark = running::<Spark>(server, there).expect("sparked under the beacon");
-    assert_ne!(spark & SERVERS, 0, "the server's, derived");
-    assert_ne!(spark & DERIVED, 0, "derived");
+    assert!(spark.is_servers(), "the server's, derived");
+    assert!(spark.is_derived(), "derived");
     world
         .until(|world| running::<Beacon>(&world["client"], here) == Some(beacon))
         .describe("the client mirrors the beacon")

@@ -8,13 +8,14 @@ use std::any::TypeId;
 use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
+use bevy_mettle_core::Activation;
 use bevy_mettle_core::net::NetRole;
 use bevy_mettle_core::registry::AbilityId;
 use bevy_mettle_core::tag::Tags;
 use bevy_mettle_effect::EffectWorld;
 use serde::{Deserialize, Serialize};
 
-use super::{DERIVED, SERVERS, role, running};
+use super::{role, running};
 use crate::active::{AbilityOf, ActiveAbility, GrantedAbility};
 use crate::behaviour::{Behaviour, BehaviourId, BehaviourRegistry, NoInput};
 use crate::data::NetExecution;
@@ -31,9 +32,9 @@ pub struct AbilityRequest {
     pub actor: Entity,
     /// The ability.
     pub ability: AbilityId,
-    /// The activation the client predicted it under: its own, the top bit
-    /// clear (the server's own have it set).
-    pub activation: u64,
+    /// The activation the client predicted it under: its own, never the
+    /// server's.
+    pub activation: Activation,
 }
 
 impl MapEntities for AbilityRequest {
@@ -53,7 +54,7 @@ pub struct AbilityRequestWith<I> {
     /// The ability.
     pub ability: AbilityId,
     /// The activation the client predicted it under.
-    pub activation: u64,
+    pub activation: Activation,
     /// The input it activated it with.
     pub input: I,
 }
@@ -73,7 +74,7 @@ pub struct AbilityReply {
     /// The ability.
     pub ability: AbilityId,
     /// The activation it answers.
-    pub activation: u64,
+    pub activation: Activation,
     /// Why it didn't activate, if it didn't.
     pub rejected: Option<Failure>,
 }
@@ -89,8 +90,8 @@ impl MapEntities for AbilityReply {
 /// triggered them.
 #[derive(Resource, Debug, Default)]
 pub(crate) struct Pending {
-    abilities: HashMap<u64, Asked>,
-    derived: HashMap<u64, Vec<u64>>,
+    abilities: HashMap<Activation, Asked>,
+    derived: HashMap<Activation, Vec<Activation>>,
 }
 
 /// A predicted activation awaiting its answer, as it was asked: what's needed
@@ -123,14 +124,19 @@ impl Asked {
 
 impl Pending {
     /// `asked`, predicted under `activation`.
-    pub(crate) fn insert(&mut self, activation: u64, asked: Asked) {
+    pub(crate) fn insert(&mut self, activation: Activation, asked: Asked) {
         self.abilities.insert(activation, asked);
     }
 
     /// `asked`, predicted under `activation`, derived from `parent`'s: undone
     /// with it while it awaits its answer. Derived after it's answered, it
     /// stands alone, answered on its own.
-    pub(crate) fn insert_derived(&mut self, parent: u64, activation: u64, asked: Asked) {
+    pub(crate) fn insert_derived(
+        &mut self,
+        parent: Activation,
+        activation: Activation,
+        asked: Asked,
+    ) {
         self.insert(activation, asked);
         if self.abilities.contains_key(&parent) {
             self.derived.entry(parent).or_default().push(activation);
@@ -138,19 +144,19 @@ impl Pending {
     }
 
     /// What was predicted under `activation`, taken: answered.
-    fn take(&mut self, activation: u64) -> Option<Entity> {
+    fn take(&mut self, activation: Activation) -> Option<Entity> {
         self.take_asked(activation).map(|asked| asked.ability)
     }
 
     /// What was predicted under `activation`, as it was asked, taken.
-    fn take_asked(&mut self, activation: u64) -> Option<Asked> {
+    fn take_asked(&mut self, activation: Activation) -> Option<Asked> {
         self.abilities.remove(&activation)
     }
 
     /// The activations asked before `before` (every one, if it's `None`),
     /// oldest first: what's waited too long for an answer.
-    fn overdue(&self, before: Option<f64>) -> Vec<u64> {
-        let mut overdue: Vec<(u64, f64)> = self
+    fn overdue(&self, before: Option<f64>) -> Vec<Activation> {
+        let mut overdue: Vec<(Activation, f64)> = self
             .abilities
             .iter()
             .filter(|(_, asked)| before.is_none_or(|before| asked.at < before))
@@ -164,7 +170,7 @@ impl Pending {
     }
 
     /// The activations derived from `parent`'s, taken.
-    fn take_derived(&mut self, parent: u64) -> Vec<u64> {
+    fn take_derived(&mut self, parent: Activation) -> Vec<Activation> {
         self.derived.remove(&parent).unwrap_or_default()
     }
 }
@@ -288,14 +294,14 @@ pub(crate) fn predict_tagged(world: &mut World, actor: Entity, tags: &Tags) -> V
 
 /// Asks the server for `id` for `actor`, running nothing: under a new
 /// activation, its number.
-fn ask(world: &mut World, actor: Entity, id: AbilityId) -> u64 {
+fn ask(world: &mut World, actor: Entity, id: AbilityId) -> Activation {
     let activation = engine::next_activation(world);
     request(world, actor, id, activation);
     activation
 }
 
 /// Asks the server for `id` for `actor` under `activation`.
-fn request(world: &mut World, actor: Entity, id: AbilityId, activation: u64) {
+fn request(world: &mut World, actor: Entity, id: AbilityId, activation: Activation) {
     world.write_message(AbilityRequest {
         actor,
         ability: id,
@@ -309,8 +315,8 @@ fn request(world: &mut World, actor: Entity, id: AbilityId, activation: u64) {
 fn predicting(
     world: &mut World,
     ability: Entity,
-    activate: impl FnOnce(&mut World, u64) -> Result<(), Failure>,
-) -> Result<u64, Failure> {
+    activate: impl FnOnce(&mut World, Activation) -> Result<(), Failure>,
+) -> Result<Activation, Failure> {
     let activation = engine::next_activation(world);
     if let Some(asked) = Asked::of(world, ability) {
         world
@@ -432,7 +438,7 @@ pub(crate) fn answer(
     world: &mut World,
     actor: Entity,
     ability: AbilityId,
-    activation: u64,
+    activation: Activation,
     rejected: Option<Failure>,
 ) {
     world.write_message(AbilityReply {
@@ -449,10 +455,10 @@ pub(crate) fn reject(
     world: &mut World,
     actor: Entity,
     ability: AbilityId,
-    activation: u64,
+    activation: Activation,
     reason: Failure,
 ) {
-    if role(world) == NetRole::Server && activation & SERVERS == 0 {
+    if role(world) == NetRole::Server && !activation.is_servers() {
         world.write_message(AbilityReply {
             actor,
             ability,
@@ -463,8 +469,8 @@ pub(crate) fn reject(
 }
 
 /// On a server: activates what clients ask for, under their activations, and
-/// answers. One under an activation with the server's bit set is rejected: a
-/// client's can't look like the server's own.
+/// answers. One under the server's activation, or a derived one, is
+/// rejected: a client's can't look like the server's own.
 pub(crate) fn serve(mut requests: MessageReader<AbilityRequest>, mut commands: Commands) {
     for request in requests.read().cloned() {
         commands.queue(move |world: &mut World| {
@@ -495,9 +501,9 @@ pub(crate) fn askable(
     world: &World,
     actor: Entity,
     id: AbilityId,
-    activation: u64,
+    activation: Activation,
 ) -> Result<(), Failure> {
-    if activation & (SERVERS | DERIVED) != 0 {
+    if activation.is_servers() || activation.is_derived() {
         warn!(
             "a client asked to activate {id:?} under activation {activation}, not its own: rejected"
         );
@@ -541,7 +547,7 @@ pub(crate) fn resolve(mut replies: MessageReader<AbilityReply>, mut commands: Co
 
 /// Undoes what `actor` predicted under `activation` (its `ability`, if it
 /// still runs it), and what that predicted as it triggered: cancelled.
-fn undo(world: &mut World, actor: Entity, activation: u64, ability: Option<Entity>) {
+fn undo(world: &mut World, actor: Entity, activation: Activation, ability: Option<Entity>) {
     if let Some(ability) = ability
         && world
             .get::<ActiveAbility>(ability)
@@ -641,6 +647,7 @@ fn abandon(world: &mut World, before: Option<f64>) {
 #[cfg(test)]
 mod tests {
     use bevy::prelude::*;
+    use bevy_mettle_core::Activation;
     use bevy_mettle_core::registry::AbilityId;
 
     use super::{Asked, Pending};
@@ -663,18 +670,23 @@ mod tests {
             world.spawn_empty().id(),
             world.spawn_empty().id(),
         );
+        let (c1, c2, c3) = (
+            Activation::client(1),
+            Activation::client(2),
+            Activation::client(3),
+        );
         let mut pending = Pending::default();
-        pending.insert(1, asked(parent));
-        pending.insert_derived(1, 2, asked(first));
-        assert_eq!(pending.derived.get(&1), Some(&vec![2]), "linked");
+        pending.insert(c1, asked(parent));
+        pending.insert_derived(c1, c2, asked(first));
+        assert_eq!(pending.derived.get(&c1), Some(&vec![c2]), "linked");
 
         // Answered: confirmed, what it triggered answered on its own.
-        assert_eq!(pending.take(1), Some(parent));
-        assert_eq!(pending.take_derived(1), [2]);
+        assert_eq!(pending.take(c1), Some(parent));
+        assert_eq!(pending.take_derived(c1), [c2]);
 
-        pending.insert_derived(1, 3, asked(second));
-        assert_eq!(pending.take_derived(1), [], "not linked: answered already");
-        assert_eq!(pending.take(3), Some(second), "but pending itself");
-        assert_eq!(pending.take(2), Some(first));
+        pending.insert_derived(c1, c3, asked(second));
+        assert_eq!(pending.take_derived(c1), [], "not linked: answered already");
+        assert_eq!(pending.take(c3), Some(second), "but pending itself");
+        assert_eq!(pending.take(c2), Some(first));
     }
 }

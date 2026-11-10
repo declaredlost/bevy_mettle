@@ -424,7 +424,7 @@ fn an_ability_reloaded_mid_cast_ends_what_it_started_with() {
 
 /// The server's one-shots of `tag` under `activation`, `n` of them, as
 /// replicated.
-fn bursts(tag: TagId, activation: u64, n: u64) -> CueBursts {
+fn bursts(tag: TagId, activation: Activation, n: u64) -> CueBursts {
     CueBursts {
         next: n,
         recent: (0..n)
@@ -449,11 +449,13 @@ fn a_cue_predicted_twice_under_one_activation_skips_both_server_copies() {
     for _ in 0..2 {
         client
             .world_mut()
-            .apply_effect(here, FireballHit.spec().activation(7));
+            .apply_effect(here, FireballHit.spec().activation(Activation::client(7)));
     }
     assert_eq!(client.read_triggered::<CueExecuted>().len(), 2, "predicted");
     let fire = tag_id(&client, "cue.hit.fire");
-    client.entity_mut(here).insert(bursts(fire, 7, 2));
+    client
+        .entity_mut(here)
+        .insert(bursts(fire, Activation::client(7), 2));
     client.tick();
     client.assert_triggered_none::<CueExecuted>(|_| true);
 }
@@ -463,12 +465,14 @@ fn a_rejected_predictions_cues_are_forgotten() {
     let (mut client, here) = app(NetRole::Client);
     client
         .world_mut()
-        .apply_effect(here, FireballHit.spec().activation(7));
-    client.world_mut().reject_prediction(7);
+        .apply_effect(here, FireballHit.spec().activation(Activation::client(7)));
+    client.world_mut().reject_prediction(Activation::client(7));
     client.read_triggered::<CueExecuted>();
     // Were the server to play it after all, it'd be its own.
     let fire = tag_id(&client, "cue.hit.fire");
-    client.entity_mut(here).insert(bursts(fire, 7, 1));
+    client
+        .entity_mut(here)
+        .insert(bursts(fire, Activation::client(7), 1));
     client.tick();
     assert_eq!(client.read_triggered::<CueExecuted>().len(), 1);
 }
@@ -478,11 +482,13 @@ fn a_predicted_cue_the_server_never_echoes_is_forgotten_in_time() {
     let (mut client, here) = app(NetRole::Client);
     client
         .world_mut()
-        .apply_effect(here, FireballHit.spec().activation(7));
+        .apply_effect(here, FireballHit.spec().activation(Activation::client(7)));
     client.read_triggered::<CueExecuted>();
     client.secs(2.0);
     let fire = tag_id(&client, "cue.hit.fire");
-    client.entity_mut(here).insert(bursts(fire, 7, 1));
+    client
+        .entity_mut(here)
+        .insert(bursts(fire, Activation::client(7), 1));
     client.tick();
     assert_eq!(
         client.read_triggered::<CueExecuted>().len(),

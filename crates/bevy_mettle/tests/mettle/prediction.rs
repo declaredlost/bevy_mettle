@@ -721,13 +721,15 @@ fn a_predicted_periodic_effect_predicts_nothing_once_answered() {
     let mut game = Game::new();
     game.client
         .world_mut()
-        .apply_effect(game.here, Burn.spec().activation(7));
+        .apply_effect(game.here, Burn.spec().activation(Activation::client(7)));
     game.client.secs(1.0);
     assert!(
         get::<Mana>(&game.client, game.here) < 30.0,
         "burning, predicted"
     );
-    game.client.world_mut().confirm_prediction(7);
+    game.client
+        .world_mut()
+        .confirm_prediction(Activation::client(7));
     game.client.tick();
     game.client.secs(1.0);
     assert!(
@@ -755,7 +757,7 @@ fn a_stack_predicted_onto_the_servers_effect_is_kept_apart() {
     let ward = shown(&mut game, Ward);
     game.client
         .world_mut()
-        .apply_effect(game.here, Ward.spec().activation(7));
+        .apply_effect(game.here, Ward.spec().activation(Activation::client(7)));
     game.client.tick();
     let stacks = |game: &Game| {
         game.client
@@ -772,7 +774,9 @@ fn a_stack_predicted_onto_the_servers_effect_is_kept_apart() {
         .remaining = Some(5.0);
     game.client.tick();
     assert_eq!(stacks(&game), Some(2), "the predicted stack on top");
-    game.client.world_mut().reject_prediction(7);
+    game.client
+        .world_mut()
+        .reject_prediction(Activation::client(7));
     game.client.tick();
     assert_eq!(stacks(&game), Some(1), "the server's effect stays");
 }
@@ -889,7 +893,7 @@ fn a_request_under_the_servers_bit_is_rejected() {
     game.server.write(AbilityRequest {
         actor: game.there,
         ability: fireball,
-        activation: 1 << 63 | 5,
+        activation: Activation::server(5),
     });
     game.server.tick();
     let replies: Vec<AbilityReply> = game

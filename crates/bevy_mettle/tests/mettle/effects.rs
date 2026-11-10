@@ -607,9 +607,12 @@ fn effects_come_off_by_activation_tag_or_with_their_actor() {
         app.add_effect::<Ward>();
     });
     let npc = actor(&mut app, []);
-    apply(&mut app, npc, Ward.spec().activation(7));
+    apply(&mut app, npc, Ward.spec().activation(Activation::client(7)));
     apply(&mut app, npc, Ward);
-    app.world_mut().commands().entity(npc).remove_activation(7);
+    app.world_mut()
+        .commands()
+        .entity(npc)
+        .remove_activation(Activation::client(7));
     app.tick();
     assert_eq!(
         effects_on(&app, npc).len(),

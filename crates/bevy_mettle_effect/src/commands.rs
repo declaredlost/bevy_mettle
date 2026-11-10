@@ -1,6 +1,7 @@
 //! Applying and removing effects: as commands, or on the world.
 
 use bevy::prelude::*;
+use bevy_mettle_core::Activation;
 use bevy_mettle_core::tag::Tags;
 
 use crate::{EffectSpec, engine};
@@ -16,7 +17,7 @@ pub trait EffectCommands {
 
     /// Takes every effect applied under `activation` off this actor: what a
     /// rejected prediction does.
-    fn remove_activation(&mut self, activation: u64) -> &mut Self;
+    fn remove_activation(&mut self, activation: Activation) -> &mut Self;
 
     /// Takes this active effect off its actor.
     fn remove_effect(&mut self) -> &mut Self;
@@ -38,7 +39,7 @@ impl EffectCommands for EntityCommands<'_> {
         })
     }
 
-    fn remove_activation(&mut self, activation: u64) -> &mut Self {
+    fn remove_activation(&mut self, activation: Activation) -> &mut Self {
         self.queue(move |entity: EntityWorldMut| {
             let target = entity.id();
             engine::remove_activation(entity.into_world_mut(), target, activation);
@@ -74,11 +75,11 @@ pub trait EffectWorld {
     /// So confirm it no earlier than the server's state as of its answer has
     /// arrived, or what it paid shows unpaid until it does. Nothing more is
     /// predicted under it.
-    fn confirm_prediction(&mut self, activation: u64);
+    fn confirm_prediction(&mut self, activation: Activation);
 
     /// The server rejected `activation`: every effect, stack and base change
     /// predicted under it undone. Nothing more is predicted under it.
-    fn reject_prediction(&mut self, activation: u64);
+    fn reject_prediction(&mut self, activation: Activation);
 
     /// What applying `spec` to `target` as an instant effect would change,
     /// without changing it; `None` if there's no such effect.
@@ -108,11 +109,11 @@ impl EffectWorld for World {
         engine::remove(self, effect, false, 0);
     }
 
-    fn confirm_prediction(&mut self, activation: u64) {
+    fn confirm_prediction(&mut self, activation: Activation) {
         crate::net::confirm(self, activation);
     }
 
-    fn reject_prediction(&mut self, activation: u64) {
+    fn reject_prediction(&mut self, activation: Activation) {
         crate::net::rollback(self, activation);
     }
 

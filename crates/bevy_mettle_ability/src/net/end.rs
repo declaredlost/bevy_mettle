@@ -5,10 +5,11 @@
 
 use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::prelude::*;
+use bevy_mettle_core::Activation;
 use bevy_mettle_core::net::NetRole;
 use serde::{Deserialize, Serialize};
 
-use super::{SERVERS, role, running};
+use super::{role, running};
 use crate::active::GrantedAbility;
 use crate::data::NetExecution;
 use crate::engine;
@@ -22,7 +23,7 @@ pub struct AbilityCancelRequest {
     /// The actor.
     pub actor: Entity,
     /// The activation it ran under.
-    pub activation: u64,
+    pub activation: Activation,
 }
 
 impl MapEntities for AbilityCancelRequest {
@@ -40,7 +41,7 @@ pub struct AbilityEnd {
     /// The actor.
     pub actor: Entity,
     /// The activation it ran under.
-    pub activation: u64,
+    pub activation: Activation,
     /// Whether it was cancelled, rather than ended.
     pub cancelled: bool,
 }
@@ -54,9 +55,9 @@ impl MapEntities for AbilityEnd {
 /// Whether the client controlling an actor runs an ability run as `net`, under
 /// `activation`, too: its own predicted activations, and every server-initiated
 /// one.
-pub(crate) fn client_runs(net: NetExecution, activation: u64) -> bool {
+pub(crate) fn client_runs(net: NetExecution, activation: Activation) -> bool {
     match net {
-        NetExecution::Predicted => activation & SERVERS == 0,
+        NetExecution::Predicted => !activation.is_servers(),
         NetExecution::ServerInitiated => true,
         NetExecution::ServerOnly | NetExecution::LocalOnly => false,
     }
@@ -69,7 +70,7 @@ pub(crate) fn tell_end(
     world: &mut World,
     actor: Entity,
     net: NetExecution,
-    activation: u64,
+    activation: Activation,
     cancelled: bool,
 ) {
     if client_runs(net, activation) && role(world) == NetRole::Server {
@@ -84,7 +85,12 @@ pub(crate) fn tell_end(
 /// On a client: asks the server to cancel what `actor` ran under
 /// `activation`, as the client cancelled it: one it predicted, or one the
 /// server initiated. A local-only one is the client's alone.
-pub(crate) fn ask_cancel(world: &mut World, actor: Entity, net: NetExecution, activation: u64) {
+pub(crate) fn ask_cancel(
+    world: &mut World,
+    actor: Entity,
+    net: NetExecution,
+    activation: Activation,
+) {
     if client_runs(net, activation) && role(world) == NetRole::Client {
         world.write_message(AbilityCancelRequest { actor, activation });
     }
@@ -139,7 +145,7 @@ pub(crate) fn hear_cancels(
         }
         cancels.retain(|(request, heard)| {
             let running = running(world, request.actor, request.activation);
-            if request.activation & SERVERS != 0 {
+            if request.activation.is_servers() {
                 // The server's own: running already, if it's the client's
                 // to cancel at all.
                 let initiated = running.is_some_and(|ability| {

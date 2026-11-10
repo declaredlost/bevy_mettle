@@ -20,4 +20,4 @@ pub use crate::tag::{
     OwnedTags, Root, Tag, TagAdded, TagApp, TagCounts, TagKey, TagRegistry, TagRemoved, Tags, owns,
 };
 #[doc(no_inline)]
-pub use crate::{Mettle, MettleCorePlugin, MettleSet, MettleSystems};
+pub use crate::{Activation, Mettle, MettleCorePlugin, MettleSet, MettleSystems};

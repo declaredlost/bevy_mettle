@@ -126,7 +126,7 @@ what a client shows.
 
 On a client, `activate_ability` predicts:
 
-1. The fireball activates at once, under a new activation number. Its
+1. The fireball activates at once, under a new [`Activation`]. Its
    behaviour runs, and its cost and cooldown are applied as predictions.
 2. An [`AbilityRequest`] is written, as a message, for your transport to send
    to the server: the actor, the ability by its number, and the activation.
@@ -200,12 +200,12 @@ running activation is checked as it comes: if it doesn't hold, the server
 cancels the ability and replies once more, rejecting the activation, and
 the client cancels it too.
 
-Activation numbers count up in each world. The server's own have the top
-bit set, so they never clash with its clients'. A request under an
-activation with the top bit set is rejected, with a warning: a client can't
-pass its activation off as the server's. Two clients' activations may share a
-number. They're told apart by the actor they're for, the source of what they
-apply.
+Each world counts its own activations: `Activation::client(n)` on a client
+or a standalone world, `Activation::server(n)` on the server. The server's
+own never clash with its clients'. A request under the server's activation,
+or a derived one, is rejected, with a warning: a client can't pass its
+activation off as the server's. Two clients' activations may be the same.
+They're told apart by the actor they're for, the source of what they apply.
 
 ## The client resolves
 
@@ -371,6 +371,7 @@ Ability requests, replies and replicas are handled in [`AbilitySystems`], in
 
 [`EffectId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.EffectId.html
 [`AbilityId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.AbilityId.html
+[`Activation`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.Activation.html
 [`TagId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.TagId.html
 [`AbilityOf`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.AbilityOf.html
 [`AbilityFailed`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityFailed.html

@@ -1,6 +1,7 @@
 //! Committing abilities: paying their cost, starting their cooldown, or both.
 
 use bevy::prelude::*;
+use bevy_mettle_core::Activation;
 use bevy_mettle_core::registry::EffectId;
 use bevy_mettle_effect::{EffectSpec, EffectWorld};
 
@@ -73,7 +74,7 @@ pub(super) fn pay(
     world: &mut World,
     ability: Entity,
     actor: Entity,
-    activation: u64,
+    activation: Activation,
     commitment: Commitment,
 ) -> Committed {
     let Some(granted) = world.get::<GrantedAbility>(ability) else {
