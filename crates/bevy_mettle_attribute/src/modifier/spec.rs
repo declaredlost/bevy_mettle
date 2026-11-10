@@ -164,12 +164,12 @@ impl ModifierSpec {
     /// If an attribute it names isn't added.
     pub fn resolve(&self, attributes: &AttributeRegistry) -> Result<Modifier, Error> {
         let id = |named: Named| {
-            attributes
-                .id_of_type(named.type_id)
-                .ok_or_else(|| Error::Invalid {
-                    what: format!("a modifier of `{}`, which isn't added", named.name),
-                    within: None,
-                })
+            attributes.id_of_type(named.type_id).ok_or_else(|| {
+                Error::invalid(
+                    format!("a modifier of `{}`, which isn't added", named.name),
+                    None,
+                )
+            })
         };
         let per = match self.per {
             Some((named, every)) => Some(Per {

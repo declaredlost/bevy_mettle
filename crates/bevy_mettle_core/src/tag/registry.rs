@@ -69,10 +69,10 @@ impl TagRegistry {
         known.extend(self.code.iter().copied());
         for &tag in &known {
             if !tag.is_path() {
-                errors.push(Error::Invalid {
-                    what: format!("a tag called `{tag}`: a tag is words joined by `.`"),
-                    within: None,
-                });
+                errors.push(Error::invalid(
+                    format!("a tag called `{tag}`: a tag is words joined by `.`"),
+                    None,
+                ));
             } else if let Some(parent) = tag.parent()
                 && !known.contains(&parent)
             {

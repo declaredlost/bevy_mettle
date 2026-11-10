@@ -7,6 +7,7 @@ mod sum;
 mod systems;
 
 use bevy::prelude::*;
+use bevy_mettle_core::condition::Condition;
 use bevy_mettle_core::tag::{OwnedTags, TagCounts};
 
 pub(crate) use self::fold::{Dirty, collect, fold};
@@ -94,6 +95,13 @@ pub struct AttributeState {
     previous: Slots<f32>,
     /// The values served by the authority, as synced from `Served`.
     served: Slots<f32>,
+    /// The attributes whose values can differ by read: a modifier of one, or
+    /// of what it's worked out through (what a modifier's per, a limit
+    /// that's another attribute), counts by the read's context. Any other is
+    /// read as cached, whatever the context. Worked out as modifiers are
+    /// folded: with none folded, none can.
+    #[reflect(ignore)]
+    contextual: Slots<bool>,
     /// Whether the authority is another world: its values are served.
     remote: bool,
     /// Whether a prediction counts for it: its values are its own.
@@ -178,6 +186,25 @@ impl AttributeState {
                 });
             }
         }
+        self.contextual.clear();
+        // With nothing that counts only sometimes, nothing counts by a read.
+        if self
+            .folded
+            .iter()
+            .all(|(_, folded)| folded.scoped.is_empty())
+        {
+            return;
+        }
+        let mut visiting = Vec::new();
+        for (attribute, _) in registry.iter() {
+            reads_context(
+                &self.folded,
+                registry,
+                attribute,
+                &mut self.contextual,
+                &mut visiting,
+            );
+        }
     }
 
     /// `attribute`'s value in `context`, with the owner owning `owned`; with
@@ -191,12 +218,12 @@ impl AttributeState {
         attribute: AttributeId,
         context: &AttributeContext,
     ) -> f32 {
-        if context.is_empty()
-            && let Some(value) = self.shown_served(attribute)
-        {
+        // A context nothing of it counts by reads as no context: as cached.
+        let plain = context.is_empty() || self.contextual.get(attribute) != Some(&true);
+        if plain && let Some(value) = self.shown_served(attribute) {
             return value;
         }
-        if context.is_empty()
+        if plain
             && !self.stale
             && !owned.is_pending()
             && let Some(value) = self.current.get(attribute)
@@ -409,4 +436,53 @@ impl AttributeState {
         walk.cut |= outer;
         value
     }
+}
+
+/// Whether `attribute`'s value can differ by read: a modifier of it counts by
+/// the read's context (its tags, the target's, the source's, a fact; or it's
+/// local to a source), or what it's worked out through does. Each answer is
+/// kept in `known`; `visiting` holds what's being worked out, so a cycle ends.
+fn reads_context(
+    folded: &Slots<Folded>,
+    registry: &AttributeRegistry,
+    attribute: AttributeId,
+    known: &mut Slots<bool>,
+    visiting: &mut Vec<AttributeId>,
+) -> bool {
+    if let Some(&reads) = known.get(attribute) {
+        return reads;
+    }
+    if visiting.contains(&attribute) {
+        return false;
+    }
+    visiting.push(attribute);
+    let mut reads = false;
+    if let Some(folded_here) = folded.get(attribute) {
+        for scoped in &folded_here.scoped {
+            reads = scoped.counts.local
+                || scoped
+                    .counts
+                    .condition
+                    .as_ref()
+                    .is_some_and(Condition::reads_context)
+                || scoped
+                    .per
+                    .is_some_and(|(per, _)| reads_context(folded, registry, per, known, visiting));
+            if reads {
+                break;
+            }
+        }
+    }
+    if !reads && let Some(info) = registry.get(attribute) {
+        reads = [info.min.as_ref(), info.max.as_ref()]
+            .into_iter()
+            .flatten()
+            .any(|bound| match bound {
+                Bound::Attribute(other) => reads_context(folded, registry, *other, known, visiting),
+                Bound::Value(_) => false,
+            });
+    }
+    visiting.pop();
+    known.insert(attribute, reads);
+    reads
 }

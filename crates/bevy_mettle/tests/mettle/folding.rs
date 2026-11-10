@@ -4,7 +4,7 @@ use bevy_mettle::core::registry::AttributeId;
 use bevy_mettle::prelude::*;
 
 use crate::common::{
-    Damage, FLOWN, Life, MaxResistance, Strength, actor, app, close, get, id, value,
+    Damage, FLOWN, Life, MaxLife, MaxResistance, Strength, actor, app, close, get, id, value,
 };
 
 fn flat(value: f32) -> Modifiers {
@@ -184,11 +184,28 @@ fn a_remote_actor_shows_what_it_is_served_but_while_it_predicts() {
     let current = |app: &bevy_harness::TestApp| app.entity(npc).get::<Current<Damage>>().get();
     assert!(close(get::<Damage>(&app, npc), 42.0), "served");
     assert!(close(current(&app), 42.0));
+    // A read in a context nothing of it counts by is the served value.
     let read = AttributeContext::new().tag("damage");
     assert!(
-        close(value::<Damage>(&app, npc, &read), 10.0),
+        close(value::<Damage>(&app, npc, &read), 42.0),
+        "nothing counts by the context: served"
+    );
+    // One a modifier counts by is worked out here: the server serves values
+    // with nothing in play.
+    let tagged = app.spawn((
+        ModifierOf(npc),
+        Modifiers(vec![
+            Modifier::flat(id::<Damage>(), 3.0).read_tagged("damage"),
+        ]),
+    ));
+    app.tick();
+    assert!(
+        close(value::<Damage>(&app, npc, &read), 13.0),
         "a read in context is worked out here"
     );
+    assert!(close(get::<Damage>(&app, npc), 42.0), "still served");
+    app.entity_mut(tagged).despawn();
+    app.tick();
     let guess = app.spawn((
         ModifierOf(npc),
         Modifiers(vec![Modifier::flat(id::<Damage>(), 5.0)]),
@@ -234,4 +251,39 @@ fn modifiers_named_by_type_are_put_on_by_number() {
         .modifiers([ModifierSpec::overriding::<Damage>(3.0)]);
     app.tick();
     assert!(close(get::<Damage>(&app, npc), 3.0));
+}
+
+#[test]
+fn a_read_in_context_counts_what_its_value_is_worked_out_through() {
+    let mut app = app();
+    // Life over its most, a most that's more in `damage` reads; damage per
+    // strength, a strength that's more in `damage` reads too.
+    let npc = actor(
+        &mut app,
+        [
+            Modifier::flat(id::<Life>(), 30.0),
+            Modifier::flat(id::<MaxLife>(), 40.0).read_tagged("damage"),
+            Modifier::flat(id::<Damage>(), 1.0).per(id::<Strength>(), 5.0),
+            Modifier::flat(id::<Strength>(), 10.0).read_tagged("damage"),
+        ],
+    );
+    app.tick();
+    let read = AttributeContext::new().tag("damage");
+    assert!(close(get::<Life>(&app, npc), 50.0), "kept to its most: 50");
+    assert!(
+        close(value::<Life>(&app, npc, &read), 80.0),
+        "its most counts by the read: 90, so 80"
+    );
+    assert!(
+        close(get::<Damage>(&app, npc), 12.0),
+        "10, and 2 per strength"
+    );
+    assert!(
+        close(value::<Damage>(&app, npc, &read), 14.0),
+        "strength counts by the read: 20, so 4"
+    );
+    // What nothing counts by reads as cached.
+    let other = AttributeContext::new().tag("state");
+    assert!(close(value::<Life>(&app, npc, &other), 50.0));
+    assert!(close(value::<Damage>(&app, npc, &other), 12.0));
 }

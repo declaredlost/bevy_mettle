@@ -686,8 +686,11 @@ fn a_client_shows_the_servers_override_whatever_order_its_sources_came_in() {
     world["client"].entity_mut(first).insert(ModifierOf(here));
     world.ticks(2);
     let client = &world["client"];
-    let read = AttributeContext::new().tag("state");
-    let local = client.world().value_at(here, id, &read).unwrap();
+    let local = client
+        .world()
+        .breakdown_at(here, id, &AttributeContext::new())
+        .unwrap()
+        .total();
     assert!(same(local, 5.0), "its own fold would say {local}");
     assert!(same(mana(client, here), 15.0), "but it shows the server's");
     assert!(same(current(client, here), 15.0));

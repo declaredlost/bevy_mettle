@@ -648,10 +648,7 @@ impl Compile<'_> {
     }
 
     fn invalid(&mut self, what: String, within: &str) {
-        self.errors.push(Error::Invalid {
-            what,
-            within: Some(within.to_owned()),
-        });
+        self.errors.push(Error::invalid(what, Some(within)));
     }
 }
 

@@ -144,10 +144,10 @@ impl CurveRegistry {
                         });
                     }
                 }
-                Err(what) => errors.push(Error::Invalid {
-                    what: format!("a curve {what}"),
-                    within: Some(def.name.to_string()),
-                }),
+                Err(what) => errors.push(Error::invalid(
+                    format!("a curve {what}"),
+                    Some(def.name.as_str()),
+                )),
             }
         }
         if !errors.is_empty() {
