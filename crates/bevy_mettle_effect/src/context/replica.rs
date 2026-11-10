@@ -137,14 +137,16 @@ impl MapEntities for ContextReplica {
 mod tests {
     use bevy::ecs::entity::{EntityHashMap, EntityMapper, MapEntities};
     use bevy::prelude::*;
+    use bevy::reflect::TypeRegistry;
     use bevy_mettle_core::registry::AbilityId;
     use serde::{Deserialize, Serialize};
 
     use super::{ContextReplica, DataReplica};
-    use crate::context::{AbilityRef, ContextData, ContextDataRegistry, EffectContext, Hit};
+    use crate::context::{AbilityRef, ContextDataRegistry, EffectContext, Hit, ReflectContextData};
 
     /// A shot: whether it was a headshot, and the entities it names.
-    #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, MapEntities)]
+    #[derive(Reflect, Clone, Debug, PartialEq, Serialize, Deserialize, MapEntities)]
+    #[reflect(ContextData)]
     struct Shot {
         headshot: bool,
         #[entities]
@@ -155,18 +157,11 @@ mod tests {
         through: Vec<Entity>,
     }
 
-    impl ContextData for Shot {
-        const NAME: &'static str = "shot";
-    }
-
     /// The wind: no entities.
-    #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, MapEntities)]
+    #[derive(Reflect, Clone, Debug, PartialEq, Serialize, Deserialize, MapEntities)]
+    #[reflect(ContextData)]
     struct Wind {
         speed: f32,
-    }
-
-    impl ContextData for Wind {
-        const NAME: &'static str = "wind";
     }
 
     /// Maps each entity as it says, and any other to itself.
@@ -184,12 +179,19 @@ mod tests {
         Entity::from_raw_u32(index).unwrap()
     }
 
-    /// A registry with the shot, then the wind.
+    /// A registry of the types `types` registers.
+    fn registered(types: impl FnOnce(&mut TypeRegistry)) -> ContextDataRegistry {
+        let mut registry = TypeRegistry::new();
+        types(&mut registry);
+        ContextDataRegistry::of(&registry)
+    }
+
+    /// A registry with the shot and the wind.
     fn registry() -> ContextDataRegistry {
-        let mut registry = ContextDataRegistry::default();
-        registry.add::<Shot>();
-        registry.add::<Wind>();
-        registry
+        registered(|types| {
+            types.register::<Shot>();
+            types.register::<Wind>();
+        })
     }
 
     fn shot() -> Shot {
@@ -277,8 +279,9 @@ mod tests {
     #[test]
     fn a_type_not_added_is_dropped() {
         // The wind isn't added: not sent.
-        let mut shots = ContextDataRegistry::default();
-        shots.add::<Shot>();
+        let shots = registered(|types| {
+            types.register::<Shot>();
+        });
         let replica = ContextReplica::of(&context(), &shots);
         assert_eq!(replica.data.len(), 1);
         let decoded = replica.context(&shots);

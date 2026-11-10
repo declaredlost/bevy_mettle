@@ -142,7 +142,7 @@ pub trait AttributeApp {
 impl AttributeApp for App {
     fn add_attribute<A: Attribute>(&mut self) -> &mut Self {
         if !self.is_plugin_added::<crate::AttributePlugin>() {
-            self.add_plugins(crate::AttributePlugin::default());
+            self.add_plugins(crate::AttributePlugin);
         }
         let (id, added) = self
             .world_mut()
@@ -158,12 +158,8 @@ impl AttributeApp for App {
             .get(id)
             .is_some_and(AttributeInfo::follows);
         if follows {
-            let schedule = self
-                .world()
-                .resource::<crate::plugin::AttributeSchedule>()
-                .0;
             self.add_systems(
-                schedule,
+                crate::AttributeFold,
                 crate::registry::state::follow_limits::<A>.in_set(crate::plugin::Phase::Follow),
             );
         }
@@ -171,25 +167,22 @@ impl AttributeApp for App {
             .register_type::<crate::Current<A>>()
             .register_type::<crate::authority::Served<A>>()
             .add_observer(crate::registry::state::remove_base::<A>);
-        let schedule = self
-            .world()
-            .resource::<crate::plugin::AttributeSchedule>()
-            .0;
         self.add_systems(
-            schedule,
+            crate::AttributeFold,
             (
-                (
-                    crate::registry::state::sync_base::<A>,
-                    crate::authority::sync_served::<A>,
-                )
-                    .in_set(crate::plugin::Phase::Sync),
-                (
-                    crate::registry::state::publish::<A>,
-                    crate::authority::serve::<A>,
-                )
-                    .chain()
-                    .in_set(crate::plugin::Phase::Publish),
-            ),
+                crate::registry::state::sync_base::<A>,
+                crate::authority::sync_served::<A>,
+            )
+                .in_set(crate::plugin::Phase::Sync),
+        )
+        .add_systems(
+            bevy_mettle_core::schedule::Mettle,
+            (
+                crate::registry::state::publish::<A>,
+                crate::authority::serve::<A>,
+            )
+                .chain()
+                .in_set(bevy_mettle_core::schedule::MettleSet::Publish),
         )
     }
 }

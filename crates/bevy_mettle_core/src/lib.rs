@@ -10,6 +10,7 @@ mod error;
 pub mod net;
 pub mod prelude;
 pub mod registry;
+pub mod schedule;
 pub mod tag;
 
 pub use self::error::{Error, Errors};

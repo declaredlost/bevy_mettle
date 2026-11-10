@@ -6,7 +6,7 @@ use bevy_mettle_core::condition::Condition;
 use bevy_mettle_core::registry::{AnyEffect, AttributeId, CurveId, EffectId, Name};
 use bevy_mettle_core::tag::{TagKey, Tags};
 
-use super::{Capture, EffectDuration, Period, Stacking};
+use super::{Capture, EffectDuration, Period, Read, Stacking};
 use crate::code::{CalculationId, Changes, ExecutionId};
 
 /// An effect as an app has it: its data checked, and what it names numbered.
@@ -31,8 +31,11 @@ pub struct EffectDef {
     pub period: Option<Period<MagnitudeDef>>,
     /// What it changes.
     pub modifiers: Vec<ModifierDef>,
-    /// The executions it runs.
-    pub executions: Vec<ExecutionId>,
+    /// What it captures: the slots its magnitudes' attributes, and its
+    /// executions' and calculations' captures, are read from.
+    pub captures: Vec<CaptureDef>,
+    /// The executions it runs, each with the slots of what it captures.
+    pub executions: Vec<(ExecutionId, Vec<usize>)>,
     /// What its target owns while it counts.
     pub grants: Tags,
     /// The cues it plays.
@@ -83,30 +86,61 @@ pub struct ModifierDef {
 /// How much, as an app has it: a [`Magnitude`](super::Magnitude), its names
 /// numbered.
 ///
-/// What the magnitude names resolved to their numbers.
+/// Its attributes are capture slots in the effect's
+/// [`captures`](EffectDef::captures); its constants folded.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MagnitudeDef {
     /// This value.
     Value(f32),
-    /// `base` times `curve` at the spec's level.
-    Scaled {
-        /// What the curve's value is multiplied by.
-        base: f32,
-        /// The curve.
-        curve: CurveId,
-    },
+    /// The spec's level.
+    Level,
     /// What the code applying it set, by a tag.
     Param(TagKey),
-    /// An attribute of the source's or the target's, as it is when the
-    /// effect's applied, times `coefficient`.
-    Attribute {
-        /// The attribute.
-        attribute: AttributeId,
-        /// Whose.
-        from: Capture,
-        /// What it's multiplied by.
-        coefficient: f32,
+    /// The effect's capture in this slot of its
+    /// [`captures`](EffectDef::captures).
+    Attribute(usize),
+    /// Worked out by a calculation registered in code, with the slots of what
+    /// it captures.
+    Custom(CalculationId, Vec<usize>),
+    /// A curve's value at `at`.
+    Curve {
+        /// The curve.
+        curve: CurveId,
+        /// Where it's read.
+        at: Box<MagnitudeDef>,
     },
-    /// Worked out by a calculation registered in code.
-    Custom(CalculationId),
+    /// These added up.
+    Sum(Vec<MagnitudeDef>),
+    /// These multiplied together.
+    Product(Vec<MagnitudeDef>),
+    /// `value`, kept within `min` and `max`.
+    Clamp {
+        /// What's kept within them.
+        value: Box<MagnitudeDef>,
+        /// The least it can be, if there's a least.
+        min: Option<f32>,
+        /// The most it can be, if there's a most.
+        max: Option<f32>,
+    },
+}
+
+/// A capture as an app has it: what an effect's magnitudes and code read.
+///
+/// An attribute the effect captures, for its magnitudes, executions and
+/// calculations.
+///
+/// One slot each, in [`EffectDef::captures`]: the same read, named twice, is
+/// one capture.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CaptureDef {
+    /// The attribute.
+    pub attribute: AttributeId,
+    /// Whose.
+    pub from: Capture,
+    /// Which of its values.
+    pub value: Read,
+    /// Captured as early as it can be and kept, or read live.
+    pub snapshot: bool,
+    /// What it's read in.
+    pub tags: Tags,
 }

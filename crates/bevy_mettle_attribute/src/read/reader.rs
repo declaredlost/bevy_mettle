@@ -50,6 +50,13 @@ impl AttributeReader<'_, '_> {
             .then(|| state.value(&self.registry, owned, attribute, context))
     }
 
+    /// `actor`'s base of `attribute`, if it has it.
+    #[must_use]
+    pub fn base_at(&self, actor: Entity, attribute: AttributeId) -> Option<f32> {
+        let (state, _) = self.actors.get(actor).ok()?;
+        state.cached_base(attribute)
+    }
+
     /// `actor`'s `A`'s modifiers in `context`, summed but not applied: for an
     /// attacker's and a target's to be combined, or a tooltip.
     #[must_use]

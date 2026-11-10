@@ -3,11 +3,12 @@
 use std::any::TypeId;
 
 use bevy::prelude::*;
-use bevy_mettle_core::registry::EffectId;
-use bevy_mettle_core::tag::TagKey;
+use bevy_mettle_core::registry::{AttributeId, EffectId};
+use bevy_mettle_core::tag::{TagKey, Tags};
 
 use crate::EffectRegistry;
 use crate::context::{AbilityRef, ContextData, EffectContext, Hit};
+use crate::data::{Capture, CaptureDef, Read};
 
 /// An effect code names: a marker type, its content's name on it.
 ///
@@ -124,6 +125,10 @@ pub struct EffectSpec {
     pub params: Vec<(TagKey, f32)>,
     /// What it carries beyond them: who applied it, what struck, where.
     pub context: EffectContext,
+    /// Its source's attributes as they were when it was made, for its
+    /// effect's snapshot captures: taken by
+    /// [`snapshot`](crate::EffectWorld::snapshot), or as it's applied.
+    pub snapshot: Vec<Snapshot>,
     /// The activation it was applied under, if any: what a rejected prediction
     /// takes back. One the server's own has its top bit set; a client's is
     /// its own, told apart from another client's by the source.
@@ -153,6 +158,7 @@ impl EffectSpec {
             level: 1.0,
             params: Vec::new(),
             context: EffectContext::default(),
+            snapshot: Vec::new(),
             activation: None,
         }
     }
@@ -243,6 +249,23 @@ impl EffectSpec {
             .map(|(_, value)| *value)
     }
 
+    /// What its snapshot holds for `capture`, if it's of its source and the
+    /// spec took it.
+    #[must_use]
+    pub fn snapshot_of(&self, capture: &CaptureDef) -> Option<f32> {
+        if capture.from != Capture::Source {
+            return None;
+        }
+        self.snapshot
+            .iter()
+            .find(|taken| {
+                taken.attribute == capture.attribute
+                    && taken.value == capture.value
+                    && taken.tags == capture.tags
+            })
+            .map(|taken| taken.amount)
+    }
+
     /// Its effect's number in `registry`: `None` if there's no such effect, or
     /// its type isn't added.
     #[must_use]
@@ -269,4 +292,17 @@ impl EffectSpec {
             Which::Number(id) => format!("{id:?}"),
         }
     }
+}
+
+/// A source's attribute as a spec was made, for a snapshot capture of it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Snapshot {
+    /// The attribute.
+    pub attribute: AttributeId,
+    /// Which of its values.
+    pub value: Read,
+    /// What it was read in.
+    pub tags: Tags,
+    /// What it was.
+    pub amount: f32,
 }

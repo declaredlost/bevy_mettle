@@ -174,7 +174,23 @@ impl<K: Kind, T: Clone> Registry<K, T> {
     /// If another type added something called `name`: data couldn't tell them
     /// apart.
     pub fn add<N: 'static>(&mut self, name: &'static str, entry: T) -> Key<K> {
-        let type_id = TypeId::of::<N>();
+        self.add_type(TypeId::of::<N>(), std::any::type_name::<N>(), name, entry)
+    }
+
+    /// Adds `entry`, by the type `type_id` (its Rust name `type_name`) called
+    /// `name`, numbered after the last; or replaces what that type added: its
+    /// number. For a type known only at runtime, as reflection knows it.
+    ///
+    /// # Panics
+    ///
+    /// If another type added something called `name`.
+    pub fn add_type(
+        &mut self,
+        type_id: TypeId,
+        type_name: &'static str,
+        name: &'static str,
+        entry: T,
+    ) -> Key<K> {
         if let Some(known) = self.id_of_type(type_id) {
             Arc::make_mut(&mut self.entries)[known.index()] = Some(entry);
             return known;
@@ -187,10 +203,7 @@ impl<K: Kind, T: Clone> Registry<K, T> {
                 .and_then(|(other, _)| self.added_by.get(other))
                 .copied()
                 .unwrap_or("another type");
-            panic!(
-                "`{other}` and `{}` are both named `{name}`",
-                std::any::type_name::<N>()
-            );
+            panic!("`{other}` and `{type_name}` are both named `{name}`");
         }
         let id = Key::new(Arc::make_mut(&mut self.numbering).push(SmolStr::new_static(name)));
         let entries = Arc::make_mut(&mut self.entries);
@@ -199,7 +212,7 @@ impl<K: Kind, T: Clone> Registry<K, T> {
         }
         entries[id.index()] = Some(entry);
         Arc::make_mut(&mut self.by_type).insert(type_id, id);
-        Arc::make_mut(&mut self.added_by).insert(type_id, std::any::type_name::<N>());
+        Arc::make_mut(&mut self.added_by).insert(type_id, type_name);
         id
     }
 

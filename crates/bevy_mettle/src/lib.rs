@@ -5,9 +5,9 @@
 #![cfg_attr(not(doctest), doc = include_str!("../README.md"))]
 
 use bevy::app::plugin_group;
+use bevy_mettle_core::schedule::MettleCorePlugin;
 
 mod content;
-mod order;
 
 /// Abilities: granted, activated, paid for, cooled down and ended.
 #[cfg(feature = "ability")]
@@ -34,7 +34,6 @@ pub use bevy_mettle_effect as effect;
 pub use bevy_mettle_lightyear as lightyear;
 
 pub use self::content::{ContentLoaded, ContentRejected, MettleContent, MettleContentPlugin};
-pub use self::order::{MettleSystems, MettleSystemsPlugin};
 
 pub mod prelude {
     //! What using the enabled parts takes: the preludes of every crate enabled.
@@ -57,24 +56,25 @@ pub mod prelude {
     pub use bevy_mettle_lightyear::prelude::*;
 
     #[doc(no_inline)]
-    pub use crate::{ContentLoaded, ContentRejected, MettleContent, MettlePlugins, MettleSystems};
+    pub use crate::{ContentLoaded, ContentRejected, MettleContent, MettlePlugins};
 }
 
 plugin_group! {
     /// The plugin of every part its features enable, each with its defaults.
     ///
-    /// Add it before any `add_attribute`, which adds `AttributePlugin` itself
-    /// if it isn't there yet. With `lightyear`, add it after lightyear's own
-    /// plugins, with mettle's `NetRole` set. Each keeps its defaults; change
-    /// one with `MettlePlugins.set(EffectPlugin::new(Update))`.
+    /// Mettle runs in its own schedule, `Mettle`, in `FixedPostUpdate`; run
+    /// it elsewhere with `MettlePlugins.set(MettleCorePlugin::new(..))`. Add
+    /// it before any `add_attribute`, which adds `AttributePlugin` itself if
+    /// it isn't there yet. With `lightyear`, add it after lightyear's own
+    /// plugins, with mettle's `NetRole` set.
     pub struct MettlePlugins {
+        :MettleCorePlugin,
         #[cfg(feature = "attribute")]
         attribute:::AttributePlugin,
         #[cfg(feature = "effect")]
         effect:::EffectPlugin,
         #[cfg(feature = "ability")]
         ability:::AbilityPlugin,
-        :MettleSystemsPlugin,
         :MettleContentPlugin,
         #[cfg(feature = "lightyear")]
         lightyear:::MettleNetPlugin,

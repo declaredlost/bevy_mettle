@@ -16,6 +16,8 @@ pub use crate::net::NetRole;
 #[doc(no_inline)]
 pub use crate::registry::{CurveId, TagId};
 #[doc(no_inline)]
+pub use crate::schedule::{Mettle, MettleCorePlugin, MettleSet, MettleSystems};
+#[doc(no_inline)]
 pub use crate::tag::{
     OwnedTags, Root, Tag, TagAdded, TagApp, TagCounts, TagKey, TagRegistry, TagRemoved, Tags, owns,
 };

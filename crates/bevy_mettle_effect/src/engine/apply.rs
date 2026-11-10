@@ -8,12 +8,12 @@ use bevy_mettle_core::registry::EffectId;
 use bevy_mettle_core::tag::{OwnedTags, TagCounts, Tags};
 
 use super::count::{activate, holds_ongoing, refresh};
-use super::execution::{execute, resolve};
+use super::execution::{execute, read, resolve};
 use super::remove::remove_tagged;
 use super::{Check, DEPTH, effects_on, source_tags};
 use crate::active::{ActiveEffect, EffectOf};
 use crate::code::ExecutionContext;
-use crate::data::{EffectDef, EffectDuration, MagnitudeDef, Reapply, StackBy, Stacking};
+use crate::data::{EffectDef, EffectDuration, Reapply, StackBy, Stacking};
 use crate::events::{Blocked, EffectApplied, EffectBlocked, EffectStacked};
 use crate::{EffectRegistry, EffectSpec, net};
 
@@ -83,7 +83,17 @@ pub(super) fn apply_at(
         remove_tagged(world, target, &def.removes, depth);
     }
     if !def.lasts() {
-        execute(world, &registry, target, &spec, &def, 1, &source_tags, &[]);
+        let captured = capture(world, target, &spec, &def);
+        execute(
+            world,
+            &registry,
+            target,
+            &spec,
+            &def,
+            1,
+            &source_tags,
+            &captured,
+        );
         chain(world, target, &spec, &def.on_apply, depth);
         return;
     }
@@ -144,13 +154,16 @@ pub(super) fn spawn(
     def: &Arc<EffectDef>,
     source_tags: TagCounts,
 ) -> Option<Entity> {
-    let (duration, period, captured) = {
+    let captured = capture(world, target, spec, def);
+    let (duration, period) = {
         let context = ExecutionContext {
             world: &*world,
             target,
             def,
             spec,
             stacks: 1,
+            captured: &captured,
+            reads: &[],
         };
         let duration = match &def.duration {
             EffectDuration::For(seconds) => Some(resolve(&context, registry, seconds)),
@@ -179,7 +192,7 @@ pub(super) fn spawn(
                 }
                 fine
             });
-        (duration, period, capture(&context, registry, def))
+        (duration, period)
     };
     let effect = world
         .spawn((
@@ -202,6 +215,7 @@ pub(super) fn spawn(
             EffectOf(target),
         ))
         .id();
+    super::live::watch(world, effect);
     if holds_ongoing(world, effect) {
         activate(world, registry, effect);
         if def.period.as_ref().is_some_and(|period| period.on_apply) {
@@ -220,17 +234,32 @@ pub(super) fn spawn(
     Some(effect)
 }
 
-/// `def`'s modifiers' attribute magnitudes, as they are now: what it keeps.
+/// What `def` captures applied to `target` with `spec`, by slot: each
+/// snapshot as `spec` took it, or as it is now; none for one read live.
 pub(super) fn capture(
-    context: &ExecutionContext,
-    registry: &EffectRegistry,
+    world: &World,
+    target: Entity,
+    spec: &EffectSpec,
     def: &EffectDef,
 ) -> Vec<Option<f32>> {
-    def.modifiers
+    let context = ExecutionContext {
+        world,
+        target,
+        def,
+        spec,
+        stacks: 1,
+        captured: &[],
+        reads: &[],
+    };
+    def.captures
         .iter()
-        .map(|modifier| {
-            matches!(modifier.value, MagnitudeDef::Attribute { .. })
-                .then(|| resolve(context, registry, &modifier.value))
+        .map(|capture| {
+            if !capture.snapshot {
+                return None;
+            }
+            spec.snapshot_of(capture)
+                .or_else(|| read(&context, capture))
+                .or(Some(0.0))
         })
         .collect()
 }

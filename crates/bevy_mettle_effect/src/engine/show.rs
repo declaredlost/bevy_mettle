@@ -13,7 +13,6 @@ use super::effects_on;
 use super::remove::{remove, remove_quietly};
 use crate::EffectRegistry;
 use crate::active::{ActiveEffect, EffectOf};
-use crate::code::ExecutionContext;
 use crate::context::ContextDataRegistry;
 use crate::net::{self, EffectReplica};
 
@@ -37,21 +36,13 @@ pub(crate) fn relink(world: &mut World, registry: &EffectRegistry, effect: Entit
     let captured = world
         .get::<ActiveEffect>(effect)
         .zip(world.get::<EffectOf>(effect))
-        .map(|(active, of)| {
-            let context = ExecutionContext {
-                world,
-                target: of.0,
-                def: &def,
-                spec: &active.spec,
-                stacks: 1,
-            };
-            capture(&context, registry, &def)
-        })
+        .map(|(active, of)| capture(world, of.0, &active.spec, &def))
         .unwrap_or_default();
     if let Some(mut active) = world.get_mut::<ActiveEffect>(effect) {
         active.def = def;
         active.captured = captured;
     }
+    super::live::watch(world, effect);
     if counted {
         activate(world, registry, effect);
     }
@@ -137,6 +128,7 @@ pub(crate) fn show(
         },
         net::Proxy,
     ));
+    super::live::watch(world, entity);
     if !replica.inhibited {
         activate(world, registry, entity);
     }

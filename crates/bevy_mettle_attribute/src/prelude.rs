@@ -25,4 +25,4 @@ pub use crate::registry::{
     AttributeApp, AttributeChanged, AttributeRegistry, Limit, OnLimit, Rounding,
 };
 #[doc(no_inline)]
-pub use crate::{Attribute, AttributePlugin, AttributeSystems, Base, Current};
+pub use crate::{Attribute, AttributeFold, AttributePlugin, Base, Current};

@@ -1,5 +1,6 @@
 //! Mettle's hot paths, measured: attributes kept and read, tags and
-//! conditions checked, effects applied, routed and ticked, for 1000 actors.
+//! conditions checked, effects applied, routed and ticked, and captures
+//! executed and followed, for 1000 actors.
 //!
 //! `cargo bench -p bevy_mettle --bench mettle`.
 
@@ -34,6 +35,25 @@ struct Shield;
 #[derive(Route)]
 struct IncomingDamage;
 
+impl RouteFn for IncomingDamage {
+    fn route(&self, effect: &ExecutionContext, damage: f32) -> Vec<BaseChange> {
+        let shield = effect
+            .value::<Shield>(effect.target, &AttributeContext::new())
+            .unwrap_or_default();
+        let absorbed = damage.min(shield);
+        let (Some(shield), Some(life)) = (
+            effect.attribute_id::<Shield>(),
+            effect.attribute_id::<Life>(),
+        ) else {
+            return Vec::new();
+        };
+        vec![
+            BaseChange::new(shield, Operation::Flat, -absorbed),
+            BaseChange::new(life, Operation::Flat, absorbed - damage),
+        ]
+    }
+}
+
 /// The effects the benches apply, as code names them.
 #[derive(Effect)]
 struct Hit;
@@ -46,6 +66,40 @@ struct Burning;
 /// What a strike executes.
 #[derive(Execution)]
 struct Strike;
+
+impl ExecutionFn for Strike {
+    fn execute(&self, effect: &ExecutionContext) -> Vec<BaseChange> {
+        effect
+            .attribute_id::<Life>()
+            .map(|life| BaseChange::new(life, Operation::Flat, -effect.level()))
+            .into_iter()
+            .collect()
+    }
+}
+
+/// What a scorch executes: its source's `A0` as it applied, less its
+/// target's `A1` as it is now, off its life.
+#[derive(Execution)]
+#[execution(source(A0), target(A1, live))]
+struct Scorch;
+
+impl ExecutionFn for Scorch {
+    fn execute(&self, effect: &ExecutionContext) -> Vec<BaseChange> {
+        let power = effect.captured::<A0>(Capture::Source).unwrap_or_default();
+        let resist = effect.captured::<A1>(Capture::Target).unwrap_or_default();
+        effect
+            .attribute_id::<Life>()
+            .map(|life| BaseChange::new(life, Operation::Flat, (resist - power).min(0.0)))
+            .into_iter()
+            .collect()
+    }
+}
+
+/// Effects capturing what they read, as code names them.
+#[derive(Effect)]
+struct Scorching;
+#[derive(Effect)]
+struct Aura;
 
 const ACTORS: u16 = 1000;
 const FIRE: &str = "damage.elemental.fire";
@@ -107,7 +161,7 @@ fn id<A: Attribute>(attributes: &AttributeRegistry) -> AttributeId {
 fn attribute_app() -> (App, Vec<Entity>) {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
-        .add_plugins(AttributePlugin::new(Update));
+        .add_plugins((MettleCorePlugin::new(Update), AttributePlugin));
     add_all(&mut app);
     let attributes = app.world().resource::<AttributeRegistry>().clone();
     let actors = (0..ACTORS)
@@ -255,7 +309,7 @@ fn bench_tags(c: &mut Criterion) {
 fn effect_app() -> (App, Vec<Entity>) {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
-        .add_plugins((AttributePlugin::new(Update), EffectPlugin::new(Update)))
+        .add_plugins((MettleCorePlugin::new(Update), AttributePlugin, EffectPlugin))
         .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
             16,
         )));
@@ -263,33 +317,15 @@ fn effect_app() -> (App, Vec<Entity>) {
     app.add_attribute::<Life>()
         .add_attribute::<MaxLife>()
         .add_attribute::<Shield>();
-    app.add_route::<IncomingDamage>(|effect, damage| {
-        let shield = effect
-            .value::<Shield>(effect.target, &AttributeContext::new())
-            .unwrap_or_default();
-        let absorbed = damage.min(shield);
-        let (Some(shield), Some(life)) = (
-            effect.attribute_id::<Shield>(),
-            effect.attribute_id::<Life>(),
-        ) else {
-            return Vec::new();
-        };
-        vec![
-            BaseChange::new(shield, Operation::Flat, -absorbed),
-            BaseChange::new(life, Operation::Flat, absorbed - damage),
-        ]
-    })
-    .add_execution::<Strike>(|effect| {
-        effect
-            .attribute_id::<Life>()
-            .map(|life| BaseChange::new(life, Operation::Flat, -effect.level()))
-            .into_iter()
-            .collect()
-    })
-    .add_effect::<Hit>()
-    .add_effect::<Routed>()
-    .add_effect::<Struck>()
-    .add_effect::<Burning>();
+    app.add_route(IncomingDamage)
+        .add_execution(Strike)
+        .add_effect::<Hit>()
+        .add_effect::<Routed>()
+        .add_effect::<Struck>()
+        .add_effect::<Burning>()
+        .add_execution(Scorch)
+        .add_effect::<Scorching>()
+        .add_effect::<Aura>();
     let effects = vec![
         EffectData::instant("hit").modifier(EffectModifier::new::<Life>(Operation::Flat, -1.0)),
         EffectData::instant("routed").modifier(EffectModifier::route::<IncomingDamage>(2.0)),
@@ -299,6 +335,22 @@ fn effect_app() -> (App, Vec<Entity>) {
             .period(0.016, false)
             .grant("state.burning")
             .modifier(EffectModifier::new::<Life>(Operation::Flat, 0.0)),
+        EffectData::lasting("scorching", 1_000_000.0)
+            .period(0.016, false)
+            .execution("scorch"),
+        // A tenth of the source's `A0`, a third of it in fire, followed live.
+        EffectData::infinite("aura")
+            .modifier(EffectModifier::new::<A2>(
+                Operation::Flat,
+                Magnitude::source::<A0>().live().times(0.1),
+            ))
+            .modifier(EffectModifier::new::<A4>(
+                Operation::Flat,
+                Magnitude::source::<A3>()
+                    .live()
+                    .tagged(FIRE)
+                    .times(1.0 / 3.0),
+            )),
     ];
     let world = app.world();
     let registry = world
@@ -364,5 +416,52 @@ fn bench_effects(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_attributes, bench_tags, bench_effects);
+fn bench_captures(c: &mut Criterion) {
+    let mut group = c.benchmark_group("captures");
+    group.measurement_time(Duration::from_secs(4));
+    // Every actor scorched by the next: each update, a period comes round on
+    // each, its execution reading a snapshot and a live capture.
+    let (mut app, actors) = effect_app();
+    for (i, &actor) in actors.iter().enumerate() {
+        let source = actors[(i + 1) % actors.len()];
+        app.world_mut()
+            .apply_effect(actor, Scorching.spec().source(source));
+    }
+    app.update();
+    group.bench_function("tick_1000_periodic_executions", |b| {
+        b.iter(|| app.update());
+    });
+    // Every actor under one caster's aura, its `A0` changing each update:
+    // each effect re-counted as it follows.
+    let (mut app, actors) = effect_app();
+    let caster = actors[0];
+    for &actor in &actors[1..] {
+        app.world_mut()
+            .apply_effect(actor, Aura.spec().source(caster));
+    }
+    app.update();
+    app.update();
+    let mut power = 10.0;
+    group.bench_function("follow_999_live_one_source", |b| {
+        b.iter(|| {
+            power += 1.0;
+            app.world_mut()
+                .get_mut::<Base<A0>>(caster)
+                .unwrap()
+                .set(power);
+            app.update();
+        });
+    });
+    // The same, nothing changing: what following costs idle.
+    group.bench_function("follow_999_live_idle", |b| b.iter(|| app.update()));
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_attributes,
+    bench_tags,
+    bench_effects,
+    bench_captures
+);
 criterion_main!(benches);

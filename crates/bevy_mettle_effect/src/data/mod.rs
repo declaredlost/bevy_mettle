@@ -11,8 +11,8 @@ use bevy_mettle_core::registry::{AnyAttribute, AnyEffect, Name};
 use bevy_mettle_core::tag::{TagKey, Tags};
 use serde::{Deserialize, Serialize};
 
-pub use self::def::{EffectDef, MagnitudeDef, ModifierDef};
-pub use self::magnitude::{Capture, Magnitude};
+pub use self::def::{CaptureDef, EffectDef, MagnitudeDef, ModifierDef};
+pub use self::magnitude::{AttributeRead, Capture, Magnitude, Read};
 pub use self::stacking::{Expire, Reapply, StackBy, Stacking};
 use crate::code::{AnyExecution, AnyRoute, Route};
 

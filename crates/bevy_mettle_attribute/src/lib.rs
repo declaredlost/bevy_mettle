@@ -13,5 +13,5 @@ mod values;
 pub use bevy_mettle_macros::Attribute;
 
 pub use self::attribute::Attribute;
-pub use self::plugin::{AttributePlugin, AttributeSystems};
+pub use self::plugin::{AttributeFold, AttributePlugin};
 pub use self::values::{Base, Current};

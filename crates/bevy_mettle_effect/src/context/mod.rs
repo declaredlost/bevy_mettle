@@ -13,8 +13,9 @@ use bevy_mettle_core::registry::AbilityId;
 use serde::{Deserialize, Serialize};
 
 use self::data::Data;
+pub(crate) use self::data::first_warning;
 pub use self::data::{
-    AnyContextData, ContextData, ContextDataFns, ContextDataId, ContextDataRegistry,
+    AnyContextData, ContextData, ContextDataId, ContextDataRegistry, ReflectContextData,
 };
 pub use self::replica::{ContextReplica, DataReplica};
 

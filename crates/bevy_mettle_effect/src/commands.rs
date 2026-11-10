@@ -87,6 +87,12 @@ pub trait EffectWorld {
         target: Entity,
         spec: &EffectSpec,
     ) -> Option<Vec<crate::code::BaseChange>>;
+
+    /// `spec`, its snapshot taken from its source now: its effect's snapshot
+    /// captures of its source, kept as it's carried and applied later. As
+    /// [`Snapshots`](crate::Snapshots) takes it in a system.
+    #[must_use]
+    fn snapshot(&self, spec: impl Into<EffectSpec>) -> EffectSpec;
 }
 
 impl EffectWorld for World {
@@ -116,5 +122,9 @@ impl EffectWorld for World {
         spec: &EffectSpec,
     ) -> Option<Vec<crate::code::BaseChange>> {
         engine::preview(self, target, spec)
+    }
+
+    fn snapshot(&self, spec: impl Into<EffectSpec>) -> EffectSpec {
+        crate::snapshot::take_in(self, spec.into())
     }
 }

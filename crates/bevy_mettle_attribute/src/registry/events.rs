@@ -11,9 +11,10 @@ use crate::Attribute;
 ///
 /// A modifier came or went, its base was set, a tag it counts while came or
 /// went. Told to observers of the actor (`commands.entity(hero).observe(..)`)
-/// and to global ones (`On<AttributeChanged<Life>>`), as
-/// [`AttributeSystems`](crate::AttributeSystems) runs. Values that only differ
-/// for some reads (a hit's bonus) aren't told.
+/// and to global ones (`On<AttributeChanged<Life>>`), as mettle publishes
+/// values
+/// ([`MettleSet::Publish`](bevy_mettle_core::schedule::MettleSet::Publish)).
+/// Values that only differ for some reads (a hit's bonus) aren't told.
 #[derive(EntityEvent)]
 pub struct AttributeChanged<A: Attribute> {
     /// The actor.

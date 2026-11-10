@@ -14,12 +14,12 @@ use bevy_mettle_core::{Error, Errors};
 
 use crate::Effect;
 use crate::code::{
-    AnyRoute, CalculationFn, CalculationId, CalculationRegistry, Changes, ExecutionFn, ExecutionId,
-    ExecutionRegistry, RouteId, RouteRegistry,
+    AnyRoute, CalculationFn, CalculationId, CalculationRegistry, Changes, Code, ExecutionFn,
+    ExecutionId, ExecutionRegistry, RouteId, RouteRegistry,
 };
 use crate::data::{
-    EffectData, EffectDef, EffectDuration, EffectModifier, Magnitude, MagnitudeDef, ModifierDef,
-    Period, Stacking,
+    AttributeRead, Capture, CaptureDef, EffectData, EffectDef, EffectDuration, EffectModifier,
+    Magnitude, MagnitudeDef, ModifierDef, Period, Stacking,
 };
 
 /// The effects there are, checked against what they name, and compiled.
@@ -85,6 +85,8 @@ struct Compile<'a> {
     registry: &'a Registry<AnyEffect, Arc<EffectDef>>,
     checks: EffectChecks<'a>,
     errors: &'a mut Vec<Error>,
+    /// The effect being compiled's captures, as its magnitudes name them.
+    captures: Vec<CaptureDef>,
 }
 
 impl EffectRegistry {
@@ -138,6 +140,7 @@ impl EffectRegistry {
                 registry: &registry,
                 checks: against,
                 errors: &mut errors,
+                captures: Vec::new(),
             };
             if let Some(effect) = compile.effect(def) {
                 compiled.push(effect);
@@ -169,12 +172,12 @@ impl EffectRegistry {
         &self.curves
     }
 
-    pub(crate) fn execution(&self, id: ExecutionId) -> Option<&ExecutionFn> {
-        self.executions.get(id)
+    pub(crate) fn execution(&self, id: ExecutionId) -> Option<&dyn ExecutionFn> {
+        self.executions.get(id).map(Code::run)
     }
 
-    pub(crate) fn calculation(&self, id: CalculationId) -> Option<&CalculationFn> {
-        self.calculations.get(id)
+    pub(crate) fn calculation(&self, id: CalculationId) -> Option<&dyn CalculationFn> {
+        self.calculations.get(id).map(Code::run)
     }
 
     pub(crate) fn routes(&self) -> &RouteRegistry {
@@ -187,6 +190,7 @@ impl Compile<'_> {
     fn effect(&mut self, def: &EffectData) -> Option<EffectDef> {
         let within = def.name.as_str().to_owned();
         let errors_before = self.errors.len();
+        self.captures.clear();
         for set in [
             &def.tags,
             &def.grants,
@@ -208,12 +212,20 @@ impl Compile<'_> {
             .iter()
             .map(|modifier| self.modifier(def, modifier, &within))
             .collect();
-        let executions: Vec<Option<ExecutionId>> = def
+        let executions: Vec<Option<(ExecutionId, Vec<usize>)>> = def
             .executions
             .iter()
             .map(|execution| {
                 let id = self.checks.executions.resolve(execution, Some(&within));
-                self.held(id)
+                let id = self.held(id)?;
+                let captures = self
+                    .checks
+                    .executions
+                    .get(id)
+                    .map(|code| code.captures().to_vec())
+                    .unwrap_or_default();
+                let reads = self.reads(&captures, &within)?;
+                Some((id, reads))
             })
             .collect();
         let on_apply = self.effects(&def.on_apply, &within);
@@ -228,6 +240,10 @@ impl Compile<'_> {
             overflow: self.effects(&stacking.overflow, &within),
         });
         self.lasting(def, &within);
+        let modifiers: Option<Vec<ModifierDef>> = modifiers.into_iter().collect();
+        if let Some(modifiers) = &modifiers {
+            self.feedback(def, modifiers, &within);
+        }
         if self.errors.len() > errors_before {
             return None;
         }
@@ -238,7 +254,8 @@ impl Compile<'_> {
             tags: def.tags.clone(),
             duration,
             period,
-            modifiers: modifiers.into_iter().collect::<Option<_>>()?,
+            modifiers: modifiers?,
+            captures: std::mem::take(&mut self.captures),
             executions: executions.into_iter().collect::<Option<_>>()?,
             grants: def.grants.clone(),
             cues: def.cues.clone(),
@@ -413,54 +430,167 @@ impl Compile<'_> {
         })
     }
 
-    /// `magnitude` compiled, or what's wrong with it noted.
+    /// `magnitude` compiled, its constants folded, or what's wrong with it
+    /// noted.
     fn magnitude(&mut self, magnitude: &Magnitude, within: &str) -> Option<MagnitudeDef> {
         match magnitude {
-            Magnitude::Value(value) => {
-                if !value.is_finite() {
-                    self.invalid(format!("a value of {value}"), within);
-                    return None;
-                }
-                Some(MagnitudeDef::Value(*value))
-            }
-            Magnitude::Scaled { base, curve } => {
-                let curve = self.checks.curves.known(curve, Some(within));
-                if !base.is_finite() {
-                    self.invalid(format!("a base of {base}"), within);
-                }
-                match curve {
-                    Err(error) => {
-                        self.errors.push(error);
-                        None
-                    }
-                    Ok(curve) => base
-                        .is_finite()
-                        .then_some(MagnitudeDef::Scaled { base: *base, curve }),
-                }
-            }
+            Magnitude::Value(value) => self
+                .finite(*value, "a value", within)
+                .map(MagnitudeDef::Value),
+            Magnitude::Level => Some(MagnitudeDef::Level),
             Magnitude::Param(param) => {
                 self.push(self.checks.tags.known(*param, Some(within)));
                 Some(MagnitudeDef::Param(*param))
             }
-            Magnitude::Attribute {
-                attribute,
-                from,
-                coefficient,
-            } => {
-                if !coefficient.is_finite() {
-                    self.invalid(format!("a coefficient of {coefficient}"), within);
-                }
-                let attribute = self.attribute(attribute, within)?;
-                coefficient.is_finite().then_some(MagnitudeDef::Attribute {
-                    attribute,
-                    from: *from,
-                    coefficient: *coefficient,
-                })
-            }
+            Magnitude::Attribute(read) => self.capture(read, within).map(MagnitudeDef::Attribute),
             Magnitude::Custom(calculation) => {
                 let id = self.checks.calculations.resolve(calculation, Some(within));
-                self.held(id).map(MagnitudeDef::Custom)
+                let id = self.held(id)?;
+                let captures = self
+                    .checks
+                    .calculations
+                    .get(id)
+                    .map(|code| code.captures().to_vec())
+                    .unwrap_or_default();
+                let reads = self.reads(&captures, within)?;
+                Some(MagnitudeDef::Custom(id, reads))
             }
+            Magnitude::Curve { curve, at } => {
+                let curve = self.checks.curves.known(curve, Some(within));
+                let curve = self.held(curve);
+                let at = self.magnitude(at, within);
+                Some(MagnitudeDef::Curve {
+                    curve: curve?,
+                    at: Box::new(at?),
+                })
+            }
+            Magnitude::Sum(terms) => self
+                .terms(terms, "a sum", within)
+                .map(|terms| fold(terms, 0.0, |a, b| a + b, MagnitudeDef::Sum)),
+            Magnitude::Product(terms) => self
+                .terms(terms, "a product", within)
+                .map(|terms| fold(terms, 1.0, |a, b| a * b, MagnitudeDef::Product)),
+            Magnitude::Clamp { value, min, max } => {
+                let min = min.map_or(Some(None), |min| {
+                    self.finite(min, "a least", within).map(Some)
+                });
+                let max = max.map_or(Some(None), |max| {
+                    self.finite(max, "a most", within).map(Some)
+                });
+                if let (Some(Some(least)), Some(Some(most))) = (min, max)
+                    && least > most
+                {
+                    self.invalid(
+                        format!("a clamp to at least {least} and at most {most}"),
+                        within,
+                    );
+                    return None;
+                }
+                let value = self.magnitude(value, within);
+                let (value, min, max) = (value?, min?, max?);
+                Some(match value {
+                    MagnitudeDef::Value(value) => MagnitudeDef::Value(clamp(value, min, max)),
+                    value => MagnitudeDef::Clamp {
+                        value: Box::new(value),
+                        min,
+                        max,
+                    },
+                })
+            }
+        }
+    }
+
+    /// `value`, if it's finite; that it isn't noted.
+    fn finite(&mut self, value: f32, what: &str, within: &str) -> Option<f32> {
+        if value.is_finite() {
+            Some(value)
+        } else {
+            self.invalid(format!("{what} of {value}"), within);
+            None
+        }
+    }
+
+    /// `terms` compiled, each one: none is noted, as `what` of nothing.
+    fn terms(
+        &mut self,
+        terms: &[Magnitude],
+        what: &str,
+        within: &str,
+    ) -> Option<Vec<MagnitudeDef>> {
+        if terms.is_empty() {
+            self.invalid(format!("{what} of nothing"), within);
+            return None;
+        }
+        let compiled: Vec<Option<MagnitudeDef>> = terms
+            .iter()
+            .map(|term| self.magnitude(term, within))
+            .collect();
+        compiled.into_iter().collect()
+    }
+
+    /// The slots `reads` are captured in, each one: code's captures.
+    fn reads(&mut self, reads: &[AttributeRead], within: &str) -> Option<Vec<usize>> {
+        let slots: Vec<Option<usize>> = reads
+            .iter()
+            .map(|read| self.capture(read, within))
+            .collect();
+        slots.into_iter().collect()
+    }
+
+    /// The slot `read` is captured in: a new one, or the one the same read
+    /// already has.
+    fn capture(&mut self, read: &AttributeRead, within: &str) -> Option<usize> {
+        let attribute = self.attribute(&read.attribute, within)?;
+        self.push(
+            self.checks
+                .tags
+                .known_all(read.tags.written(), Some(within)),
+        );
+        let capture = CaptureDef {
+            attribute,
+            from: read.from,
+            value: read.value,
+            snapshot: read.snapshot,
+            tags: read.tags.clone(),
+        };
+        if let Some(slot) = self.captures.iter().position(|known| *known == capture) {
+            return Some(slot);
+        }
+        self.captures.push(capture);
+        Some(self.captures.len() - 1)
+    }
+
+    /// Notes a live capture of the target's of what the effect itself
+    /// changes: it would follow what it changes, and change it again.
+    fn feedback(&mut self, def: &EffectData, modifiers: &[ModifierDef], within: &str) {
+        if !def.lasts() {
+            return;
+        }
+        let feeding: Vec<String> = self
+            .captures
+            .iter()
+            .filter(|capture| {
+                !capture.snapshot
+                    && capture.from == Capture::Target
+                    && modifiers
+                        .iter()
+                        .any(|modifier| modifier.changes == Changes::Attribute(capture.attribute))
+            })
+            .map(|capture| {
+                self.checks
+                    .attributes
+                    .name(capture.attribute)
+                    .unwrap_or("?")
+                    .to_owned()
+            })
+            .collect();
+        for name in feeding {
+            self.invalid(
+                format!(
+                    "a live read of the target's `{name}`, which it changes: it would follow itself"
+                ),
+                within,
+            );
         }
     }
 
@@ -523,4 +653,38 @@ impl Compile<'_> {
             within: Some(within.to_owned()),
         });
     }
+}
+
+/// `terms` as `node`, or as one value if every one is: `value` folded with
+/// `op`, from `identity`.
+fn fold(
+    terms: Vec<MagnitudeDef>,
+    identity: f32,
+    op: impl Fn(f32, f32) -> f32,
+    node: impl Fn(Vec<MagnitudeDef>) -> MagnitudeDef,
+) -> MagnitudeDef {
+    let mut constant = identity;
+    let mut rest = Vec::new();
+    for term in terms {
+        match term {
+            MagnitudeDef::Value(value) => constant = op(constant, value),
+            term => rest.push(term),
+        }
+    }
+    if rest.is_empty() {
+        return MagnitudeDef::Value(constant);
+    }
+    if constant.to_bits() != identity.to_bits() {
+        rest.insert(0, MagnitudeDef::Value(constant));
+    }
+    if rest.len() == 1 {
+        return rest.remove(0);
+    }
+    node(rest)
+}
+
+/// `value`, kept within `min` and `max`.
+pub(crate) fn clamp(value: f32, min: Option<f32>, max: Option<f32>) -> f32 {
+    let value = min.map_or(value, |min| value.max(min));
+    max.map_or(value, |max| value.min(max))
 }

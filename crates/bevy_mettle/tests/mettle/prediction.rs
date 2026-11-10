@@ -61,11 +61,13 @@ struct Cast;
 #[derive(Route)]
 struct Price;
 
-fn route_price(_: &ExecutionContext, price: f32) -> Vec<BaseChange> {
-    vec![
-        BaseChange::new(id::<Mana>(), Operation::Flat, -price),
-        BaseChange::new(id::<Strength>(), Operation::Flat, 1.0).on_source(),
-    ]
+impl RouteFn for Price {
+    fn route(&self, _: &ExecutionContext, price: f32) -> Vec<BaseChange> {
+        vec![
+            BaseChange::new(id::<Mana>(), Operation::Flat, -price),
+            BaseChange::new(id::<Strength>(), Operation::Flat, 1.0).on_source(),
+        ]
+    }
 }
 
 /// Where a shot is aimed: how far along.
@@ -104,7 +106,7 @@ fn world(role: NetRole) -> TestApp {
         .with(move |app| {
             app.insert_resource(role);
         })
-        .plugins((EffectPlugin::default(), AbilityPlugin))
+        .plugins((EffectPlugin, AbilityPlugin))
         .with(move |app| {
             // The server knows a shot reaches only 10; the client, 100.
             let reach = if role == NetRole::Server { 10.0 } else { 100.0 };
@@ -120,7 +122,7 @@ fn world(role: NetRole) -> TestApp {
                 .add_ability::<Focus>()
                 .add_ability::<Shot>()
                 .add_ability::<Bolt>()
-                .add_route::<Price>(route_price)
+                .add_route(Price)
                 .add_effect::<FireballCooldown>()
                 .add_effect::<Burn>()
                 .add_effect::<Ward>()

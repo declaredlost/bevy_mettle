@@ -15,7 +15,7 @@ gives an entity its modifiers with `modifiers(..)`, on `EntityCommands` or
 # #[derive(Attribute)] #[attribute(base = 10.0)] struct SpellPower;
 # #[derive(Attribute)] #[attribute(base = 100.0, min = 0.0)] struct Mana;
 # let mut app = App::new();
-# app.add_plugins(MettlePlugins.set(AttributePlugin::new(Update)))
+# app.add_plugins((MinimalPlugins, MettlePlugins.set(MettleCorePlugin::new(Update))))
 #     .add_attribute::<SpellPower>()
 #     .add_attribute::<Mana>();
 # let world = app.world_mut();
@@ -89,7 +89,7 @@ Here they are all at once on the mage's spell power:
 # use bevy_mettle::prelude::*;
 # #[derive(Attribute)] #[attribute(base = 10.0)] struct SpellPower;
 # let mut app = App::new();
-# app.add_plugins(MettlePlugins.set(AttributePlugin::new(Update)))
+# app.add_plugins((MinimalPlugins, MettlePlugins.set(MettleCorePlugin::new(Update))))
 #     .add_attribute::<SpellPower>();
 # let world = app.world_mut();
 let mage = world
@@ -133,7 +133,7 @@ what the server serves ([Prediction](prediction.md)).
 # use bevy_mettle::prelude::*;
 # #[derive(Attribute)] #[attribute(base = 10.0)] struct SpellPower;
 # let mut app = App::new();
-# app.add_plugins(MettlePlugins.set(AttributePlugin::new(Update)))
+# app.add_plugins((MinimalPlugins, MettlePlugins.set(MettleCorePlugin::new(Update))))
 #     .add_attribute::<SpellPower>();
 let mage = app.world_mut().spawn(Base::<SpellPower>::default()).id();
 app.world_mut()
@@ -172,7 +172,7 @@ context](reading.md#local-modifiers) shows how a read names one.
 # #[derive(Attribute)] #[attribute(base = 10.0)] struct SpellPower;
 # #[derive(Attribute)] #[attribute(base = 100.0, min = 0.0)] struct Mana;
 # let mut app = App::new();
-# app.add_plugins(MettlePlugins.set(AttributePlugin::new(Update)))
+# app.add_plugins((MinimalPlugins, MettlePlugins.set(MettleCorePlugin::new(Update))))
 #     .add_attribute::<SpellPower>()
 #     .add_attribute::<Mana>();
 #[derive(Tag)]
@@ -221,7 +221,8 @@ the mage `state.casting` while it casts. Effects grant tags, such as
 `owner_has("state")` holds while the mage owns `state.casting`.
 
 Mettle tells owned tags coming and going with [`TagAdded`] and
-[`TagRemoved`] in [`AttributeSystems`], before values are worked out.
+[`TagRemoved`] as attributes are folded ([`AttributeFold`]), before values
+are worked out.
 [Gameplay tags](tags.md) covers them.
 
 ## In data
@@ -268,7 +269,7 @@ struct Casting;
 
 fn app(role: NetRole) -> App {
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, MettlePlugins.set(AttributePlugin::new(Update))))
+    app.add_plugins((MinimalPlugins, MettlePlugins.set(MettleCorePlugin::new(Update))))
         .add_attribute::<SpellPower>()
         .add_tag::<Casting>()
         .insert_resource(role)
@@ -335,7 +336,7 @@ replicates ([Over lightyear](lightyear.md)).
 [`OwnedTags`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.OwnedTags.html
 [`TagAdded`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagAdded.html
 [`TagRemoved`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagRemoved.html
-[`AttributeSystems`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/struct.AttributeSystems.html
+[`AttributeFold`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/struct.AttributeFold.html
 [`AttributeId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.AttributeId.html
 [`AttributeRegistry`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/registry/struct.AttributeRegistry.html
 [`ModifierSpec`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.ModifierSpec.html

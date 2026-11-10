@@ -15,14 +15,28 @@ use crate::common::{Damage, Life, Mana, Strength, actor, attributes, close, get,
 #[attribute(min = 0.0)]
 struct Shield;
 
-/// Damage dealt, before the shield takes its share: what hits deal.
+/// Damage dealt, before the shield takes its share: what hits deal, routed
+/// by the router it's added with.
 #[derive(Route)]
-struct IncomingDamage;
+struct IncomingDamage(fn(&ExecutionContext, f32) -> Vec<BaseChange>);
+
+impl RouteFn for IncomingDamage {
+    fn route(&self, cx: &ExecutionContext, amount: f32) -> Vec<BaseChange> {
+        (self.0)(cx, amount)
+    }
+}
 
 /// A price paid in life: what a blood spell costs.
 #[derive(Route)]
 #[route(name = "blood_price")]
 struct BloodPrice;
+
+/// A price paid from life.
+impl RouteFn for BloodPrice {
+    fn route(&self, _: &ExecutionContext, price: f32) -> Vec<BaseChange> {
+        vec![BaseChange::new(id::<Life>(), Operation::Flat, -price)]
+    }
+}
 
 /// A hit, dealing damage as content says.
 #[derive(Effect)]
@@ -36,6 +50,19 @@ struct Strike;
 #[derive(Execution)]
 #[execution(name = "strike")]
 struct StrikeDamage;
+
+impl ExecutionFn for StrikeDamage {
+    fn execute(&self, context: &ExecutionContext) -> Vec<BaseChange> {
+        let damage = context
+            .source()
+            .and_then(|source| context.value::<Damage>(source, &AttributeContext::new()))
+            .unwrap_or_default();
+        vec![BaseChange::route(
+            context.route_id::<IncomingDamage>().expect("a route"),
+            damage,
+        )]
+    }
+}
 
 /// A price paid in life.
 #[derive(Effect)]
@@ -64,11 +91,6 @@ fn route_damage(context: &ExecutionContext, damage: f32) -> Vec<BaseChange> {
     ]
 }
 
-/// A price paid from life.
-fn route_price(_: &ExecutionContext, price: f32) -> Vec<BaseChange> {
-    vec![BaseChange::new(id::<Life>(), Operation::Flat, -price)]
-}
-
 const TAGS: &[&str] = &["state"];
 
 fn tags() -> TagRegistry {
@@ -86,18 +108,9 @@ fn code(app: &mut App) {
     with_shield(app);
     app.init_resource::<EffectRegistry>()
         .init_resource::<CalculationRegistry>()
-        .add_route::<IncomingDamage>(route_damage)
-        .add_route::<BloodPrice>(route_price)
-        .add_execution::<StrikeDamage>(|context: &ExecutionContext| {
-            let damage = context
-                .source()
-                .and_then(|source| context.value::<Damage>(source, &AttributeContext::new()))
-                .unwrap_or_default();
-            vec![BaseChange::route(
-                context.route_id::<IncomingDamage>().expect("a route"),
-                damage,
-            )]
-        });
+        .add_route(IncomingDamage(route_damage))
+        .add_route(BloodPrice)
+        .add_execution(StrikeDamage);
 }
 
 /// `effects`, checked against what `world` has, into its effect registry.
@@ -132,7 +145,7 @@ fn load(app: &mut App, effects: &[EffectData]) {
 /// names.
 fn app<E: Effect>(effects: &[EffectData]) -> TestApp {
     TestApp::builder()
-        .plugins(EffectPlugin::default())
+        .plugins(EffectPlugin)
         .with(|app| {
             code(app);
             app.add_effect::<E>();
@@ -221,16 +234,16 @@ fn what_an_execution_changes_is_told_as_it_was_kept() {
 fn routing_is_single_pass() {
     // A router dealing a route: what it deals it is dropped.
     let mut app = TestApp::builder()
-        .plugins(EffectPlugin::default())
+        .plugins(EffectPlugin)
         .with(|app| {
             code(app);
             app.add_effect::<Hit>()
-                .add_route::<IncomingDamage>(|context, damage| {
+                .add_route(IncomingDamage(|context, damage| {
                     vec![
                         BaseChange::route(context.route_id::<BloodPrice>().unwrap(), damage),
                         BaseChange::new(id::<Mana>(), Operation::Flat, -damage),
                     ]
-                });
+                }));
             load(app, &[hit(10.0)]);
         })
         .build();
@@ -262,11 +275,13 @@ fn a_route_is_dealt_flat_by_what_executes_and_never_read() {
     let scaled = EffectData::instant("scaled").modifier(additive);
     let reads = EffectData::instant("reads").modifier(EffectModifier::new::<Strength>(
         Operation::Flat,
-        Magnitude::Attribute {
+        Magnitude::Attribute(AttributeRead {
             attribute: Name::from_static("incoming_damage"),
             from: Capture::Source,
-            coefficient: 1.0,
-        },
+            value: Read::Current,
+            snapshot: true,
+            tags: Tags::new(),
+        }),
     ));
     let periodic = EffectData::lasting("bleed", 5.0)
         .period(1.0, false)
@@ -312,7 +327,7 @@ fn an_ability_paid_through_a_route_is_checked_as_routed() {
     let price =
         EffectData::instant("bolt.cost").modifier(EffectModifier::route::<BloodPrice>(30.0));
     let mut app = TestApp::builder()
-        .plugins((EffectPlugin::default(), AbilityPlugin))
+        .plugins((EffectPlugin, AbilityPlugin))
         .with(|app| {
             code(app);
             app.add_behaviour::<CastBolt>().add_ability::<Bolt>();

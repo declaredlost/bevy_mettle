@@ -18,6 +18,12 @@ struct Fireball;
 #[derive(Effect, Execution)]
 struct Burn;
 
+impl ExecutionFn for Burn {
+    fn execute(&self, _: &ExecutionContext) -> Vec<BaseChange> {
+        vec![BaseChange::new(id::<Life>(), Operation::Flat, -5.0)]
+    }
+}
+
 /// The fireball, its cost and cooldown, and a burn run in code.
 fn content() -> MettleContent {
     MettleContent {
@@ -45,9 +51,7 @@ fn code(app: &mut App) -> &mut App {
     app.add_behaviour::<Cast>()
         .add_ability::<Fireball>()
         .add_effect::<Burn>()
-        .add_execution::<Burn>(|_: &ExecutionContext| {
-            vec![BaseChange::new(id::<Life>(), Operation::Flat, -5.0)]
-        })
+        .add_execution(Burn)
 }
 
 /// An app with the attributes, the behaviour and the code `content` names.

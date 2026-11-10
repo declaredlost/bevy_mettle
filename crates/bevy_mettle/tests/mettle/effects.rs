@@ -57,6 +57,24 @@ struct Strike;
 #[execution(name = "strike")]
 struct StrikeDamage;
 
+impl ExecutionFn for StrikeDamage {
+    fn execute(&self, context: &ExecutionContext) -> Vec<BaseChange> {
+        let query = AttributeContext::new();
+        let damage = context
+            .source()
+            .and_then(|source| context.value::<Damage>(source, &query))
+            .unwrap_or_default();
+        let resist = context
+            .value::<Resistance>(context.target, &AttributeContext::new().tag(FIRE))
+            .unwrap_or_default();
+        vec![BaseChange::new(
+            id::<Life>(),
+            Operation::Flat,
+            -damage * (1.0 - resist),
+        )]
+    }
+}
+
 #[derive(Effect)]
 struct Fuse;
 
@@ -82,13 +100,31 @@ struct Buff;
 #[derive(Execution)]
 struct Burn;
 
+impl ExecutionFn for Burn {
+    fn execute(&self, _: &ExecutionContext) -> Vec<BaseChange> {
+        Vec::new()
+    }
+}
+
 /// The level, squared.
 #[derive(Calculation)]
 struct LevelSquared;
 
+impl CalculationFn for LevelSquared {
+    fn calculate(&self, context: &ExecutionContext) -> f32 {
+        context.level() * context.level()
+    }
+}
+
 /// A number that isn't one.
 #[derive(Calculation)]
 struct Nan;
+
+impl CalculationFn for Nan {
+    fn calculate(&self, _: &ExecutionContext) -> f32 {
+        f32::NAN
+    }
+}
 
 /// The tags the effects name.
 const TAGS: &[&str] = &[
@@ -153,7 +189,7 @@ fn registry(world: &World, effects: &[EffectData]) -> EffectRegistry {
 fn app(effects: &[EffectData], code: impl FnOnce(&mut App)) -> TestApp {
     TestApp::builder()
         .with(attributes)
-        .plugins(EffectPlugin::default())
+        .plugins(EffectPlugin)
         .with(|app| {
             app.insert_resource(tags()).insert_resource(curves());
             code(app);
@@ -457,20 +493,18 @@ fn magnitudes_come_from_curves_params_attributes_and_code() {
     ));
     let captured = EffectData::instant("captured").modifier(EffectModifier::new::<Damage>(
         Operation::Flat,
-        Magnitude::source::<Strength>(0.5),
+        Magnitude::source::<Strength>().times(0.5),
     ));
     let custom = EffectData::instant("custom").modifier(EffectModifier::new::<Damage>(
         Operation::Flat,
         Magnitude::Custom(Name::from_static("level_squared")),
     ));
     let mut app = app(&[curve, param, captured, custom], |app| {
-        app.add_calculation::<LevelSquared>(|context: &ExecutionContext| {
-            context.level() * context.level()
-        })
-        .add_effect::<Curve>()
-        .add_effect::<Param>()
-        .add_effect::<Captured>()
-        .add_effect::<Custom>();
+        app.add_calculation(LevelSquared)
+            .add_effect::<Curve>()
+            .add_effect::<Param>()
+            .add_effect::<Captured>()
+            .add_effect::<Custom>();
     });
     let npc = actor(&mut app, []);
     let caster = actor(&mut app, []);
@@ -490,22 +524,7 @@ fn magnitudes_come_from_curves_params_attributes_and_code() {
 fn an_execution_works_damage_out_from_both_sides() {
     let strike = EffectData::instant("strike").execution("strike");
     let mut app = app(&[strike], |app| {
-        app.add_effect::<Strike>()
-            .add_execution::<StrikeDamage>(|context: &ExecutionContext| {
-                let query = AttributeContext::new();
-                let damage = context
-                    .source()
-                    .and_then(|source| context.value::<Damage>(source, &query))
-                    .unwrap_or_default();
-                let resist = context
-                    .value::<Resistance>(context.target, &AttributeContext::new().tag(FIRE))
-                    .unwrap_or_default();
-                vec![BaseChange::new(
-                    id::<Life>(),
-                    Operation::Flat,
-                    -damage * (1.0 - resist),
-                )]
-            });
+        app.add_effect::<Strike>().add_execution(StrikeDamage);
     });
     let npc = actor(
         &mut app,
@@ -720,7 +739,7 @@ fn a_registry_reports_everything_wrong_at_once() {
 
 #[test]
 fn executions_need_an_instant_effect_or_a_period() {
-    let executions = ExecutionRegistry::default().with::<Burn>(|_: &ExecutionContext| Vec::new());
+    let executions = ExecutionRegistry::default().with(Burn);
     let build = |effect: EffectData| {
         EffectRegistry::check(
             &[effect],
@@ -755,8 +774,7 @@ fn an_effect_whose_duration_cant_be_isnt_applied() {
     let numb = EffectData::lasting("numb", Magnitude::Custom(Name::from_static("nan")))
         .modifier(flat::<Damage>(5.0));
     let mut app = app(&[numb], |app| {
-        app.add_calculation::<Nan>(|_: &ExecutionContext| f32::NAN)
-            .add_effect::<Numb>();
+        app.add_calculation(Nan).add_effect::<Numb>();
     });
     watch(&mut app);
     let npc = actor(&mut app, []);
@@ -823,7 +841,7 @@ fn an_attribute_magnitude_is_captured_as_the_effect_applies() {
     let might = EffectData::infinite("might")
         .modifier(EffectModifier::new::<Damage>(
             Operation::Flat,
-            Magnitude::source::<Strength>(1.0),
+            Magnitude::source::<Strength>(),
         ))
         .stacking(Stacking {
             by: StackBy::Target,

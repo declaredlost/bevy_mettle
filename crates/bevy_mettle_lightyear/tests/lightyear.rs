@@ -8,6 +8,7 @@ use core::time::Duration;
 use bevy::app::Plugins;
 use bevy::ecs::entity::MapEntities;
 use bevy::prelude::*;
+use bevy::reflect::TypeRegistry;
 use bevy::state::app::StatesPlugin;
 use bevy_harness::{TestApp, TestWorld};
 use bevy_mettle_ability::data::NetExecution;
@@ -139,15 +140,8 @@ fn in_reach(In(check): In<InputCheck<Aim>>, reach: Res<Reach>) -> bool {
 
 /// The game's own on an effect's context: what a shot marked, and whether
 /// it was a headshot. Added on both sides.
-#[derive(
-    ContextData,
-    Clone,
-    Debug,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    MapEntities
-)]
+#[derive(Reflect, Clone, Debug, PartialEq, Serialize, Deserialize, MapEntities)]
+#[reflect(ContextData)]
 struct Impact {
     #[entities]
     marked: Entity,
@@ -155,15 +149,8 @@ struct Impact {
 }
 
 /// The game's own too, added after [`Impact`].
-#[derive(
-    ContextData,
-    Clone,
-    Debug,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    MapEntities
-)]
+#[derive(Reflect, Clone, Debug, PartialEq, Serialize, Deserialize, MapEntities)]
+#[reflect(ContextData)]
 struct Wound {
     deep: bool,
 }
@@ -172,7 +159,7 @@ struct Wound {
 fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
     app.insert_resource(role)
         .add_attribute::<Mana>()
-        .add_plugins((EffectPlugin::default(), AbilityPlugin))
+        .add_plugins((EffectPlugin, AbilityPlugin))
         .add_behaviour::<Cast>()
         .add_behaviour::<Shoot>()
         .add_behaviour::<Smiting>()
@@ -194,8 +181,8 @@ fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
         .add_ability::<Scope>()
         .add_effect::<FireballCost>()
         .add_effect::<FireballCooldown>()
-        .add_context_data::<Impact>()
-        .add_context_data::<Wound>()
+        .register_type::<Impact>()
+        .register_type::<Wound>()
         .insert_resource(Reach(if role == NetRole::Server { 10.0 } else { 100.0 }))
         .add_plugins(MettleNetPlugin { replicas })
         .replicate_attribute::<Mana>()
@@ -1221,11 +1208,10 @@ fn context_data_is_numbered_by_name_whatever_order_its_added_in() {
     world.ticks(20);
     assert_eq!(world["client"].resource::<Mismatches>().0, [], "alike");
     // The client adds the same types, the other way round: numbered alike.
-    let mut reversed = App::new();
-    reversed
-        .add_context_data::<Wound>()
-        .add_context_data::<Impact>();
-    let reversed = reversed.world().resource::<ContextDataRegistry>().clone();
+    let mut reversed = TypeRegistry::empty();
+    reversed.register::<Wound>();
+    reversed.register::<Impact>();
+    let reversed = ContextDataRegistry::of(&reversed);
     world["client"].insert_resource(reversed);
     world.ticks(20);
     assert_eq!(
@@ -1234,9 +1220,9 @@ fn context_data_is_numbered_by_name_whatever_order_its_added_in() {
         "the same types, numbered alike"
     );
     // The client lacks one the server adds: told.
-    let mut fewer = App::new();
-    fewer.add_context_data::<Impact>();
-    let fewer = fewer.world().resource::<ContextDataRegistry>().clone();
+    let mut fewer = TypeRegistry::empty();
+    fewer.register::<Impact>();
+    let fewer = ContextDataRegistry::of(&fewer);
     world["client"].insert_resource(fewer);
     world.ticks(20);
     let seen = world["client"].resource::<Mismatches>().0.clone();
@@ -1335,6 +1321,90 @@ fn a_replicated_effects_context_names_the_clients_entities() {
         })
     );
     assert_eq!(context.get::<Wound>(), Some(&Wound { deep: true }));
+}
+
+#[test]
+fn context_data_registered_by_reflection_is_numbered_alike_on_both_sides() {
+    let world = net();
+    let server = world["server"].resource::<ContextDataRegistry>().clone();
+    let client = world["client"].resource::<ContextDataRegistry>().clone();
+    for (impact, wound) in [
+        (server.id_of::<Impact>(), server.id_of::<Wound>()),
+        (client.id_of::<Impact>(), client.id_of::<Wound>()),
+    ] {
+        assert!(
+            impact.is_some() && wound.is_some(),
+            "registered as context data"
+        );
+        assert_ne!(impact, wound);
+    }
+    assert_eq!(server.id_of::<Impact>(), client.id_of::<Impact>());
+    assert_eq!(server.id_of::<Wound>(), client.id_of::<Wound>());
+}
+
+#[test]
+fn a_snapshot_replicates_and_the_client_shows_the_servers() {
+    let mut world = net();
+    // Half the caster's mana, snapshotted.
+    let siphon = EffectData::infinite("siphon").modifier(EffectModifier::new::<Mana>(
+        Operation::Flat,
+        Magnitude::source::<Mana>().times(0.5),
+    ));
+    reload_with(world["server"].world_mut(), std::slice::from_ref(&siphon));
+    reload_with(world["client"].world_mut(), &[siphon]);
+    let (there, here) = mage(&mut world, true);
+    let caster = world["server"].spawn((
+        Base::<Mana>::new(40.0),
+        Replicate::to_clients(NetworkTarget::All),
+    ));
+    world.ticks(2);
+    let siphon = world["server"]
+        .resource::<EffectRegistry>()
+        .id("siphon")
+        .expect("reloaded");
+    // Snapshotted as it's made, then the caster drained before it's applied.
+    let made = world["server"]
+        .world()
+        .snapshot(EffectSpec::from_id(siphon).source(caster));
+    world["server"]
+        .entity_mut(caster)
+        .get_mut::<Base<Mana>>()
+        .unwrap()
+        .set(10.0);
+    world["server"].world_mut().apply_effect(there, made);
+    world
+        .until(|world| {
+            world["client"]
+                .entity(here)
+                .try_get::<ActiveEffects>()
+                .is_some_and(|effects| effects.iter().count() == 1)
+        })
+        .describe("the siphon replicates")
+        .within_ticks(20);
+    world.ticks(10);
+    let caster_here = mapped(&world["client"], caster).expect("the caster replicated");
+    let client = &world["client"];
+    assert!(
+        same(mana(client, caster_here), 10.0),
+        "the client has the caster as it is now"
+    );
+    let shown = client
+        .entity(here)
+        .get::<ActiveEffects>()
+        .iter()
+        .next()
+        .unwrap();
+    assert_eq!(
+        client.entity(shown).get::<EffectReplica>().captured,
+        [Some(40.0)],
+        "what the server captured, sent"
+    );
+    assert!(same(mana(&world["server"], there), 50.0), "30 and 20");
+    assert!(
+        same(mana(client, here), 50.0),
+        "the server's capture shown, not the caster read here: {}",
+        mana(client, here)
+    );
 }
 
 #[test]

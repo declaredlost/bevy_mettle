@@ -220,6 +220,10 @@ activation, a client's prediction of it is taken back if the server rejects
 the activation ([Prediction](prediction.md)); one applied without it stays.
 The ability's cost and cooldown are applied the same way.
 
+A projectile that lands later should hit with its caster's attributes as it
+was cast. Take the spec's snapshot as it's made, `snapshots.take(spec)`, and
+carry it: see [Snapshots](applying-effects.md#snapshots).
+
 Add it like any other system:
 
 ```rust,no_run

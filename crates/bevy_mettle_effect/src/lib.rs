@@ -13,10 +13,12 @@ pub mod net;
 mod plugin;
 pub mod prelude;
 mod registry;
+mod snapshot;
 mod spec;
 mod systems;
 
 pub use self::commands::{EffectCommands, EffectWorld};
-pub use self::plugin::{EffectPlugin, EffectSystems};
+pub use self::plugin::EffectPlugin;
 pub use self::registry::{EffectChecks, EffectRegistry};
-pub use self::spec::{Effect, EffectSpec, IntoEffectId};
+pub use self::snapshot::Snapshots;
+pub use self::spec::{Effect, EffectSpec, IntoEffectId, Snapshot};

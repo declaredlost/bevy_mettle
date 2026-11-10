@@ -9,12 +9,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Mettle`, the schedule mettle's gameplay runs in, and its steps,
+  `MettleSet::{Effects, Attributes, Settle, Publish}`, in order.
+  `MettleCorePlugin` runs it, in `FixedPostUpdate` unless
+  `MettleCorePlugin::new` says otherwise, from a system in `MettleSystems`,
+  which game systems order themselves against. Every part's plugin adds it
+  if it isn't there yet (`schedule::ensure`); `MettlePlugins` has it first.
+  `Mettle`, `MettleSet`, `MettleSystems` and `MettleCorePlugin` are in the
+  preludes.
+- `AttributeFold`: the schedule attributes are folded in, run from
+  `MettleSet::Attributes`: bases synced, modifiers folded, values worked
+  out, bases following their limits. `Current<A>` and `AttributeChanged`
+  are published in `MettleSet::Publish`.
+- Live reads settle in the step they move: in `MettleSet::Settle`, effects
+  whose live reads moved are worked out again and attributes folded again,
+  until nothing moves, up to 8 rounds. What's published is settled: an
+  `AttributeChanged` is told once, with the settled value. What's left
+  after 8 rounds follows on the next step, with a warning once.
+- Magnitudes as small expressions: terms `Value`, `Level`, `Param`,
+  `Attribute` (an `AttributeRead`), `Custom` and `Curve { curve, at }` (at
+  the level unless it says), combined by `Sum`, `Product` and `Clamp`.
+  Unreal's magnitude kinds are compositions of them: a scalable float is a
+  value times a curve at the level; an attribute-based magnitude's
+  coefficient and additions, a product and a sum, each part any magnitude;
+  an attribute curve, a curve at an attribute; a custom calculation's
+  coefficient, a product. Builders: `Magnitude::curve`, `curve_at`,
+  `times`, `plus` and `clamp`. Checked into a `MagnitudeDef` of numbers,
+  its constants folded. Content is rejected for a sum or product of nothing
+  or a clamp whose least is above its most.
+- `AttributeRead`: which attribute an `Attribute` magnitude reads, whose
+  (`Capture`), which of its values (`Read`: `Current`, `Base`, or `Bonus`,
+  its current value less its base), in what tags (Unreal's tag filters), and
+  whether it's a snapshot. Started by `Magnitude::source::<A>()` or
+  `target::<A>()`, then `.base()`, `.bonus()`, `.live()`, `.tagged(..)`,
+  `.times(..)`, `.plus(..)`. Read as the hit it's part of: in the effect's
+  tags and its own, with its target and source and what each owns, so
+  modifiers counting for such hits count.
+- Snapshot and live captures, as Unreal's `bSnapshot`. A snapshot (the
+  default) is taken at the earliest moment and kept: a source's as the spec
+  is made, if its snapshot is taken, or as it's applied; a target's as it's
+  applied. A live read is read as it's needed, and a lasting effect follows
+  it, its modifiers worked out again in the step the attribute changes,
+  only for the effects reading the actor that changed. Content is rejected
+  for a lasting effect reading live what it changes of the target's.
+- `EffectWorld::snapshot` and the `Snapshots` system param (`take`): a spec
+  with its source's snapshot captures taken now, in its `snapshot`
+  (`Snapshot`), for a projectile to carry its caster's attributes as it was
+  cast.
+- Declared captures: `#[execution(source(A, ..), target(B, ..))]` and
+  `#[calculation(..)]`, with the `AttributeRead` options (`base`, `bonus`,
+  `live`, `tagged(..)`), as `Execution::captures` and
+  `Calculation::captures`. They're the effect's captures like its
+  magnitudes': snapshotted, replicated and checked.
+- `ExecutionContext::captured::<A>(Capture)`: what the running execution or
+  calculation declared it captures, as Unreal's
+  `AttemptCalculateCapturedAttributeMagnitude`.
+- `ReflectContextData`: `#[reflect(ContextData)]`, registering a type as
+  context data, and `ContextDataRegistry`, built from the type registry.
+- `Registry::add_type`: adding an entry by a type known only at runtime, as
+  reflection knows it.
+- `AttributeReader::base_at`: an actor's base of an attribute, by number.
+
 - An effect spec's context, Unreal's `FGameplayEffectContext`:
   `EffectSpec::context`, an `EffectContext` of its `source`, `causer` (what
   struck), `object` (what it came from), `ability` (an `AbilityRef`: which
   ability, at what level), `hit` (a `Hit`: point and normal) and `origin`,
   each with a builder on the spec. A game adds its own with a `ContextData`
-  type (`#[derive(ContextData)]`, `add_context_data`, `.with(..)`,
+  type (`#[reflect(ContextData)]`, `register_type`, `.with(..)`,
   `get::<C>()`). Executions and calculations read it; chained effects carry
   it; `EffectExecuted` and `CueExecuted` are told it, and a `Cue` plays with
   it (`CueExecuted::location` and `normal` read its hit). It's replicated
@@ -58,12 +119,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MettlePlugins`: the plugin of every part its features enable. With
   `lightyear`, it carries `MettleNetPlugin`, and goes after lightyear's
   plugins.
-- `MettleSystems` and `MettleSystemsPlugin`: every part's set in it, in each
-  schedule it runs in; abilities, then effects, then attributes where they
-  share one.
 - The facade's `lightyear` feature: `bevy_mettle_lightyear` as
   `bevy_mettle::lightyear`, in the prelude.
-- `AttributePlugin::schedule` and `EffectPlugin::schedule`.
 - `bevy_mettle_lightyear`'s prelude.
 - The bevy_mettle book: a guide to every part, its examples compiled as
   doctests.
@@ -136,6 +193,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   however often it was predicted.
 
 ### Changed
+
+- `AttributePlugin` and `EffectPlugin` are unit structs, run in `Mettle`:
+  `AttributePlugin::new` and `EffectPlugin::new` are gone. Run mettle
+  elsewhere with `MettlePlugins.set(MettleCorePlugin::new(..))`.
+- `AttributeSystems`, the `AttributeSchedule` resource and `EffectSystems`
+  are gone: effects run in `MettleSet::Effects`, attributes in
+  `MettleSet::Attributes`. Cues stay in `PostUpdate` (`CueSystems`), and
+  abilities' network messages in `PreUpdate` (`AbilitySystems`).
+- The facade's `MettleSystems` and `MettleSystemsPlugin` are gone:
+  `MettleSystems` is core's, holding the system that runs `Mettle`.
+- `ExecutionFn::execute`, `CalculationFn::calculate` and `RouteFn::route`
+  take `&self`, on the code's own type, and a value of it is registered:
+  `add_execution(FireDamage)`, `add_calculation(BurnTime { per: 25.0 })`,
+  `add_route(IncomingDamage)`.
+- `Magnitude::source::<A>()` and `Magnitude::target::<A>()` take no
+  coefficient: `.times(..)` scales them.
+- `Magnitude::Scaled` and an `Attribute` magnitude's `coefficient` are
+  gone, folded into expressions: `Magnitude::scaled` builds the product of
+  a value and a curve, and `Attribute` holds an `AttributeRead`.
+- `ContextData` is by reflection: any type deriving `Reflect`, `Clone`,
+  `PartialEq`, `Serialize`, `Deserialize` and `MapEntities` is one,
+  registered with `#[reflect(ContextData)]` and `app.register_type::<T>()`.
+  Its derive and `add_context_data` are gone. Types are numbered by type
+  path once the app's built, in `EffectPlugin::finish`.
 
 - `bevy_mettle_ability::net` is one module: its messages and replica are at
   `net::` (`net::AbilityRequest`, `net::AbilityEnd`, …), its parts private.
@@ -330,6 +411,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An effect's change is folded in the fixed step it's made: attributes ran
+  in `FixedPreUpdate` and effects in `FixedUpdate`, so what effects changed
+  was folded a tick late.
 - A one-shot cue's burst maps its entities as it's replicated: its source
   arrived unmapped.
 - On a client, `activate_tagged` and `activate` on a granted ability run

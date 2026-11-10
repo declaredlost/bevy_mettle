@@ -3,30 +3,21 @@
 
 use bevy::prelude::*;
 use bevy_mettle_attribute::modifier::{Modifier, Operation};
-use bevy_mettle_attribute::read::AttributeContext;
+use bevy_mettle_attribute::read::{AttributeContext, AttributeWorld};
 use bevy_mettle_attribute::registry::AttributeRegistry;
 use bevy_mettle_core::registry::AttributeId;
-use bevy_mettle_core::tag::{OwnedTags, TagCounts};
+use bevy_mettle_core::tag::{OwnedTags, TagCounts, Tags};
 
 use super::{Check, count, source_tags};
 use crate::active::{ActiveEffect, EffectOf};
 use crate::code::{BaseChange, Changes, ExecutionContext, RouteId, Whose};
 use crate::cue::Cue;
-use crate::data::{Capture, EffectDef, MagnitudeDef};
+use crate::data::{Capture, CaptureDef, EffectDef, MagnitudeDef, Read};
 use crate::events::{Delta, EffectExecuted, Routed};
 use crate::{EffectRegistry, EffectSpec, net};
 
-/// How much `magnitude` is: as `captured`, if it was.
-pub(super) fn magnitude(
-    context: &ExecutionContext,
-    registry: &EffectRegistry,
-    magnitude: &MagnitudeDef,
-    captured: Option<f32>,
-) -> f32 {
-    captured.unwrap_or_else(|| resolve(context, registry, magnitude))
-}
-
-/// How much `magnitude` is, for `context`.
+/// How much `magnitude` is, for `context`: its attributes as `context`
+/// captured them, or read now.
 pub(super) fn resolve(
     context: &ExecutionContext,
     registry: &EffectRegistry,
@@ -34,12 +25,7 @@ pub(super) fn resolve(
 ) -> f32 {
     match magnitude {
         MagnitudeDef::Value(value) => *value,
-        MagnitudeDef::Scaled { base, curve } => {
-            base * registry
-                .curves()
-                .at(*curve, context.spec.level)
-                .unwrap_or_default()
-        }
+        MagnitudeDef::Level => context.spec.level,
         MagnitudeDef::Param(param) => context.spec.param_value(*param).unwrap_or_else(|| {
             warn!(
                 "effect `{}` reads {param:?}, which its spec doesn't set: 0",
@@ -47,24 +33,80 @@ pub(super) fn resolve(
             );
             0.0
         }),
-        MagnitudeDef::Attribute {
-            attribute,
-            from,
-            coefficient,
-        } => {
-            let whose = match from {
-                Capture::Source => context.spec.context.source,
-                Capture::Target => Some(context.target),
-            };
-            whose
-                .and_then(|entity| context.value_at(entity, *attribute, &AttributeContext::new()))
-                .unwrap_or_default()
-                * coefficient
-        }
-        MagnitudeDef::Custom(calculation) => registry
+        MagnitudeDef::Attribute(slot) => captured(context, *slot),
+        MagnitudeDef::Custom(calculation, reads) => registry
             .calculation(*calculation)
-            .map_or(0.0, |calculate| calculate(context)),
+            .map_or(0.0, |calculation| {
+                calculation.calculate(&ExecutionContext { reads, ..*context })
+            }),
+        MagnitudeDef::Curve { curve, at } => registry
+            .curves()
+            .at(*curve, resolve(context, registry, at))
+            .unwrap_or_default(),
+        MagnitudeDef::Sum(terms) => terms
+            .iter()
+            .map(|term| resolve(context, registry, term))
+            .sum(),
+        MagnitudeDef::Product(terms) => terms
+            .iter()
+            .map(|term| resolve(context, registry, term))
+            .product(),
+        MagnitudeDef::Clamp { value, min, max } => {
+            crate::registry::clamp(resolve(context, registry, value), *min, *max)
+        }
     }
+}
+
+/// The value in `context`'s capture `slot`: as captured, or read now if it's
+/// read live or wasn't taken.
+pub(crate) fn captured(context: &ExecutionContext, slot: usize) -> f32 {
+    if let Some(value) = context.captured.get(slot).copied().flatten() {
+        return value;
+    }
+    context
+        .def
+        .captures
+        .get(slot)
+        .and_then(|capture| read(context, capture))
+        .unwrap_or_default()
+}
+
+/// What `capture` reads now, if whose it is has it.
+pub(super) fn read(context: &ExecutionContext, capture: &CaptureDef) -> Option<f32> {
+    let source = context.spec.context.source;
+    let whose = match capture.from {
+        Capture::Source => source?,
+        Capture::Target => context.target,
+    };
+    let tags = hit_tags(context.def, capture);
+    let world = context.world;
+    let mut hit = AttributeContext::new().tags(&tags);
+    if let Some(owned) = world.get::<OwnedTags>(context.target) {
+        hit = hit.target_tags(owned);
+    }
+    if let Some(source) = source {
+        hit = hit.source(source);
+        if let Some(owned) = world.get::<OwnedTags>(source) {
+            hit = hit.source_tags(owned);
+        }
+    }
+    let current = || context.value_at(whose, capture.attribute, &hit);
+    let base = || context.world.base_at(whose, capture.attribute);
+    match capture.value {
+        Read::Current => current(),
+        Read::Base => base(),
+        Read::Bonus => Some(current()? - base()?),
+    }
+}
+
+/// What `capture` is read in: its effect's tags and its own, as a hit's
+/// attributes are, so modifiers counting for such hits count.
+pub(crate) fn hit_tags(def: &EffectDef, capture: &CaptureDef) -> Tags {
+    let mut tags = capture.tags.clone();
+    for tag in def.tags.written() {
+        tags.insert(tag);
+    }
+    tags
 }
 
 /// What executing an effect works out: the changes it makes to bases, and
@@ -104,9 +146,11 @@ pub(super) fn changes(
         def,
         spec,
         stacks,
+        captured,
+        reads: &[],
     };
     let mut changes = Vec::new();
-    for (index, modifier) in def.modifiers.iter().enumerate() {
+    for modifier in &def.modifiers {
         let weight = modifier
             .condition
             .as_ref()
@@ -114,8 +158,7 @@ pub(super) fn changes(
         if weight <= 0.0 || (modifier.op.whole() && weight < 1.0) {
             continue;
         }
-        let captured = captured.get(index).copied().flatten();
-        let mut value = magnitude(&context, registry, &modifier.value, captured);
+        let mut value = resolve(&context, registry, &modifier.value);
         if !modifier.op.whole() {
             value *= count(stacks) * weight;
         }
@@ -132,9 +175,10 @@ pub(super) fn changes(
             on: Whose::Target,
         });
     }
-    for execution in &def.executions {
-        if let Some(run) = registry.execution(*execution) {
-            changes.extend(run(&context));
+    for (execution, reads) in &def.executions {
+        if let Some(execution) = registry.execution(*execution) {
+            let running = ExecutionContext { reads, ..context };
+            changes.extend(execution.execute(&running));
         }
     }
     route(&context, registry, changes)
@@ -177,7 +221,7 @@ fn route(
         let Some(run) = registered.get(dealt.route) else {
             continue;
         };
-        for change in run(context, dealt.amount) {
+        for change in run.route(context, dealt.amount) {
             if let Changes::Route(other) = change.changes {
                 warn!(
                     "the router of `{}` deals route `{}`: dropped, as routing is single-pass",
@@ -201,7 +245,20 @@ pub(crate) fn preview(world: &World, target: Entity, spec: &EffectSpec) -> Optio
     let registry = world.get_resource::<EffectRegistry>()?;
     let def = registry.get(spec.effect_id(registry)?)?;
     let source_tags = source_tags(world, spec.context.source);
-    Some(changes(world, registry, target, spec, def, 1, &source_tags, &[]).changes)
+    let captured = super::apply::capture(world, target, spec, def);
+    Some(
+        changes(
+            world,
+            registry,
+            target,
+            spec,
+            def,
+            1,
+            &source_tags,
+            &captured,
+        )
+        .changes,
+    )
 }
 
 /// Executes `def` on `target`: its modifiers and executions, changing bases.
@@ -301,19 +358,19 @@ pub(super) fn modifiers(world: &World, registry: &EffectRegistry, effect: Entity
         def: &active.def,
         spec: &active.spec,
         stacks: active.stacks,
+        captured: &active.captured,
+        reads: &[],
     };
     active
         .def
         .modifiers
         .iter()
-        .enumerate()
-        .filter_map(|(index, modifier)| {
+        .filter_map(|modifier| {
             // A route is only dealt as an effect executes: it counts for none.
             let Changes::Attribute(attribute) = modifier.changes else {
                 return None;
             };
-            let captured = active.captured.get(index).copied().flatten();
-            let value = magnitude(&context, registry, &modifier.value, captured);
+            let value = resolve(&context, registry, &modifier.value);
             Some(Modifier {
                 attribute,
                 op: modifier.op,

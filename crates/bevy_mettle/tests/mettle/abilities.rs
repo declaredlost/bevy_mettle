@@ -212,7 +212,7 @@ fn app(abilities: &[AbilityData]) -> TestApp {
     }
     TestApp::builder()
         .with(attributes)
-        .plugins((EffectPlugin::default(), AbilityPlugin))
+        .plugins((EffectPlugin, AbilityPlugin))
         .with(|app| {
             app.add_behaviour::<Cast>()
                 .add_behaviour::<Shoot>()
@@ -539,7 +539,7 @@ fn an_ability_with_everything_checks() {
 fn a_registry_reports_everything_wrong_at_once() {
     let mut app = TestApp::builder()
         .with(attributes)
-        .plugins((EffectPlugin::default(), AbilityPlugin))
+        .plugins((EffectPlugin, AbilityPlugin))
         .build();
     let world = app.world_mut();
     let attributes = world.resource::<AttributeRegistry>().clone();
