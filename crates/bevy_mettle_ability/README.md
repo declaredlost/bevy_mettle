@@ -20,7 +20,7 @@ can do, granted to it, activated, paid for, cooled down and ended.
 
 - An [`AbilityData`] is content, named by its name: the behaviour that runs it, its
   cost and cooldown (effects), what it needs and what blocks it, what it
-  cancels and blocks while active, the tags it grants, and what triggers
+  ends and blocks while active, its owner tags, and what triggers
   it.
 - A behaviour is a component of yours, `#[derive(Behaviour)]`, added with
   [`add_behaviour`]: put on the ability's entity as it activates, for your
@@ -97,11 +97,11 @@ fn load(
     let effects = [
         EffectData::instant("fireball.cost")
             .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-        EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
+        EffectData::lasting("fireball.cooldown", 2.0).owner_tag("cooldown.fireball"),
     ];
-    let effects = EffectRegistry::check(
+    let effects = EffectRegistry::build(
         &effects,
-        EffectChecks {
+        EffectScope {
             tags: &tags,
             curves: &CurveRegistry::default(),
             attributes: &attributes,
@@ -115,10 +115,10 @@ fn load(
         .cost("fireball.cost")
         .cooldown("fireball.cooldown");
     // Checked from the app's registry, which knows `Fireball` is code's.
-    let abilities = abilities.recheck(
+    let abilities = abilities.rebuild(
         &[fireball],
         &[],
-        AbilityChecks {
+        AbilityScope {
             tags: &tags,
             effects: &effects,
             behaviours: &behaviours,

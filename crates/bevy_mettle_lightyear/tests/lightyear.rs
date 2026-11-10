@@ -82,6 +82,10 @@ struct FireballCost;
 #[effect(name = "fireball.cooldown")]
 struct FireballCooldown;
 
+/// Half its caster's mana, snapshotted: only one test's content has it.
+#[derive(Effect)]
+struct Siphon;
+
 #[derive(Component, Default, Behaviour)]
 struct Cast;
 
@@ -108,7 +112,7 @@ fn flare(add: On<Add<Flaring>>, active: Query<&ActiveAbility>, mut commands: Com
     };
     let event =
         GameplayEvent::new(active.actor, TagKey::named("event.spark")).under(active.activation);
-    commands.queue(move |world: &mut World| AbilityWorld::send_event(world, event));
+    commands.trigger(event);
 }
 
 /// Where a shot is aimed: how far along. Sent from clients.
@@ -209,16 +213,16 @@ fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
     let world = app.world_mut();
     let effects = world
         .resource::<EffectRegistry>()
-        .recheck(
+        .rebuild(
             &[
                 EffectData::instant(Key::of::<FireballCost>())
                     .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0))
                     .cue("cue.hit"),
                 EffectData::lasting(Key::of::<FireballCooldown>(), 1.0)
-                    .grant("cooldown.fireball")
+                    .owner_tag("cooldown.fireball")
                     .cue("cue.cooling"),
             ],
-            EffectChecks {
+            EffectScope {
                 tags: &tags,
                 curves: &CurveRegistry::default(),
                 attributes: world.resource(),
@@ -230,10 +234,10 @@ fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
         .unwrap();
     let abilities = world
         .resource::<AbilityRegistry>()
-        .recheck(
+        .rebuild(
             &abilities(),
             &[],
-            AbilityChecks {
+            AbilityScope {
                 tags: &tags,
                 effects: &effects,
                 behaviours: world.resource(),
@@ -251,8 +255,8 @@ fn abilities() -> [AbilityData; 10] {
         .tag("ability")
         .cost(Key::of::<FireballCost>())
         .cooldown(Key::of::<FireballCooldown>())
-        .blocked_by("state.stunned")
-        .cancel_if(Condition::owner_has("state.stunned"));
+        .require(!Condition::owner_has("state.stunned"))
+        .end_if(Condition::owner_has("state.stunned"));
     let shot =
         AbilityData::new(Key::of::<Shot>(), Key::of::<Shoot>()).cost(Key::of::<FireballCost>());
     let smite = AbilityData::new(Key::of::<Smite>(), Key::of::<Smiting>())
@@ -266,7 +270,7 @@ fn abilities() -> [AbilityData; 10] {
         AbilityData::new(Key::of::<Zoom>(), Key::of::<Zooming>()).net(NetExecution::LocalOnly);
     let flare = AbilityData::new(Key::of::<Flare>(), Key::of::<Flaring>())
         .cost(Key::of::<FireballCost>())
-        .blocked_by("state.stunned");
+        .require(!Condition::owner_has("state.stunned"));
     let spark = AbilityData::new(Key::of::<Spark>(), Key::of::<Sparking>())
         .trigger(Trigger::Event(TagKey::named("event.spark")));
     let beacon = AbilityData::new(Key::of::<Beacon>(), Key::of::<Flaring>())
@@ -416,14 +420,15 @@ fn mage(world: &mut TestWorld, controlled: bool) -> (Entity, Entity) {
     (there, mapped(&world["client"], there).unwrap())
 }
 
+/// `spec`, as `app` numbers its attributes.
+fn modifier(app: &TestApp, spec: ModifierSpec) -> Modifier {
+    spec.resolve(app.resource()).expect("an added attribute")
+}
+
 /// `mage`'s mana, as `app` reads it.
 fn mana(app: &TestApp, mage: Entity) -> f32 {
     app.world()
-        .value_at(
-            mage,
-            app.world().attribute_id::<Mana>().unwrap(),
-            &AttributeContext::new(),
-        )
+        .value::<Mana>(mage, &AttributeContext::new())
         .unwrap()
 }
 
@@ -524,11 +529,14 @@ fn an_items_modifiers_replicate_and_count_on_the_client() {
     let (there, here) = mage(&mut world, true);
     // The server's numbers: the client, adding the same attributes in the same
     // order, means the same by them.
-    let id = world["server"].world().attribute_id::<Mana>().unwrap();
+    let server = &world["server"];
     let modifiers = Modifiers(vec![
-        Modifier::flat(id, 5.0),
-        Modifier::additive(id, 1.0).owner_has("state.stunned"),
-        Modifier::flat(id, 100.0).local(),
+        modifier(server, ModifierSpec::flat::<Mana>(5.0)),
+        modifier(
+            server,
+            ModifierSpec::additive::<Mana>(1.0).owner_has("state.stunned"),
+        ),
+        modifier(server, ModifierSpec::flat::<Mana>(100.0).local()),
     ]);
     let ring = world["server"].spawn((
         ModifierOf(there),
@@ -547,12 +555,15 @@ fn an_items_modifiers_replicate_and_count_on_the_client() {
 fn a_sources_modifiers_go_by_number_and_count_in_the_clients_own_fold() {
     let mut world = net();
     let (there, here) = mage(&mut world, true);
-    let id = world["server"].world().attribute_id::<Mana>().unwrap();
+    let tagged = modifier(
+        &world["server"],
+        ModifierSpec::flat::<Mana>(7.0).read_tagged("state"),
+    );
     // Counted for reads tagged `state` alone: the client's own fold, not the
     // value the server sends.
     let ring = world["server"].spawn((
         ModifierOf(there),
-        Modifiers(vec![Modifier::flat(id, 7.0).read_tagged("state")]),
+        Modifiers(vec![tagged.clone()]),
         ModifiersReplica::default(),
         Replicate::to_clients(NetworkTarget::All),
     ));
@@ -574,15 +585,13 @@ fn a_sources_modifiers_go_by_number_and_count_in_the_clients_own_fold() {
         [Some(ConditionOver::ReadTagged(state))],
         "sent by number"
     );
-    client.entity(ring).assert_eq(Modifiers(vec![
-        Modifier::flat(id, 7.0).read_tagged("state"),
-    ]));
+    client.entity(ring).assert_eq(Modifiers(vec![tagged]));
     let read = AttributeContext::new().tag("state");
-    let tagged = client.world().value_at(here, id, &read).unwrap();
+    let tagged = client.world().value::<Mana>(here, &read).unwrap();
     assert!(same(tagged, 37.0), "counting in a tagged read: {tagged}");
     let plain = client
         .world()
-        .value_at(here, id, &AttributeContext::new().tag("cue"))
+        .value::<Mana>(here, &AttributeContext::new().tag("cue"))
         .unwrap();
     assert!(same(plain, 30.0), "and not in another: {plain}");
 }
@@ -665,11 +674,11 @@ fn current(app: &TestApp, here: Entity) -> f32 {
 fn a_client_shows_the_servers_override_whatever_order_its_sources_came_in() {
     let mut world = net();
     let (there, here) = mage(&mut world, true);
-    let id = world["server"].world().attribute_id::<Mana>().unwrap();
     let ring = move |world: &mut TestWorld, value: f32| {
+        let overriding = modifier(&world["server"], ModifierSpec::overriding::<Mana>(value));
         world["server"].spawn((
             ModifierOf(there),
-            Modifiers(vec![Modifier::overriding(id, value)]),
+            Modifiers(vec![overriding]),
             ModifiersReplica::default(),
             Replicate::to_clients(NetworkTarget::All),
         ))
@@ -689,7 +698,7 @@ fn a_client_shows_the_servers_override_whatever_order_its_sources_came_in() {
     let client = &world["client"];
     let local = client
         .world()
-        .breakdown_at(here, id, &AttributeContext::new())
+        .breakdown::<Mana>(here, &AttributeContext::new())
         .unwrap()
         .total();
     assert!(same(local, 5.0), "its own fold would say {local}");
@@ -703,11 +712,8 @@ fn a_prediction_shows_until_answered_then_the_served_value() {
     world["server"].insert_resource(ReplicationMetadata::new(Duration::from_millis(50)));
     let (there, here) = mage(&mut world, true);
     // A source only the server has: what the client can't work out itself.
-    let id = world["server"].world().attribute_id::<Mana>().unwrap();
-    world["server"].spawn((
-        ModifierOf(there),
-        Modifiers(vec![Modifier::flat(id, 100.0)]),
-    ));
+    let flat = modifier(&world["server"], ModifierSpec::flat::<Mana>(100.0));
+    world["server"].spawn((ModifierOf(there), Modifiers(vec![flat])));
     world.ticks(20);
     assert!(same(current(&world["client"], here), 130.0), "served");
     world["client"]
@@ -883,7 +889,7 @@ fn another_clients_actor_shows_its_cues_but_not_its_effects() {
     let played = client.read_triggered::<CueExecuted>();
     assert_eq!(played.len(), 1, "the hit, once");
     assert_eq!(played[0].tag.name(), "cue.hit");
-    assert!(same(played[0].magnitude, -20.0));
+    assert!(same(played[0].magnitude(), -20.0));
 }
 
 #[test]
@@ -912,7 +918,6 @@ fn a_one_shot_a_client_predicted_plays_once() {
 #[test]
 fn a_client_coming_to_see_an_actor_joins_its_cues() {
     let mut world = net();
-    world["client"].watch_triggered::<CueAdded>();
     let there = world["server"].spawn((
         Base::<Mana>::default(),
         Replicate::to_clients(NetworkTarget::All),
@@ -927,7 +932,17 @@ fn a_client_coming_to_see_an_actor_joins_its_cues() {
         })
         .describe("the client shows the cooldown's cue")
         .within_ticks(20);
-    world["client"].assert_triggered::<CueAdded>(|added| added.joined);
+    let client = &world["client"];
+    let here = mapped(client, there).unwrap();
+    let cue = client
+        .entity(here)
+        .get::<ActiveCues>()
+        .iter()
+        .next()
+        .unwrap();
+    let cue = client.entity(cue).get::<ActiveCue>();
+    assert!(cue.joined, "going already as the client came to see it");
+    assert!(!cue.unreplicated, "served");
 }
 
 /// Whether `app` has a granted ability on `actor`.
@@ -1125,15 +1140,15 @@ fn reload_with(world: &mut World, effects: &[EffectData]) {
             .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0))
             .cue("cue.hit"),
         EffectData::lasting(Key::of::<FireballCooldown>(), 1.0)
-            .grant("cooldown.fireball")
+            .owner_tag("cooldown.fireball")
             .cue("cue.cooling"),
     ];
     all.extend_from_slice(effects);
     let reloaded = world
         .resource::<EffectRegistry>()
-        .recheck(
+        .rebuild(
             &all,
-            EffectChecks {
+            EffectScope {
                 tags: world.resource(),
                 curves: &CurveRegistry::default(),
                 attributes: world.resource(),
@@ -1215,6 +1230,11 @@ fn context_data_is_numbered_by_name_whatever_order_its_added_in() {
     let mut reversed = TypeRegistry::empty();
     reversed.register::<Wound>();
     reversed.register::<Impact>();
+    reversed.register::<Origin>();
+    reversed.register::<Hit>();
+    reversed.register::<AbilityRef>();
+    reversed.register::<SourceObject>();
+    reversed.register::<Causer>();
     let reversed = ContextDataRegistry::of(&reversed);
     world["client"].insert_resource(reversed);
     world.ticks(20);
@@ -1269,10 +1289,10 @@ fn carrying(
     effect
         .into()
         .source(source)
-        .causer(causer)
-        .object(object)
-        .hit(struck())
-        .origin(Vec3::new(-5.0, 0.0, 0.0))
+        .with(Causer(causer))
+        .with(SourceObject(object))
+        .with(struck())
+        .with(Origin(Vec3::new(-5.0, 0.0, 0.0)))
         .with(Impact {
             marked,
             headshot: true,
@@ -1308,15 +1328,25 @@ fn a_replicated_effects_context_names_the_clients_entities() {
         .unwrap();
     let replica = &client.entity(shown).get::<EffectReplica>().context;
     assert_eq!(replica.source, Some(here), "the replica, mapped");
-    assert_eq!(replica.causer, Some(arrow_here));
-    assert_eq!(replica.object, Some(bow_here));
-    assert_eq!(replica.data[0].entities, [marked_here]);
+    let entities: Vec<Entity> = replica
+        .data
+        .iter()
+        .flat_map(|data| data.entities.iter().copied())
+        .collect();
+    assert_eq!(
+        entities,
+        [arrow_here, bow_here, marked_here],
+        "the causer's, the object's and the impact's"
+    );
     let context = &client.entity(shown).get::<ActiveEffect>().spec().context;
     assert_eq!(context.source, Some(here), "the effect shown, mapped");
-    assert_eq!(context.causer, Some(arrow_here));
-    assert_eq!(context.object, Some(bow_here));
-    assert_eq!(context.hit, Some(struck()));
-    assert_eq!(context.origin, Some(Vec3::new(-5.0, 0.0, 0.0)));
+    assert_eq!(context.get::<Causer>(), Some(&Causer(arrow_here)));
+    assert_eq!(context.get::<SourceObject>(), Some(&SourceObject(bow_here)));
+    assert_eq!(context.get::<Hit>(), Some(&struck()));
+    assert_eq!(
+        context.get::<Origin>(),
+        Some(&Origin(Vec3::new(-5.0, 0.0, 0.0)))
+    );
     assert_eq!(
         context.get::<Impact>(),
         Some(&Impact {
@@ -1350,10 +1380,15 @@ fn context_data_registered_by_reflection_is_numbered_alike_on_both_sides() {
 fn a_snapshot_replicates_and_the_client_shows_the_servers() {
     let mut world = net();
     // Half the caster's mana, snapshotted.
-    let siphon = EffectData::infinite("siphon").modifier(EffectModifier::new::<Mana>(
+    let siphon = EffectData::infinite(Key::of::<Siphon>()).modifier(EffectModifier::new::<Mana>(
         Operation::Flat,
         Magnitude::source::<Mana>().times(0.5),
     ));
+    for side in ["server", "client"] {
+        world[side]
+            .resource_mut::<EffectRegistry>()
+            .name_type::<Siphon>();
+    }
     reload_with(world["server"].world_mut(), std::slice::from_ref(&siphon));
     reload_with(world["client"].world_mut(), &[siphon]);
     let (there, here) = mage(&mut world, true);
@@ -1362,14 +1397,8 @@ fn a_snapshot_replicates_and_the_client_shows_the_servers() {
         Replicate::to_clients(NetworkTarget::All),
     ));
     world.ticks(2);
-    let siphon = world["server"]
-        .resource::<EffectRegistry>()
-        .id("siphon")
-        .expect("reloaded");
     // Snapshotted as it's made, then the caster drained before it's applied.
-    let made = world["server"]
-        .world()
-        .snapshot(EffectSpec::from_id(siphon).source(caster));
+    let made = world["server"].world().snapshot(Siphon.source(caster));
     world["server"]
         .entity_mut(caster)
         .get_mut::<Base<Mana>>()
@@ -1434,10 +1463,13 @@ fn a_one_shot_the_server_plays_is_told_its_context_on_the_client() {
     assert_eq!(played.tag.name(), "cue.hit");
     let context = &played.context;
     assert_eq!(context.source, Some(archer_here), "mapped");
-    assert_eq!(context.causer, Some(arrow_here));
-    assert_eq!(context.object, Some(bow_here));
-    assert_eq!(context.hit, Some(struck()));
-    assert_eq!(context.origin, Some(Vec3::new(-5.0, 0.0, 0.0)));
+    assert_eq!(context.get::<Causer>(), Some(&Causer(arrow_here)));
+    assert_eq!(context.get::<SourceObject>(), Some(&SourceObject(bow_here)));
+    assert_eq!(context.get::<Hit>(), Some(&struck()));
+    assert_eq!(
+        context.get::<Origin>(),
+        Some(&Origin(Vec3::new(-5.0, 0.0, 0.0)))
+    );
     assert_eq!(
         context.get::<Impact>(),
         Some(&Impact {
@@ -1657,10 +1689,9 @@ fn a_server_initiated_ability_the_server_triggers_runs_on_the_client() {
     let (there, here) = granted(&mut world, |server, there| {
         server.grant_ability(there, Ward);
     });
-    AbilityWorld::send_event(
-        world["server"].world_mut(),
-        GameplayEvent::new(there, TagKey::named("event.ward")),
-    );
+    let server = world["server"].world_mut();
+    server.trigger(GameplayEvent::new(there, TagKey::named("event.ward")));
+    server.flush();
     let activation = running::<Ward>(&world["server"], there).expect("triggered");
     assert!(activation.is_servers(), "the server's own");
     world
@@ -1681,10 +1712,9 @@ fn a_server_initiated_ability_the_client_cancels_is_cancelled_on_the_server() {
     let (there, here) = granted(&mut world, |server, there| {
         server.grant_ability(there, Ward);
     });
-    AbilityWorld::send_event(
-        world["server"].world_mut(),
-        GameplayEvent::new(there, TagKey::named("event.ward")),
-    );
+    let server = world["server"].world_mut();
+    server.trigger(GameplayEvent::new(there, TagKey::named("event.ward")));
+    server.flush();
     world
         .until(|world| running::<Ward>(&world["client"], here).is_some())
         .describe("the client runs what the server triggered")
@@ -1748,6 +1778,7 @@ fn a_client_asking_for_a_local_only_ability_is_rejected() {
         actor: here,
         ability: zoom,
         activation: Activation::client(1),
+        input: NoInput,
     });
     world.ticks(20);
     assert_eq!(running::<Zoom>(&world["server"], there), None);
@@ -1898,10 +1929,9 @@ fn a_server_initiated_ability_started_and_ended_at_once_isnt_left_running_on_the
     world["client"].watch_triggered::<AbilityActivated>();
     // Started and ended in one server frame: its start and its end go out
     // together, the start first.
-    AbilityWorld::send_event(
-        world["server"].world_mut(),
-        GameplayEvent::new(there, TagKey::named("event.ward")),
-    );
+    let server = world["server"].world_mut();
+    server.trigger(GameplayEvent::new(there, TagKey::named("event.ward")));
+    server.flush();
     let activation = running::<Ward>(&world["server"], there).expect("triggered");
     let ward = ability::<Ward>(&world["server"], there);
     world["server"].world_mut().end_ability(ward);
@@ -1929,10 +1959,9 @@ fn a_predicted_trigger_under_the_servers_activation_runs_on_the_server_alone() {
         server.grant_ability(there, Beacon);
         server.grant_ability(there, Spark);
     });
-    AbilityWorld::send_event(
-        world["server"].world_mut(),
-        GameplayEvent::new(there, TagKey::named("event.beacon")),
-    );
+    let server = world["server"].world_mut();
+    server.trigger(GameplayEvent::new(there, TagKey::named("event.beacon")));
+    server.flush();
     let server = &world["server"];
     let beacon = running::<Beacon>(server, there).expect("triggered");
     assert!(beacon.is_servers(), "the server's own");
@@ -1970,10 +1999,9 @@ fn a_local_only_ability_an_event_on_the_client_triggers_runs_there_alone() {
     let (there, here) = granted(&mut world, |server, there| {
         server.grant_ability(there, Lens);
     });
-    AbilityWorld::send_event(
-        world["client"].world_mut(),
-        GameplayEvent::new(here, TagKey::named("event.lens")),
-    );
+    let client = world["client"].world_mut();
+    client.trigger(GameplayEvent::new(here, TagKey::named("event.lens")));
+    client.flush();
     let client = &world["client"];
     assert!(running::<Lens>(client, here).is_some(), "run at once");
     client

@@ -32,15 +32,13 @@ pub struct AbilityDef {
     /// What has to hold for it to activate.
     pub require: Option<Condition>,
     /// What interrupts it.
-    pub cancel_if: Option<Condition>,
-    /// It can't activate while its owner owns any of these.
-    pub blocked_by: Tags,
-    /// The active abilities it cancels as it activates.
-    pub cancels: Tags,
+    pub end_if: Option<Condition>,
+    /// The active abilities it ends (cancels) as it activates.
+    pub ends: Tags,
     /// The abilities it keeps from activating while it's active.
     pub blocks: Tags,
-    /// What its owner owns while it's active.
-    pub grants: Tags,
+    /// What its owner holds while it's active.
+    pub owner_tags: Tags,
     /// The cues it plays while it's active.
     pub cues: Tags,
     /// What activates it.

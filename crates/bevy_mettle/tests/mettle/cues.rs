@@ -1,6 +1,6 @@
 //! Cues: lasting ones held while effects count and abilities are active, as
-//! entities; one-shots as effects execute; handlers run for the most specific
-//! tag; and what a server keeps for its clients.
+//! entities observed as they're added and removed; one-shots triggered as
+//! effects execute; and what a server keeps for its clients.
 
 use bevy::prelude::*;
 use bevy_harness::TestApp;
@@ -33,16 +33,38 @@ struct Cast;
 #[derive(Component, Default, Behaviour)]
 struct Channel;
 
-/// Which handler ran, for which cue, and how.
+/// What the observers saw: each lasting cue added or removed, and each
+/// one-shot under `cue.hit` they played, the most specific first.
 #[derive(Resource, Default)]
-struct Ran(Vec<String>);
+struct Seen(Vec<String>);
 
-fn on_hit(In(event): In<CueEvent>, mut ran: ResMut<Ran>) {
-    ran.0.push(format!("hit {}", event.tag()));
+/// A lasting cue added: its tag, actor, whether it was joined and whether
+/// it's unreplicated.
+fn on_added(added: On<Add<ActiveCue>>, cues: Query<(&ActiveCue, &CueOf)>, mut seen: ResMut<Seen>) {
+    let (cue, of) = cues.get(added.entity).unwrap();
+    seen.0.push(format!(
+        "added {} on {} joined {} unreplicated {}",
+        cue.tag, of.0, cue.joined, cue.unreplicated
+    ));
 }
 
-fn on_fire_hit(In(event): In<CueEvent>, mut ran: ResMut<Ran>) {
-    ran.0.push(format!("fire hit {}", event.tag()));
+/// A lasting cue removed, read as it goes.
+fn on_removed(
+    removed: On<Remove<ActiveCue>>,
+    cues: Query<(&ActiveCue, &CueOf)>,
+    mut seen: ResMut<Seen>,
+) {
+    let (cue, of) = cues.get(removed.entity).unwrap();
+    seen.0.push(format!("removed {} on {}", cue.tag, of.0));
+}
+
+/// A hit's one-shot: a fire hit's own, else any hit's.
+fn on_hit(played: On<CueExecuted>, mut seen: ResMut<Seen>) {
+    if played.tag.is_within("cue.hit.fire") {
+        seen.0.push(format!("fire hit {}", played.tag));
+    } else if played.tag.is_within("cue.hit") {
+        seen.0.push(format!("hit {}", played.tag));
+    }
 }
 
 const TAGS: &[&str] = &[
@@ -95,9 +117,10 @@ fn app(role: NetRole) -> (TestApp, Entity) {
             app.insert_resource(role)
                 .add_behaviour::<Cast>()
                 .add_behaviour::<Channel>()
-                .init_resource::<Ran>()
-                .add_cue_handler("cue.hit", on_hit)
-                .add_cue_handler("cue.hit.fire", on_fire_hit)
+                .init_resource::<Seen>()
+                .add_observer(on_added)
+                .add_observer(on_removed)
+                .add_observer(on_hit)
                 .add_effect::<Burning>()
                 .add_effect::<Smoulder>()
                 .add_effect::<FireballHit>()
@@ -105,13 +128,16 @@ fn app(role: NetRole) -> (TestApp, Entity) {
                 .add_ability::<Fireball>()
                 .insert_resource(content());
         })
-        .watch_triggered::<CueAdded>()
-        .watch_triggered::<CueRemoved>()
         .watch_triggered::<CueExecuted>()
         .build();
     let actor = app.spawn((Base::<Life>::default(), Base::<Mana>::default()));
     app.tick();
     (app, actor)
+}
+
+/// What the observers saw, taken.
+fn seen(app: &mut TestApp) -> Vec<String> {
+    std::mem::take(&mut app.resource_mut::<Seen>().0)
 }
 
 /// `tag`'s number in `app`'s tree.
@@ -139,7 +165,12 @@ fn a_lasting_effects_cue_is_held_while_it_counts() {
     app.world_mut().apply_effect(mage, Burning);
     app.tick();
     assert_eq!(shown(&app, mage), ["cue.burning"]);
-    app.assert_triggered::<CueAdded>(|added| added.tag.name() == "cue.burning" && !added.joined);
+    assert_eq!(
+        seen(&mut app),
+        [format!(
+            "added cue.burning on {mage} joined false unreplicated false"
+        )]
+    );
 
     // Wet: the burning doesn't count, so its cue ends.
     app.world_mut()
@@ -149,14 +180,14 @@ fn a_lasting_effects_cue_is_held_while_it_counts() {
     app.tick();
     app.tick();
     assert_eq!(shown(&app, mage), Vec::<String>::new());
-    app.assert_triggered::<CueRemoved>(|removed| removed.tag.name() == "cue.burning");
+    assert_eq!(seen(&mut app), [format!("removed cue.burning on {mage}")]);
 }
 
 #[test]
 fn a_cue_held_twice_ends_once_both_let_go() {
     let (mut app, mage) = app(NetRole::Standalone);
     app.world_mut().apply_effect(mage, Burning);
-    app.world_mut().add_cue(mage, &Cue::new("cue.burning"));
+    app.world_mut().add_cue(mage, "cue.burning");
     app.tick();
     assert_eq!(shown(&app, mage), ["cue.burning"], "one entity, held twice");
     let effect = app
@@ -165,12 +196,46 @@ fn a_cue_held_twice_ends_once_both_let_go() {
         .iter()
         .next()
         .unwrap();
-    app.world_mut().remove_effect(effect);
+    app.world_mut().despawn(effect);
     app.tick();
     assert_eq!(shown(&app, mage), ["cue.burning"], "still held");
-    app.world_mut().remove_cue(mage, &Cue::new("cue.burning"));
+    app.world_mut().remove_cue(mage, "cue.burning");
     app.tick();
     assert_eq!(shown(&app, mage), Vec::<String>::new());
+}
+
+#[test]
+fn removing_a_cue_removes_whichever_source_holds_it() {
+    let (mut app, mage) = app(NetRole::Standalone);
+    app.world_mut().add_unreplicated_cue(mage, "cue.casting");
+    app.tick();
+    assert_eq!(shown(&app, mage), ["cue.casting"]);
+    app.world_mut().remove_cue(mage, "cue.casting");
+    app.tick();
+    assert_eq!(
+        shown(&app, mage),
+        Vec::<String>::new(),
+        "the unreplicated one"
+    );
+    // None holds it: warned of, and nothing changes.
+    app.world_mut().remove_cue(mage, "cue.casting");
+    app.tick();
+    assert_eq!(shown(&app, mage), Vec::<String>::new());
+}
+
+#[test]
+fn a_cue_is_unreplicated_while_only_unreplicated_sources_hold_it() {
+    let (mut app, mage) = app(NetRole::Server);
+    app.world_mut().add_unreplicated_cue(mage, "cue.casting");
+    app.tick();
+    let cue = |app: &TestApp| {
+        let entity = app.entity(mage).get::<ActiveCues>().iter().next().unwrap();
+        app.entity(entity).get::<ActiveCue>().clone()
+    };
+    assert!(cue(&app).unreplicated);
+    app.world_mut().add_cue(mage, "cue.casting");
+    app.tick();
+    assert!(!cue(&app).unreplicated, "served now too");
 }
 
 #[test]
@@ -201,7 +266,7 @@ fn an_effect_executing_plays_its_cue_with_what_it_dealt() {
         .apply_effect(mage, FireballHit.level(3.0).source(caster));
     app.assert_triggered::<CueExecuted>(|executed| {
         executed.tag.name() == "cue.hit.fire"
-            && close(executed.magnitude, -15.0)
+            && close(executed.magnitude(), -15.0)
             && close(executed.level, 3.0)
             && executed.context.source == Some(caster)
             && hit.is_some()
@@ -231,32 +296,31 @@ fn a_periodic_effect_holds_its_cue_and_plays_it_each_period() {
     assert!(
         played
             .iter()
-            .all(|executed| close(executed.magnitude, -2.0))
+            .all(|executed| close(executed.magnitude(), -2.0))
     );
 }
 
 #[test]
-fn the_most_specific_handler_runs_alone() {
+fn an_observer_matches_a_tag_and_its_children_the_most_specific_first() {
     let (mut app, mage) = app(NetRole::Standalone);
     app.world_mut().execute_cue(mage, &Cue::new("cue.hit.fire"));
     app.world_mut().execute_cue(mage, &Cue::new("cue.hit.cold"));
     assert_eq!(
-        app.resource::<Ran>().0,
+        seen(&mut app),
         ["fire hit cue.hit.fire", "hit cue.hit.cold"],
         "fire's own, then the hit one for cold"
     );
 }
 
 #[test]
-fn a_server_serves_its_cues_but_those_it_keeps_local() {
+fn a_server_serves_its_cues_but_those_unreplicated() {
     let (mut app, mage) = app(NetRole::Server);
     app.world_mut().apply_effect(mage, Burning);
+    app.world_mut().add_unreplicated_cue(mage, "cue.casting");
     app.world_mut()
-        .add_cue(mage, &Cue::new("cue.casting").local());
+        .execute_cue(mage, &Cue::new("cue.hit.fire").level(9.0));
     app.world_mut()
-        .execute_cue(mage, &Cue::new("cue.hit.fire").magnitude(9.0));
-    app.world_mut()
-        .execute_cue(mage, &Cue::new("cue.hit.cold").local());
+        .execute_cue(mage, &Cue::new("cue.hit.cold").unreplicated());
     app.tick();
     assert_eq!(shown(&app, mage), ["cue.burning", "cue.casting"]);
     let tree = app.world().resource::<TagRegistry>();
@@ -270,12 +334,12 @@ fn a_server_serves_its_cues_but_those_it_keeps_local() {
     assert_eq!(
         served,
         [TagKey::named("cue.burning")],
-        "the local one kept back"
+        "the unreplicated one kept back"
     );
     let bursts = app.entity(mage).get::<CueBursts>();
-    assert_eq!(bursts.recent.len(), 1, "the local one kept back");
+    assert_eq!(bursts.recent.len(), 1, "the unreplicated one kept back");
     assert_eq!(bursts.recent[0].tag, tag_id(&app, "cue.hit.fire"));
-    assert!(close(bursts.recent[0].magnitude, 9.0));
+    assert!(close(bursts.recent[0].level, 9.0));
 }
 
 #[test]
@@ -303,7 +367,9 @@ fn a_client_shows_the_servers_cues_and_plays_its_one_shots_once() {
     let here = client.spawn((Base::<Life>::default(), state(&server)));
     client.tick();
     assert_eq!(shown(&client, here), ["cue.burning"]);
-    client.assert_triggered::<CueAdded>(|added| added.joined);
+    assert!(seen(&mut client).contains(&format!(
+        "added cue.burning on {here} joined true unreplicated false"
+    )));
     let played = client.read_triggered::<CueExecuted>();
     assert_eq!(played.len(), 1);
     assert_eq!(played[0].tag.name(), "cue.land");
@@ -328,12 +394,12 @@ fn a_client_shows_the_servers_cues_and_plays_its_one_shots_once() {
         .iter()
         .next()
         .unwrap();
-    server.world_mut().remove_effect(effect);
+    server.world_mut().despawn(effect);
     server.tick();
     client.entity_mut(here).insert(state(&server));
     client.tick();
     assert_eq!(shown(&client, here), Vec::<String>::new());
-    client.assert_triggered::<CueRemoved>(|removed| removed.tag.name() == "cue.burning");
+    assert!(seen(&mut client).contains(&format!("removed cue.burning on {here}")));
 }
 
 #[test]
@@ -342,7 +408,12 @@ fn a_cue_starting_on_an_actor_already_seen_isnt_joined() {
     let burning = tag_id(&client, "cue.burning");
     client.entity_mut(here).insert(ServedCues([burning].into()));
     client.tick();
-    client.assert_triggered::<CueAdded>(|added| !added.joined);
+    assert_eq!(
+        seen(&mut client),
+        [format!(
+            "added cue.burning on {here} joined false unreplicated false"
+        )]
+    );
 }
 
 #[test]
@@ -434,7 +505,6 @@ fn bursts(tag: TagId, activation: Activation, n: u64) -> CueBursts {
                 seq,
                 at: 0.0,
                 tag,
-                magnitude: -15.0,
                 changes: Vec::new(),
                 level: 1.0,
                 context: ContextReplica::default(),
@@ -507,7 +577,7 @@ fn a_one_shots_magnitude_is_its_first_attributes_and_it_carries_every_change() {
     assert_eq!(played.len(), 1);
     let drain = &played[0];
     assert!(
-        close(drain.magnitude, -30.0),
+        close(drain.magnitude(), -30.0),
         "life's, both of its changes: {drain:?}"
     );
     let changes: Vec<(AttributeId, f32)> = drain

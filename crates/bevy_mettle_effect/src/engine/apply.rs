@@ -79,8 +79,8 @@ pub(super) fn apply_at(
         });
         return;
     }
-    if !def.removes.is_empty() {
-        remove_tagged(world, target, &def.removes, depth);
+    if !def.ends.is_empty() {
+        remove_tagged(world, target, &def.ends, depth);
     }
     if !def.lasts() {
         let captured = capture(world, target, &spec, &def);
@@ -136,8 +136,8 @@ pub(super) fn blocked(
         .is_some_and(|require| !require.holds(&check))
     {
         Some(Blocked::Requirement)
-    } else if immune(world, target, &def.tags) {
-        Some(Blocked::Immunity)
+    } else if blocked_by_effect(world, target, &def.tags) {
+        Some(Blocked::Effect)
     } else {
         None
     }
@@ -205,7 +205,7 @@ pub(super) fn spawn(
                 period,
                 until_period: period.unwrap_or_default(),
                 inhibited: true,
-                granted: Tags::new(),
+                owner_tags: Tags::new(),
                 cues: Tags::new(),
                 source_tags: source_tags.clone(),
                 predicted: 0,
@@ -265,11 +265,11 @@ pub(super) fn capture(
 }
 
 /// Whether an effect on `target` keeps effects tagged `tags` off it.
-pub(super) fn immune(world: &World, target: Entity, tags: &Tags) -> bool {
+pub(super) fn blocked_by_effect(world: &World, target: Entity, tags: &Tags) -> bool {
     effects_on(world, target).into_iter().any(|effect| {
         world
             .get::<ActiveEffect>(effect)
-            .is_some_and(|active| !active.inhibited && tags.contains_any(&active.def.immunity))
+            .is_some_and(|active| !active.inhibited && tags.contains_any(&active.def.blocks))
     })
 }
 

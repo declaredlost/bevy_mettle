@@ -155,7 +155,7 @@ When a stacked effect's time runs out, `expire` decides:
   with its own time.
 - **A stack of a stronger spec is still the first one's.** If later
   applications should be able to replace a weaker effect, give it no
-  stacking, and have the stronger one `removes` the weaker one's tag.
+  stacking, and have the stronger one `ends` the weaker one's tag.
 
 [`Stacking`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/struct.Stacking.html
 [`EffectStacked`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/events/struct.EffectStacked.html

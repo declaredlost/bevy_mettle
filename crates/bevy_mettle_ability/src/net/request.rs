@@ -25,9 +25,10 @@ use crate::events::{AbilityFailed, Activated, Failure};
 /// A client's ask that the server activate an ability it already predicts.
 ///
 /// It asks for `ability` on `actor`, which the client activated under
-/// `activation`.
+/// `activation`, with the input it activated it with: [`NoInput`] for a
+/// behaviour that takes none.
 #[derive(Message, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AbilityRequest {
+pub struct AbilityRequest<I = NoInput> {
     /// The actor.
     pub actor: Entity,
     /// The ability.
@@ -35,31 +36,11 @@ pub struct AbilityRequest {
     /// The activation the client predicted it under: its own, never the
     /// server's.
     pub activation: Activation,
-}
-
-impl MapEntities for AbilityRequest {
-    fn map_entities<M: EntityMapper>(&mut self, mapper: &mut M) {
-        self.actor = mapper.get_mapped(self.actor);
-    }
-}
-
-/// A client's ask that the server activate an ability with its input.
-///
-/// One it already predicts: an [`AbilityRequest`], and the input it activated
-/// it with.
-#[derive(Message, Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AbilityRequestWith<I> {
-    /// The actor.
-    pub actor: Entity,
-    /// The ability.
-    pub ability: AbilityId,
-    /// The activation the client predicted it under.
-    pub activation: Activation,
     /// The input it activated it with.
     pub input: I,
 }
 
-impl<I: MapEntities> MapEntities for AbilityRequestWith<I> {
+impl<I: MapEntities> MapEntities for AbilityRequest<I> {
     fn map_entities<M: EntityMapper>(&mut self, mapper: &mut M) {
         self.actor = mapper.get_mapped(self.actor);
         self.input.map_entities(mapper);
@@ -306,6 +287,7 @@ fn request(world: &mut World, actor: Entity, id: AbilityId, activation: Activati
         actor,
         ability: id,
         activation,
+        input: NoInput,
     });
 }
 
@@ -345,7 +327,7 @@ pub(crate) fn predict_with<B: Behaviour>(
         .get_resource::<BehaviourRegistry>()
         .and_then(|behaviours| behaviours.id_of::<B>())
     else {
-        warn!("`{}` isn't added: nothing it runs can activate", B::NAME);
+        warn!("`{}` isn't added: nothing it runs can activate", B::KEY);
         return Err(Failure::Input);
     };
     let Some((ability, net)) = granted(world, actor, id) else {
@@ -362,7 +344,7 @@ pub(crate) fn predict_with<B: Behaviour>(
         }
         Route::Ask => {
             let activation = engine::next_activation(world);
-            world.write_message(AbilityRequestWith {
+            world.write_message(AbilityRequest {
                 actor,
                 ability: id,
                 activation,
@@ -383,7 +365,7 @@ pub(crate) fn predict_with<B: Behaviour>(
                 )
                 .map(drop)
             })?;
-            world.write_message(AbilityRequestWith {
+            world.write_message(AbilityRequest {
                 actor,
                 ability: id,
                 activation,
@@ -468,19 +450,24 @@ pub(crate) fn reject(
     }
 }
 
-/// On a server: activates what clients ask for, under their activations, and
-/// answers. One under the server's activation, or a derived one, is
-/// rejected: a client's can't look like the server's own.
-pub(crate) fn serve(mut requests: MessageReader<AbilityRequest>, mut commands: Commands) {
+/// On a server: activates what clients ask for with input `I`, under their
+/// activations, and answers. One under the server's activation, or a derived
+/// one, is rejected: a client's can't look like the server's own.
+pub(crate) fn serve<I: Component + Clone>(
+    mut requests: MessageReader<AbilityRequest<I>>,
+    mut commands: Commands,
+) {
     for request in requests.read().cloned() {
         commands.queue(move |world: &mut World| {
             let rejected = askable(world, request.actor, request.ability, request.activation)
                 .and_then(|()| {
-                    engine::activate_id(
+                    engine::activate_id_with(
                         world,
                         request.actor,
                         request.ability,
                         Some(request.activation),
+                        None,
+                        super::given(request.input),
                     )
                 })
                 .err();
@@ -604,8 +591,9 @@ pub(crate) fn expire(world: &mut World) {
     abandon(world, Some(before));
 }
 
-/// Takes back every activation this client predicted that awaits its answer,
-/// as a rejection would, each failing [`Failure::Unanswered`]: what a lost
+/// Takes back every prediction this client awaits an answer to, at once.
+///
+/// As a rejection would, each failing [`Failure::Unanswered`]: what a lost
 /// connection leaves.
 pub fn abandon_pending(world: &mut World) {
     abandon(world, None);

@@ -14,8 +14,7 @@ use crate::active::GrantedAbility;
 use crate::data::{NetExecution, Trigger};
 use crate::events::GameplayEvent;
 
-/// Sends `event` to its actor: told, and the abilities it triggers activated
-/// with it.
+/// `event` was sent to its actor: the abilities it triggers activated with it.
 ///
 /// Sent under a predicted activation, a [`Predicted`] ability it triggers
 /// runs under an activation derived from it, the same on a client and its
@@ -24,7 +23,7 @@ use crate::events::GameplayEvent;
 /// ability.
 ///
 /// [`Predicted`]: crate::data::NetExecution::Predicted
-pub(crate) fn send(world: &mut World, event: GameplayEvent) {
+pub(crate) fn event_sent(world: &mut World, event: GameplayEvent) {
     let actor = event.entity;
     let triggered: Vec<(Entity, AbilityId, NetExecution)> = abilities_of(world, actor)
         .into_iter()
@@ -37,7 +36,6 @@ pub(crate) fn send(world: &mut World, event: GameplayEvent) {
             triggers.then_some((ability, granted.def.id, granted.def.net))
         })
         .collect();
-    world.trigger(event.clone());
     let role = crate::net::role(world);
     for (ability, id, net) in triggered {
         // A local-only ability runs where it's triggered, whatever this is.

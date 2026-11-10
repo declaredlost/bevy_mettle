@@ -55,7 +55,7 @@ impl<A: Attribute> PartialEq for AttributeChanged<A> {
 impl<A: Attribute> fmt::Debug for AttributeChanged<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AttributeChanged")
-            .field("attribute", &A::NAME)
+            .field("attribute", &A::KEY)
             .field("entity", &self.entity)
             .field("old", &self.old)
             .field("new", &self.new)

@@ -1,7 +1,8 @@
 # Defining effects
 
 An effect is what changes an actor: damage, a buff, a cooldown, a stun. It
-says what it changes, for how long, and what tags it grants while it lasts.
+says what it changes, for how long, and what tags its owner holds while it
+lasts.
 It's Unreal's `GameplayEffect`, as data.
 
 Effects are content: definitions, each with a name. A game builds them as
@@ -41,12 +42,12 @@ fn effects() -> Vec<EffectData> {
                 Operation::Flat,
                 Magnitude::param("param.damage"),
             ))
-            .grant("state.burning")
+            .owner_tag("state.burning")
             .require(!Condition::owner_has("immune.fire"))
             .ongoing(!Condition::owner_has("state.wet")),
         EffectData::instant("fireball.cost")
             .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-        EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
+        EffectData::lasting("fireball.cooldown", 2.0).owner_tag("cooldown.fireball"),
         EffectData::infinite("staff"),
     ]
 }
@@ -105,18 +106,18 @@ effect says.
 | Field | What it does |
 |---|---|
 | `name` | What content and an [`Effect`] type call it by |
-| `tags` | What it is: what removal, immunity and requirements match on |
+| `tags` | What it is: what ending, blocking and requirements match on |
 | `duration` | `Instant`, `Infinite`, or `For(..)` so many seconds |
 | `period` | Executes every so often while it lasts, instead of its modifiers counting all along |
 | `modifiers` | What it changes: modifiers while it lasts, or the base as it executes |
 | `executions` | Formulas in code, run as it executes: see [Effects in code](effect-code.md) |
-| `grants` | Tags the target owns while it counts |
+| `owner_tags` | Tags the target, its owner, holds while it counts |
 | `cues` | Cues held on the target while it counts, and played each time it executes: see [Cues](cues.md) |
 | `require` | What has to hold for it to apply at all |
 | `ongoing` | What has to hold for it to count; while it doesn't, it's inhibited |
-| `remove_if` | What takes it off as soon as it holds |
-| `removes` | Active effects with any of these tags, taken off as it applies |
-| `immunity` | Effects with any of these tags can't apply while it counts |
+| `end_if` | What ends it as soon as it holds |
+| `ends` | Active effects with any of these tags, ended as it applies |
+| `blocks` | Effects with any of these tags can't apply while it counts |
 | `stacking` | How applying it again stacks: see [Stacking](stacking.md) |
 | `on_apply`, `on_remove`, `on_expire` | Effects applied to the target as it applies, comes off, or runs out of time |
 
@@ -133,7 +134,7 @@ counts, and stop counting when it goes. The base is left alone, so a
 two-second buff can't leave anything behind.
 
 An instant effect can't have anything that needs it to last: a period,
-granted tags, immunity, an ongoing or removal requirement, stacking, or
+owner tags, blocked effects, an ongoing or end condition, stacking, or
 effects on removal or expiry. Content with one is rejected.
 
 ## Periods
@@ -180,12 +181,13 @@ scales the amount. A `Base` or `Override` counts only when it holds in full.
 `.per::<A>(every)` makes a modifier count once for each whole `every` of the
 target's `A`: +1 damage per 10 spell power.
 
-A modifier can deal a [route](effect-code.md#routes) instead: an amount no
-actor holds, routed into attributes they do as the effect executes.
-`EffectModifier::route::<IncomingDamage>(40.0)`. In data, a route modifier
-names its route by name, `"incoming_damage"`, where an attribute's names
-the attribute, and its `op` is flat unless it says. A route is dealt flat amounts only, by an effect that executes:
-instant, or periodic. The registry rejects any other.
+A modifier can route into a [route](effect-code.md#routes) instead: an
+amount no actor holds, routed into attributes they do as the effect
+executes. `EffectModifier::route::<IncomingDamage>(40.0)`. In data, a route
+modifier names its route by name, `"incoming_damage"`, where an attribute's
+names the attribute, and its `op` is flat unless it says. A route takes flat
+amounts only, from an effect that executes: instant, or periodic. The
+registry rejects any other.
 
 Data names attributes, routes, executions and calculations by name. Checking
 the content resolves each name to its number, which is what the effect runs
@@ -394,21 +396,25 @@ Facts are never set here.
   inhibited: its modifiers stop counting, its tags are taken back, and its
   time stands still. Burning is inhibited while the mage is wet, and picks
   up where it left off when the mage dries.
-- **`remove_if`** is checked every tick. As soon as it holds, the effect
-  comes off.
+- **`end_if`** is checked every tick. As soon as it holds, the effect
+  ends.
 
-## Removing and immunity
+## Ending and blocking
 
-`removes` takes active effects off the target as the effect applies: a
-potion that removes `effect.affliction` cleanses burning and poison. It's
-done before the new effect lands, so it never removes itself.
+`ends` ends active effects on the target as the effect applies: a potion
+that ends `effect.affliction` cleanses burning and poison. It's done before
+the new effect lands, so it never ends itself.
 
-`immunity` keeps effects off while it counts. A fire ward with
-`.immunity("effect.affliction.burning")` blocks burning, with
-[`EffectBlocked`]'s reason `Immunity`. An inhibited ward protects no one.
+`blocks` keeps effects off while it counts: Unreal's immunity. A fire ward
+with `.blocks("effect.affliction.burning")` blocks burning, with
+[`EffectBlocked`]'s reason `Effect`. An inhibited ward protects no one.
 
-Tags match by their tree: removing `effect.affliction` removes everything
-tagged under it.
+Tags match by their tree: ending `effect.affliction` ends everything tagged
+under it.
+
+Abilities have the same pair under the same names: an ability `ends` the
+active abilities it matches as it starts, and `blocks` others while it's
+active. Each has `end_if` too.
 
 ## Chains
 
@@ -466,12 +472,12 @@ To ask before inserting it, call [`MettleContent::check`]:
 #             .tag("effect.affliction.burning")
 #             .period(0.5, true)
 #             .modifier(EffectModifier::new::<Life>(Operation::Flat, Magnitude::param("param.damage")))
-#             .grant("state.burning")
+#             .owner_tag("state.burning")
 #             .require(!Condition::owner_has("immune.fire"))
 #             .ongoing(!Condition::owner_has("state.wet")),
 #         EffectData::instant("fireball.cost")
 #             .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-#         EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
+#         EffectData::lasting("fireball.cooldown", 2.0).owner_tag("cooldown.fireball"),
 #         EffectData::infinite("staff"),
 #     ]
 # }
@@ -505,7 +511,7 @@ app.insert_resource(content.clone());
 // A typo is caught before anything runs.
 let typo = MettleContent {
     tags: tags(),
-    effects: vec![EffectData::lasting("chill", 2.0).grant("state.chilled")],
+    effects: vec![EffectData::lasting("chill", 2.0).owner_tag("state.chilled")],
     ..default()
 };
 let errors = typo.check(app.world()).unwrap_err();
@@ -545,7 +551,7 @@ app.add_plugins((MinimalPlugins, MettlePlugins))
         tags: ["cooldown", "cooldown.fireball"].map(TagKey::named).to_vec(),
         effects: vec![
             EffectData::lasting(Key::of::<Burning>(), 4.0),
-            EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
+            EffectData::lasting("fireball.cooldown", 2.0).owner_tag("cooldown.fireball"),
         ],
         ..default()
     });
@@ -561,8 +567,8 @@ assert_eq!(registry.iter().count(), 2);
 
 [`EffectRegistry`] reads as every registry does: `get(id)` gives the
 checked effect, `id("name")` and `id_of::<E>()` its number, `name(id)` its
-name, and `iter()` every one. [`EffectRegistry::recheck`] is the check on
-its own, against an [`EffectChecks`] of the tag, curve, attribute,
+name, and `iter()` every one. [`EffectRegistry::rebuild`] is the check on
+its own, against an [`EffectScope`] of the tag, curve, attribute,
 execution, calculation and route registries; it keeps the numbers effects
 had, and the effects code named with `add_effect`.
 
@@ -594,8 +600,8 @@ everything is checked against everything again.
   base, and the change stays. For a buff that comes and goes, leave out the
   period.
 
-[`EffectRegistry::recheck`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectRegistry.html#method.recheck
-[`EffectChecks`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectChecks.html
+[`EffectRegistry::rebuild`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectRegistry.html#method.rebuild
+[`EffectScope`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectScope.html
 [`EffectRegistry`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectRegistry.html
 [`MettleContent`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleContent.html
 [`MettleContent::check`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleContent.html#method.check

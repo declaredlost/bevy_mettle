@@ -3,11 +3,11 @@
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy_mettle_attribute::read::{AttributeContext, AttributeReader, AttributeWorld};
+use bevy_mettle_attribute::read::{AttributeContext, AttributeReader, NumberedAttributes};
 use bevy_mettle_core::registry::AttributeId;
 use bevy_mettle_core::tag::OwnedTags;
 
-use crate::data::{Capture, Read};
+use crate::data::{Read, Side};
 use crate::{EffectRegistry, EffectSpec, Snapshot};
 
 /// A system parameter: taking specs' snapshots as they're made.
@@ -100,7 +100,7 @@ fn take(
         return spec;
     };
     for capture in &def.captures {
-        if !capture.snapshot || capture.from != Capture::Source {
+        if !capture.snapshot || capture.from != Side::Source {
             continue;
         }
         // Read as a hit would be: in its effect's tags and its own, from its

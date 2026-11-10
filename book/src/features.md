@@ -20,7 +20,7 @@ The prelude brings in every enabled part's prelude, with `MettlePlugins`,
 schedule: `Mettle`, `MettleSet`, `MettleSystems` and `MettleCorePlugin`.
 That's the derives and the app traits (`AttributeApp`, `TagApp`,
 `EffectApp`, `BehaviourApp`, `AbilityApp`); the specs (`EffectSpec`,
-`AbilitySpec`, `IntoAbilityId`); every registry and its numbers
+`AbilitySpec`); every registry and its numbers
 (`TagRegistry` and `TagId`, `CurveRegistry` and `CurveId`,
 `AttributeRegistry`, `EffectRegistry` and `EffectId`, `AbilityRegistry` and
 `AbilityId`, and the rest); the data types with their `AnyEffect` and

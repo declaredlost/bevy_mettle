@@ -4,12 +4,12 @@ use bevy_mettle::core::registry::AttributeId;
 use bevy_mettle::prelude::*;
 
 use crate::common::{
-    Damage, FLOWN, Life, MaxLife, MaxResistance, Strength, actor, app, close, get, id, own,
-    set_base, value,
+    Damage, FLOWN, Life, MaxLife, MaxResistance, Strength, actor, app, close, get, id, modifier,
+    modifiers, own, set_base, value,
 };
 
 fn flat(value: f32) -> Modifiers {
-    Modifiers(vec![Modifier::flat(id::<Damage>(), value)])
+    modifiers([ModifierSpec::flat::<Damage>(value)])
 }
 
 #[test]
@@ -30,7 +30,7 @@ fn despawning_a_source_takes_its_modifiers_away() {
     let npc = actor(&mut app, []);
     let buff = app.spawn((
         ModifierOf(npc),
-        Modifiers(vec![Modifier::additive(id::<Damage>(), 1.0)]),
+        modifiers([ModifierSpec::additive::<Damage>(1.0)]),
     ));
     let ring = app.spawn((ModifierOf(npc), flat(5.0)));
     app.tick();
@@ -49,7 +49,8 @@ fn changing_or_removing_a_sources_modifiers_refolds() {
     let npc = actor(&mut app, []);
     let ring = app.spawn((ModifierOf(npc), flat(5.0)));
     app.tick();
-    app.world_mut().get_mut::<Modifiers>(ring).unwrap().0[0] = Modifier::flat(id::<Damage>(), 9.0);
+    app.world_mut().get_mut::<Modifiers>(ring).unwrap().0[0] =
+        modifier(ModifierSpec::flat::<Damage>(9.0));
     app.tick();
     assert!(close(get::<Damage>(&app, npc), 19.0), "changed");
     app.entity_mut(ring).remove::<Modifiers>();
@@ -73,7 +74,7 @@ fn a_source_moved_to_another_actor_counts_for_it_instead() {
 #[test]
 fn an_actors_own_modifiers_count_and_refold_as_they_change() {
     let mut app = app();
-    let npc = actor(&mut app, [Modifier::flat(id::<Damage>(), 1.0)]);
+    let npc = actor(&mut app, [ModifierSpec::flat::<Damage>(1.0)]);
     assert!(close(get::<Damage>(&app, npc), 11.0));
     app.entity_mut(npc).insert(flat(3.0));
     app.tick();
@@ -94,13 +95,12 @@ fn an_actor_with_nothing_has_its_bases() {
 #[test]
 fn a_modifier_of_an_attribute_not_added_is_skipped() {
     let mut app = app();
-    let npc = actor(
-        &mut app,
-        [
-            Modifier::flat(AttributeId::new(999), 5.0),
-            Modifier::flat(id::<Damage>(), 1.0),
-        ],
-    );
+    let npc = actor(&mut app, []);
+    app.entity_mut(npc).insert(Modifiers(vec![
+        Modifier::new(AttributeId::new(999), Operation::Flat, 5.0),
+        modifier(ModifierSpec::flat::<Damage>(1.0)),
+    ]));
+    app.tick();
     assert!(close(get::<Damage>(&app, npc), 11.0));
 }
 
@@ -108,7 +108,7 @@ fn a_modifier_of_an_attribute_not_added_is_skipped() {
 fn a_source_that_is_an_actor_too_refolds_itself_as_its_modifiers_go() {
     let mut app = app();
     let owner = actor(&mut app, []);
-    let pet = actor(&mut app, [Modifier::flat(id::<Damage>(), 5.0)]);
+    let pet = actor(&mut app, [ModifierSpec::flat::<Damage>(5.0)]);
     app.entity_mut(pet).insert(ModifierOf(owner));
     app.tick();
     assert!(close(get::<Damage>(&app, pet), 15.0));
@@ -127,7 +127,7 @@ fn a_modifier_whose_condition_cant_be_is_skipped() {
     let mut app = app();
     let npc = actor(
         &mut app,
-        [Modifier::flat(id::<Damage>(), 5.0).condition(Condition::fact_ramp(FLOWN, 5.0, 5.0))],
+        [ModifierSpec::flat::<Damage>(5.0).condition(Condition::fact_ramp(FLOWN, 5.0, 5.0))],
     );
     let read = AttributeContext::new().fact(FLOWN, 5.0);
     assert!(close(value::<Damage>(&app, npc, &read), 10.0), "not NaN");
@@ -139,8 +139,8 @@ fn a_base_or_an_override_per_something_is_skipped() {
     let npc = actor(
         &mut app,
         [
-            Modifier::base(id::<Damage>(), 10.0).per(id::<Strength>(), 100.0),
-            Modifier::overriding(id::<Life>(), 1.0).per(id::<Strength>(), 100.0),
+            ModifierSpec::base::<Damage>(10.0).per::<Strength>(100.0),
+            ModifierSpec::overriding::<Life>(1.0).per::<Strength>(100.0),
         ],
     );
     assert!(close(get::<Damage>(&app, npc), 10.0), "not replaced by 0");
@@ -153,7 +153,7 @@ fn of_overrides_the_one_applied_last_counts_whatever_came_first() {
     let npc = actor(&mut app, []);
     let ring = app.spawn((
         ModifierOf(npc),
-        Modifiers(vec![Modifier::overriding(id::<Damage>(), 2.0)]),
+        modifiers([ModifierSpec::overriding::<Damage>(2.0)]),
     ));
     app.tick();
     assert!(close(get::<Damage>(&app, npc), 2.0));
@@ -161,7 +161,7 @@ fn of_overrides_the_one_applied_last_counts_whatever_came_first() {
     app.entity_mut(npc).remove::<Modifiers>();
     app.tick();
     app.entity_mut(npc)
-        .insert(Modifiers(vec![Modifier::overriding(id::<Damage>(), 1.0)]));
+        .insert(modifiers([ModifierSpec::overriding::<Damage>(1.0)]));
     app.tick();
     assert!(
         close(get::<Damage>(&app, npc), 1.0),
@@ -195,9 +195,7 @@ fn a_remote_actor_shows_what_it_is_served_but_while_it_predicts() {
     // with nothing in play.
     let tagged = app.spawn((
         ModifierOf(npc),
-        Modifiers(vec![
-            Modifier::flat(id::<Damage>(), 3.0).read_tagged("damage"),
-        ]),
+        modifiers([ModifierSpec::flat::<Damage>(3.0).read_tagged("damage")]),
     ));
     app.tick();
     assert!(
@@ -209,7 +207,7 @@ fn a_remote_actor_shows_what_it_is_served_but_while_it_predicts() {
     app.tick();
     let guess = app.spawn((
         ModifierOf(npc),
-        Modifiers(vec![Modifier::flat(id::<Damage>(), 5.0)]),
+        modifiers([ModifierSpec::flat::<Damage>(5.0)]),
         Provisional,
     ));
     app.tick();
@@ -262,10 +260,10 @@ fn a_read_in_context_counts_what_its_value_is_worked_out_through() {
     let npc = actor(
         &mut app,
         [
-            Modifier::flat(id::<Life>(), 30.0),
-            Modifier::flat(id::<MaxLife>(), 40.0).read_tagged("damage"),
-            Modifier::flat(id::<Damage>(), 1.0).per(id::<Strength>(), 5.0),
-            Modifier::flat(id::<Strength>(), 10.0).read_tagged("damage"),
+            ModifierSpec::flat::<Life>(30.0),
+            ModifierSpec::flat::<MaxLife>(40.0).read_tagged("damage"),
+            ModifierSpec::flat::<Damage>(1.0).per::<Strength>(5.0),
+            ModifierSpec::flat::<Strength>(10.0).read_tagged("damage"),
         ],
     );
     app.tick();
@@ -296,9 +294,9 @@ fn what_one_change_moves_is_worked_out_again_and_nothing_else_is_lost() {
     let npc = actor(
         &mut app,
         [
-            Modifier::flat(id::<Life>(), 30.0),
-            Modifier::flat(id::<Damage>(), 1.0).per(id::<Strength>(), 5.0),
-            Modifier::flat(id::<Strength>(), 5.0).owner_has("state.enraged"),
+            ModifierSpec::flat::<Life>(30.0),
+            ModifierSpec::flat::<Damage>(1.0).per::<Strength>(5.0),
+            ModifierSpec::flat::<Strength>(5.0).owner_has("state.enraged"),
         ],
     );
     app.tick();

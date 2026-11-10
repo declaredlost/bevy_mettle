@@ -6,8 +6,8 @@ use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use bevy_mettle_ability::events::Failure;
 use bevy_mettle_ability::net::{
-    AbilityCancelRequest, AbilityEnd, AbilityInput, AbilityReply, AbilityRequest,
-    AbilityRequestWith, AbilityStarted, AbilityStartedWith, abandon_pending,
+    AbilityCancelRequest, AbilityEnd, AbilityInput, AbilityReply, AbilityRequest, AbilityStarted,
+    abandon_pending,
 };
 use bevy_replicon::prelude::RepliconTick;
 use bevy_replicon::server::server_tick::ServerTick;
@@ -57,15 +57,16 @@ pub(super) fn abandon(
     commands.queue(abandon_pending);
 }
 
-/// On a client: sends the requests with input, and the new input, mettle
-/// wrote to the server.
-pub(super) fn ask_with<I: Component + Clone + Serialize + DeserializeOwned + MapEntities>(
-    mut requests: ResMut<Messages<AbilityRequestWith<I>>>,
-    mut inputs: ResMut<Messages<AbilityInput<I>>>,
+/// On a client: sends the requests with input `I`, and new `I` to what's
+/// running, mettle wrote to the server: requests first, so input never goes
+/// before what it's for. A behaviour taking none sends no new input.
+pub(super) fn ask<I: Component + Clone + Serialize + DeserializeOwned + MapEntities>(
+    mut requests: ResMut<Messages<AbilityRequest<I>>>,
+    inputs: Option<ResMut<Messages<AbilityInput<I>>>>,
     mut senders: Query<
         (
-            &mut MessageSender<AbilityRequestWith<I>>,
-            &mut MessageSender<AbilityInput<I>>,
+            &mut MessageSender<AbilityRequest<I>>,
+            Option<&mut MessageSender<AbilityInput<I>>>,
         ),
         With<Client>,
     >,
@@ -75,32 +76,35 @@ pub(super) fn ask_with<I: Component + Clone + Serialize + DeserializeOwned + Map
             sender.send::<MettleChannel>(request.clone());
         }
     }
+    let Some(mut inputs) = inputs else {
+        return;
+    };
     for input in inputs.drain() {
-        for (_, mut sender) in &mut senders {
+        for mut sender in senders.iter_mut().filter_map(|(_, sender)| sender) {
             sender.send::<MettleChannel>(input.clone());
         }
     }
 }
 
-/// A client's link, as the server hears its input on it. Lightyear gives a
-/// link a receiver as its first message of that kind arrives, so either may
-/// not be there yet.
-type Giving<I> = (
+/// A client's link, as the server hears its requests and input on it, and
+/// answers on it. Lightyear gives a link a receiver as its first message of
+/// that kind arrives, so either may not be there yet.
+type Asking<I> = (
     Entity,
-    Option<&'static mut MessageReceiver<AbilityRequestWith<I>>>,
+    Option<&'static mut MessageReceiver<AbilityRequest<I>>>,
     Option<&'static mut MessageReceiver<AbilityInput<I>>>,
     &'static mut MessageSender<Answer>,
 );
 
-/// On a server: takes each client's requests with input, and new input, for
-/// actors it controls; rejects requests for the rest back to it, and drops
-/// input for them.
-pub(super) fn hear_input<I: Component + Clone + Serialize + DeserializeOwned + MapEntities>(
-    mut links: Query<Giving<I>, With<ClientOf>>,
+/// On a server: takes each client's requests with input `I`, and new `I`, for
+/// actors it controls; rejects requests for the rest back to it, so its
+/// prediction is undone, and drops input for them.
+pub(super) fn hear_requests<I: Component + Clone + Serialize + DeserializeOwned + MapEntities>(
+    mut links: Query<Asking<I>, With<ClientOf>>,
     controlled: Query<&ControlledBy>,
     tick: Res<ServerTick>,
-    mut requests: MessageWriter<AbilityRequestWith<I>>,
-    mut inputs: MessageWriter<AbilityInput<I>>,
+    mut requests: MessageWriter<AbilityRequest<I>>,
+    mut inputs: Option<MessageWriter<AbilityInput<I>>>,
 ) {
     let controls = |actor: Entity, link: Entity| {
         controlled
@@ -128,13 +132,13 @@ pub(super) fn hear_input<I: Component + Clone + Serialize + DeserializeOwned + M
             }
         }
         for input in given.iter_mut().flat_map(|given| given.receive()) {
-            if controls(input.actor, link) {
-                inputs.write(input);
-            } else {
+            if !controls(input.actor, link) {
                 warn!(
                     "a client gave input for {}, which it doesn't control: dropped",
                     input.actor
                 );
+            } else if let Some(inputs) = inputs.as_mut() {
+                inputs.write(input);
             }
         }
     }
@@ -193,13 +197,7 @@ impl ForController for AbilityEnd {
     }
 }
 
-impl ForController for AbilityStarted {
-    fn actor(&self) -> Entity {
-        self.actor
-    }
-}
-
-impl<I: Send + Sync + Clone + 'static> ForController for AbilityStartedWith<I> {
+impl<I: Send + Sync + Clone + 'static> ForController for AbilityStarted<I> {
     fn actor(&self) -> Entity {
         self.actor
     }
@@ -233,59 +231,6 @@ pub(super) fn hear<M: ForController>(
     for mut receiver in &mut receivers {
         for message in receiver.receive() {
             messages.write(message);
-        }
-    }
-}
-
-/// On a client: sends the requests mettle wrote to the server.
-pub(super) fn ask(
-    mut requests: ResMut<Messages<AbilityRequest>>,
-    mut senders: Query<&mut MessageSender<AbilityRequest>, With<Client>>,
-) {
-    for request in requests.drain() {
-        for mut sender in &mut senders {
-            sender.send::<MettleChannel>(request.clone());
-        }
-    }
-}
-
-/// A client's link, as the server hears it and answers on it.
-type Asking = (
-    Entity,
-    &'static mut MessageReceiver<AbilityRequest>,
-    &'static mut MessageSender<Answer>,
-);
-
-/// On a server: takes each client's requests for actors it controls, and
-/// rejects the rest back to it, so its prediction is undone.
-pub(super) fn hear_requests(
-    mut links: Query<Asking, With<ClientOf>>,
-    controlled: Query<&ControlledBy>,
-    tick: Res<ServerTick>,
-    mut requests: MessageWriter<AbilityRequest>,
-) {
-    for (link, mut receiver, mut sender) in &mut links {
-        for request in receiver.receive() {
-            if controlled
-                .get(request.actor)
-                .is_ok_and(|controlled| controlled.owner == link)
-            {
-                requests.write(request);
-            } else {
-                warn!(
-                    "a client asked to activate {:?} for {}, which it doesn't control: rejected",
-                    request.ability, request.actor
-                );
-                sender.send::<MettleChannel>(Answer {
-                    reply: AbilityReply {
-                        actor: request.actor,
-                        ability: request.ability,
-                        activation: request.activation,
-                        rejected: Some(Failure::NotGranted),
-                    },
-                    tick: **tick,
-                });
-            }
         }
     }
 }

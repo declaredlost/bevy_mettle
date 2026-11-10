@@ -39,10 +39,9 @@ assert!((mana - 120.0).abs() < 1e-4);
 
 As it's put on, each becomes a [`Modifier`], which names its attribute by
 number, an [`AttributeId`], as Bevy names a component by its `ComponentId`.
-What's kept, folded and replicated is the number. With one in hand
-(`world.attribute_id::<SpellPower>()`, or `attributes.id_of::<SpellPower>()` from
-the [`AttributeRegistry`]), make a `Modifier` directly:
-`Modifier::flat(power, 5.0)`.
+What's kept, folded and replicated is the number: a `Modifier` is what's
+read back, and `ModifierSpec` what code writes. `spec.resolve(&attributes)`
+makes one by hand, against the [`AttributeRegistry`].
 
 ## Sources
 
@@ -71,13 +70,13 @@ within its limits. The limits always win.
 
 | Operation | Builder | What it does |
 |---|---|---|
-| `Base` | `Modifier::base` | Replaces the base. The one applied last counts |
-| `Flat` | `Modifier::flat` | Added to the base |
-| `Additive` | `Modifier::additive` | A fraction, summed with the others of its kind: +20% and +30% are +50% ("increased") |
-| `Multiplicative` | `Modifier::multiplicative` | A fraction, multiplied in on its own: +20% and +30% are +56% ("more") |
-| `Divide` | `Modifier::divide` | A fraction, summed, then divided by: +100% halves it, and more never reaches 0 (cooldown recovery) |
-| `Unscaled` | `Modifier::unscaled` | Added after everything else, scaled by nothing |
-| `Override` | `Modifier::overriding` | The value, whatever else there is. The one applied last counts |
+| `Base` | `ModifierSpec::base` | Replaces the base. The one applied last counts |
+| `Flat` | `ModifierSpec::flat` | Added to the base |
+| `Additive` | `ModifierSpec::additive` | A fraction, summed with the others of its kind: +20% and +30% are +50% ("increased") |
+| `Multiplicative` | `ModifierSpec::multiplicative` | A fraction, multiplied in on its own: +20% and +30% are +56% ("more") |
+| `Divide` | `ModifierSpec::divide` | A fraction, summed, then divided by: +100% halves it, and more never reaches 0 (cooldown recovery) |
+| `Unscaled` | `ModifierSpec::unscaled` | Added after everything else, scaled by nothing |
+| `Override` | `ModifierSpec::overriding` | The value, whatever else there is. The one applied last counts |
 
 Fractions are written as fractions: `0.2` is +20%, `-0.2` is -20%. Amounts
 (`Base`, `Flat`, `Unscaled`, `Override`) are written as amounts.
@@ -151,18 +150,18 @@ assert_eq!(app.world().get::<Current<SpellPower>>(mage).unwrap().get(), 50.0);
 
 A plain modifier always counts. Three builders narrow that.
 
-**A condition.** [`Modifier::condition`] takes any [`Condition`]. The modifier
+**A condition.** [`ModifierSpec::condition`] takes any [`Condition`]. The modifier
 counts while it holds, and as much as it does: a condition weighing 0.5
-counts half the amount. [`Modifier::read_tagged`] and
-[`Modifier::owner_has`] are the common ones. Each condition you add must
+counts half the amount. [`ModifierSpec::read_tagged`] and
+[`ModifierSpec::owner_has`] are the common ones. Each condition you add must
 hold as well: they're combined with "and".
 
-**Per another attribute.** [`Modifier::per`] counts once for each whole
+**Per another attribute.** [`ModifierSpec::per`] counts once for each whole
 amount of another attribute, read in the same context. +1 spell power per
 10 mana gives +6 at 60 mana. A multiplicative one is multiplied in each
 time: +10% twice is +21%.
 
-**Local.** [`Modifier::local`] counts only for reads that name its source:
+**Local.** [`ModifierSpec::local`] counts only for reads that name its source:
 a staff's own spell power, not every spell's. [Reading in
 context](reading.md#local-modifiers) shows how a read names one.
 
@@ -216,7 +215,7 @@ checked as content is loaded.
 
 `owner_has` reads the tags the actor owns: its [`OwnedTags`], a component
 from `bevy_mettle_core`. Effects and abilities share them. The game marks
-the mage `state.casting` while it casts. Effects grant tags, such as
+the mage `state.casting` while it casts. Effects tag their owner, such as
 `state.burning`, while they last. A tag counts for every tag above it, so
 `owner_has("state")` holds while the mage owns `state.casting`.
 
@@ -326,11 +325,11 @@ replicates ([Over lightyear](lightyear.md)).
 [`Modifiers`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.Modifiers.html
 [`ModifierOf`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.ModifierOf.html
 [`ModifierSources`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.ModifierSources.html
-[`Modifier::condition`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.Modifier.html#method.condition
-[`Modifier::read_tagged`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.Modifier.html#method.read_tagged
-[`Modifier::owner_has`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.Modifier.html#method.owner_has
-[`Modifier::per`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.Modifier.html#method.per
-[`Modifier::local`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.Modifier.html#method.local
+[`ModifierSpec::condition`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.ModifierSpec.html#method.condition
+[`ModifierSpec::read_tagged`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.ModifierSpec.html#method.read_tagged
+[`ModifierSpec::owner_has`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.ModifierSpec.html#method.owner_has
+[`ModifierSpec::per`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.ModifierSpec.html#method.per
+[`ModifierSpec::local`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.ModifierSpec.html#method.local
 [`Modifier::check`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.Modifier.html#method.check
 [`Condition`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/condition/type.Condition.html
 [`OwnedTags`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.OwnedTags.html

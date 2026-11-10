@@ -1,0 +1,9 @@
+error[E0119]: conflicting implementations of trait `Keyed` for type `Rite`
+ --> tests/derives/two_kinds.rs:5:19
+  |
+5 | #[derive(Ability, Effect)]
+  |          -------  ^^^^^^ conflicting implementation for `Rite`
+  |          |
+  |          first implementation here
+  |
+  = note: this error originates in the derive macro `Effect` (in Nightly builds, run with -Z macro-backtrace for more info)

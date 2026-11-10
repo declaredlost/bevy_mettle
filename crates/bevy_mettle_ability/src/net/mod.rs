@@ -9,14 +9,18 @@
 //! what a client mirrors, [`AbilityEnd`]s as the server ends what a client
 //! runs and [`AbilityCancelRequest`]s as a client cancels it, and
 //! [`AbilityReplica`]s with their [`AbilityOf`](crate::active::AbilityOf).
-//! An ability given input goes as [`AbilityRequestWith`] and
-//! [`AbilityStartedWith`], and new input while it runs as [`AbilityInput`].
+//! A request and a start carry the ability's input, [`NoInput`] if its
+//! behaviour takes none; new input while it runs goes as [`AbilityInput`].
+//!
+//! [`NoInput`]: crate::behaviour::NoInput
 
 mod end;
 mod input;
 mod replica;
 mod request;
 mod start;
+
+use std::any::TypeId;
 
 use bevy::prelude::*;
 use bevy_mettle_core::Activation;
@@ -28,16 +32,15 @@ pub use self::input::AbilityInput;
 pub(crate) use self::input::{add_input, send_input};
 pub use self::replica::AbilityReplica;
 pub(crate) use self::replica::{show_replicas, sync_replicas};
-pub use self::request::{
-    AbilityReply, AbilityRequest, AbilityRequestWith, PredictionTimeout, abandon_pending,
-};
+pub use self::request::{AbilityReply, AbilityRequest, PredictionTimeout, abandon_pending};
 pub(crate) use self::request::{
     Asked, Pending, answer, expire, predict, predict_granted, predict_tagged, predict_with, reject,
     resolve, serve,
 };
-pub use self::start::{AbilityStarted, AbilityStartedWith};
-pub(crate) use self::start::{hear_started, hear_started_with, started, tells_start};
+pub use self::start::AbilityStarted;
+pub(crate) use self::start::{hear_started, started, tells_start};
 use crate::active::ActiveAbility;
+use crate::behaviour::NoInput;
 use crate::engine;
 
 /// On a server: the systems activating what clients ask for, with input and
@@ -45,6 +48,11 @@ use crate::engine;
 /// the request it cancels finds it running.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Serving;
+
+/// `input`, unless it's [`NoInput`]: a behaviour taking none is given none.
+fn given<I: 'static>(input: I) -> Option<I> {
+    (TypeId::of::<I>() != TypeId::of::<NoInput>()).then_some(input)
+}
 
 /// This world's role.
 pub(crate) fn role(world: &World) -> NetRole {

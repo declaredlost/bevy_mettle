@@ -1,10 +1,10 @@
-//! `#[derive(Kind)]` and `#[derive(Tag)]`, re-exported by
-//! `bevy_mettle_core`;
+//! `#[derive(Tag)]`, re-exported by `bevy_mettle_core`;
 //! `#[derive(Attribute)]`, by `bevy_mettle_attribute`;
 //! `#[derive(Effect)]`, `#[derive(Route)]`, `#[derive(Execution)]` and
 //! `#[derive(Calculation)]`, by `bevy_mettle_effect`; and
 //! `#[derive(Ability)]` and `#[derive(Behaviour)]`, by `bevy_mettle_ability`:
-//! their documentation is there.
+//! their documentation is there. `#[derive(Kind)]` is mettle's own, for its
+//! crates' kinds.
 
 mod ability;
 mod attribute;
@@ -36,11 +36,11 @@ pub fn derive_attribute(input: TokenStream) -> TokenStream {
         .into()
 }
 
-/// A route effects deal: a marker type, its name on `#[route(..)]`.
+/// A route effects route into: its name and router's captures, `#[route(..)]`.
 ///
 /// ```ignore
 /// #[derive(Route)]
-/// #[route(name = "incoming_damage")]
+/// #[route(name = "incoming_damage", target(Shield, live))]
 /// pub struct IncomingDamage;
 /// ```
 #[proc_macro_derive(Route, attributes(route))]
@@ -66,11 +66,12 @@ pub fn derive_effect(input: TokenStream) -> TokenStream {
         .into()
 }
 
-/// An execution: its name and captures on `#[execution(..)]`.
+/// An execution: its name, captures and routes on `#[execution(..)]`.
 ///
 /// ```ignore
 /// #[derive(Execution)]
 /// #[execution(source(SpellPower, bonus), target(Armour, live, tagged("damage.fire")))]
+/// #[execution(routes(IncomingDamage))]
 /// pub struct FireDamage;
 /// ```
 #[proc_macro_derive(Execution, attributes(execution))]
@@ -125,7 +126,7 @@ pub fn derive_behaviour(input: TokenStream) -> TokenStream {
         .into()
 }
 
-/// A kind of thing content names, named in messages after its type.
+/// One of mettle's kinds, named in messages after its type: mettle's alone.
 ///
 /// Named as the type is in `snake_case`, without a leading `Any`, unless
 /// `#[kind(name = "..")]` says otherwise.
@@ -134,6 +135,7 @@ pub fn derive_behaviour(input: TokenStream) -> TokenStream {
 /// #[derive(Kind)]
 /// pub enum AnyEffect {}
 /// ```
+#[doc(hidden)]
 #[proc_macro_derive(Kind, attributes(kind))]
 pub fn derive_kind(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

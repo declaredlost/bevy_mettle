@@ -32,8 +32,8 @@ struct MaxResistance;
 #[attribute(base = 10.0)]
 struct SpellPower;
 
-assert_eq!(Life::NAME, "life");
-assert_eq!(MaxResistance::NAME, "max_resistance");
+assert_eq!(Key::of::<Life>().as_str(), "life");
+assert_eq!(Key::of::<MaxResistance>().as_str(), "max_resistance");
 ```
 
 ## Settings
@@ -76,28 +76,39 @@ attribute types can't share a name. Adding the second one panics.
 
 ### Without the derive
 
-The derive writes an [`Attribute`] impl, whose rules are constants. Write
-the impl yourself if you'd rather:
+The derive writes an [`Attribute`] impl, whose rules are constants, and a
+`Keyed` impl, of kind `AnyAttribute`, whose key is its name. Write them yourself if
+you'd rather:
 
 ```rust
 # use bevy_mettle::prelude::*;
+use bevy_mettle::core::registry::AnyAttribute;
+
 struct MaxLife;
 
+impl Keyed for MaxLife {
+    type Kind = AnyAttribute;
+    const KEY: &'static str = "max_life";
+}
+
 impl Attribute for MaxLife {
-    const NAME: &'static str = "max_life";
     const BASE: f32 = 100.0;
 }
 
 struct Life;
 
+impl Keyed for Life {
+    type Kind = AnyAttribute;
+    const KEY: &'static str = "life";
+}
+
 impl Attribute for Life {
-    const NAME: &'static str = "life";
     const BASE: f32 = 100.0;
     const MIN: Option<Limit> = Some(Limit::Value(0.0));
     const MAX: Option<Limit> = Some(Limit::attribute::<MaxLife>());
 }
 
-assert_eq!(Life::NAME, "life");
+assert_eq!(Key::of::<Life>().as_str(), "life");
 ```
 
 ## Adding them to the app

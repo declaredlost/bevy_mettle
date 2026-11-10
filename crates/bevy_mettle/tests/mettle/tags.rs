@@ -40,7 +40,7 @@ fn owned_tags_reads_and_conditions_take_tag_types() {
     let mut app = app();
     let mage = actor(
         &mut app,
-        [Modifier::flat(crate::common::id::<Damage>(), 5.0).owner_has(Stunned)],
+        [ModifierSpec::flat::<Damage>(5.0).owner_has(Stunned)],
     );
     let mut owned = app.world_mut().get_mut::<OwnedTags>(mage).unwrap();
     owned.add(Stunned);
@@ -52,10 +52,9 @@ fn owned_tags_reads_and_conditions_take_tag_types() {
     assert!(close(value::<Damage>(&app, mage, &read), 15.0));
 
     // A read tagged by type.
-    let resistance = crate::common::id::<Resistance>();
-    app.world_mut().entity_mut(mage).insert(Modifiers(vec![
-        Modifier::flat(resistance, 0.5).read_tagged(Element),
-    ]));
+    app.world_mut()
+        .entity_mut(mage)
+        .modifiers([ModifierSpec::flat::<Resistance>(0.5).read_tagged(Element)]);
     app.tick();
     let fire = AttributeContext::new().tag(Fire);
     assert!(close(value::<Resistance>(&app, mage, &fire), 0.5));
@@ -75,15 +74,15 @@ fn tags_code_adds_join_the_tree_content_is_checked_against() {
         // `element` with `element.fire`.
         tags: vec![TagKey::named("state")],
         effects: vec![
-            EffectData::lasting("stun", 1.0).grant(Stunned),
-            EffectData::lasting("burn", 1.0).grant("element.fire"),
+            EffectData::lasting("stun", 1.0).owner_tag(Stunned),
+            EffectData::lasting("burn", 1.0).owner_tag("element.fire"),
         ],
         ..default()
     };
     content.check(app.world()).unwrap();
 
     let misspelled = MettleContent {
-        effects: vec![EffectData::lasting("stun", 1.0).grant("state.stunted")],
+        effects: vec![EffectData::lasting("stun", 1.0).owner_tag("state.stunted")],
         ..default()
     };
     let errors = misspelled.check(app.world()).unwrap_err().to_string();

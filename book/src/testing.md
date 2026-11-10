@@ -38,7 +38,7 @@ fn content() -> MettleContent {
         effects: vec![
             EffectData::instant("fireball.cost")
                 .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-            EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
+            EffectData::lasting("fireball.cooldown", 2.0).owner_tag("cooldown.fireball"),
         ],
         abilities: vec![
             AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>())

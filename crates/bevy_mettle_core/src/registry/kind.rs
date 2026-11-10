@@ -4,45 +4,46 @@
 //! another's without depending on it, as an effect names the ability that
 //! applied it.
 
-/// A kind of thing content defines and names: an effect, an ability, a curve.
+/// A kind of thing mettle's content defines: what its keys are typed by.
 ///
-/// A tag is a kind too, as is anything else a game defines.
-///
-/// What a [`Key`](super::Key) names, and an [`Id`](super::Id) numbers.
-/// Usually an empty enum, `AnyEffect`. Derive it, named in messages as the
-/// type is in `snake_case`, without a leading `Any`, unless
-/// `#[kind(name = "..")]` says otherwise:
+/// What a [`Key`](super::Key) names, and an [`Id`](super::Id) numbers, each
+/// an empty enum: [`AnyTag`], [`AnyCurve`], [`AnyAttribute`], [`AnyEffect`]
+/// and [`AnyAbility`] here; `AnyExecution`, `AnyCalculation`, `AnyRoute` and
+/// `AnyContextData` in `bevy_mettle_effect`; `AnyBehaviour` in
+/// `bevy_mettle_ability`. A `Key<AnyEffect>` can't stand in for a
+/// `Key<AnyAbility>`.
 ///
 /// ```
-/// use bevy_mettle_core::registry::{Key, Kind};
+/// use bevy_mettle_core::registry::{AnyEffect, Key};
 ///
-/// #[derive(Kind)]
-/// enum AnyItem {}
-///
-/// let sword: Key<AnyItem> = Key::from_static("sword");
-/// assert_eq!(format!("{sword:?}"), r#"item("sword")"#);
+/// let burning: Key<AnyEffect> = Key::from_static("burning");
+/// assert_eq!(format!("{burning:?}"), r#"effect("burning")"#);
 /// ```
 pub trait Kind: 'static {
-    /// What one is called in messages: `effect`, `item`.
+    /// What one is called in messages: `effect`, `ability`.
     const NAME: &'static str;
 }
 
+/// Mettle's crates derive their kinds; games don't define their own.
+#[doc(hidden)]
 pub use bevy_mettle_macros::Kind;
 
-/// A type that names something of kind `K`: its key, without constructing it.
+/// A type that names something content defines: its kind and its key.
 ///
 /// Implemented by the derives (`#[derive(Effect)]`, `#[derive(Ability)]`,
 /// `#[derive(Behaviour)]`, ...) with the name they give the type, for
-/// [`Key::of`](super::Key::of). One type can be keyed as more than one kind:
-/// an ability and its effect, say.
+/// [`Key::of`](super::Key::of). A type is of one kind: an ability and its
+/// effect are two types.
 #[diagnostic::on_unimplemented(
-    message = "`{Self}` doesn't name a {K}",
-    label = "not keyed as this kind",
+    message = "`{Self}` doesn't name anything content defines",
+    label = "not keyed",
     note = "derive what it is: `#[derive(Effect)]`, `#[derive(Ability)]`, ..."
 )]
-pub trait Keyed<K: Kind> {
-    /// Its name as a `K`, as content writes it and its key holds it:
-    /// `"burning"`.
+pub trait Keyed {
+    /// What it is: `AnyEffect`, `AnyAbility`.
+    type Kind: Kind;
+
+    /// Its name, as content writes it and its key holds it: `"burning"`.
     const KEY: &'static str;
 }
 

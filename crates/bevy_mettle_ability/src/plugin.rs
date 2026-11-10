@@ -4,7 +4,8 @@ use bevy_mettle_core::tag::{TagAdded, TagRemoved};
 use bevy_mettle_effect::events::EffectApplied;
 
 use crate::active::GrantedBy;
-use crate::behaviour::BehaviourRegistry;
+use crate::behaviour::{BehaviourRegistry, NoInput};
+use crate::events::GameplayEvent;
 use crate::net::{
     AbilityCancelRequest, AbilityEnd, AbilityReply, AbilityRequest, AbilityStarted, {self},
 };
@@ -19,7 +20,8 @@ pub struct AbilitySystems;
 
 /// Activates abilities by their triggers, and grants them with their effects.
 ///
-/// Activated as owned tags come and go, and granted and taken away with the
+/// Activated as gameplay events are triggered and owned tags come and go,
+/// and granted and taken away with the
 /// effects that grant them; given their new definitions as the
 /// [`AbilityRegistry`] is replaced. Starts with an empty registry; the game
 /// inserts one built from its data.
@@ -45,7 +47,7 @@ impl Plugin for AbilityPlugin {
                 PreUpdate,
                 (
                     engine::relink.run_if(resource_changed::<AbilityRegistry>),
-                    net::serve
+                    net::serve::<NoInput>
                         .in_set(net::Serving)
                         .run_if(resource_equals(NetRole::Server)),
                     net::resolve.run_if(resource_equals(NetRole::Client)),
@@ -55,7 +57,7 @@ impl Plugin for AbilityPlugin {
                         .after(net::Serving)
                         .run_if(resource_equals(NetRole::Server)),
                     // Starts before ends: one started and ended at once ends.
-                    net::hear_started.run_if(resource_equals(NetRole::Client)),
+                    net::hear_started::<NoInput>.run_if(resource_equals(NetRole::Client)),
                     net::hear_ends.run_if(resource_equals(NetRole::Client)),
                     net::show_replicas.run_if(resource_equals(NetRole::Client)),
                 )
@@ -86,6 +88,10 @@ impl Plugin for AbilityPlugin {
                     commands.queue(move |world: &mut World| engine::tag_removed(world, actor, tag));
                 },
             )
+            .add_observer(|event: On<GameplayEvent>, mut commands: Commands| {
+                let event = event.event().clone();
+                commands.queue(move |world: &mut World| engine::event_sent(world, event));
+            })
             .add_observer(|event: On<EffectApplied>, mut commands: Commands| {
                 let (actor, effect) = (event.entity, event.effect);
                 commands

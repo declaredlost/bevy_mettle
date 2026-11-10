@@ -36,7 +36,30 @@ impl AttributeReader<'_, '_> {
         self.value_at(actor, self.registry.id_of::<A>()?, context)
     }
 
-    /// `actor`'s `attribute` in `context`, if it has it.
+    /// `actor`'s `A`'s modifiers in `context`, summed but not applied: for an
+    /// attacker's and a target's to be combined, or a tooltip.
+    #[must_use]
+    pub fn breakdown<A: Attribute>(
+        &self,
+        actor: Entity,
+        context: &AttributeContext,
+    ) -> Option<Breakdown> {
+        let attribute = self.registry.id_of::<A>()?;
+        let (state, owned) = self.actors.get(actor).ok()?;
+        state
+            .has(attribute)
+            .then(|| state.breakdown(&self.registry, owned, attribute, context))
+    }
+
+    /// `actor`'s owned tags, if it has attributes.
+    #[must_use]
+    pub fn owned(&self, actor: Entity) -> Option<&OwnedTags> {
+        self.actors.get(actor).ok().map(|(_, owned)| owned)
+    }
+
+    /// `actor`'s `attribute` in `context`, if it has it: by number, for
+    /// mettle's crates.
+    #[doc(hidden)]
     #[must_use]
     pub fn value_at(
         &self,
@@ -50,53 +73,101 @@ impl AttributeReader<'_, '_> {
             .then(|| state.value(&self.registry, owned, attribute, context))
     }
 
-    /// `actor`'s base of `attribute`, if it has it.
+    /// `actor`'s base of `attribute`, if it has it: by number, for mettle's
+    /// crates.
+    #[doc(hidden)]
     #[must_use]
     pub fn base_at(&self, actor: Entity, attribute: AttributeId) -> Option<f32> {
         let (state, _) = self.actors.get(actor).ok()?;
         state.cached_base(attribute)
     }
+}
 
-    /// `actor`'s `A`'s modifiers in `context`, summed but not applied: for an
-    /// attacker's and a target's to be combined, or a tooltip.
-    #[must_use]
-    pub fn breakdown<A: Attribute>(
+/// Reading and changing attributes on the world: in exclusive systems, tests.
+///
+/// Each names its attribute by type, as the reader does.
+pub trait AttributeWorld {
+    /// `A`'s number in this world's app, if it's added: as
+    /// `world.component_id::<T>()` is to a component, and what events name it
+    /// by.
+    fn attribute_id<A: Attribute>(&self) -> Option<AttributeId>;
+
+    /// `actor`'s `A` in `context`, if it has `A`.
+    fn value<A: Attribute>(&self, actor: Entity, context: &AttributeContext) -> Option<f32>;
+
+    /// `actor`'s `A`'s modifiers in `context`, summed but not applied.
+    fn breakdown<A: Attribute>(
+        &self,
+        actor: Entity,
+        context: &AttributeContext,
+    ) -> Option<Breakdown>;
+
+    /// `actor`'s base of `A`, if it has `A`.
+    fn base<A: Attribute>(&self, actor: Entity) -> Option<f32>;
+
+    /// Changes `actor`'s `A`'s base by `op` and `value`, as an instant effect
+    /// does (damage taken off life), rounded and kept within its limits: as
+    /// [`Operation::apply`] says. Whether it has `A`.
+    ///
+    /// The limits are read as the bases are now, though they changed since
+    /// attributes were last kept.
+    fn apply_to_base<A: Attribute>(&mut self, actor: Entity, op: Operation, value: f32) -> bool;
+
+    /// What `actor`'s `A`'s base would be were `base` changed by `op` and
+    /// `value`, as [`apply_to_base`](Self::apply_to_base) changes it: rounded
+    /// and kept within its limits, read as the bases are now. `None` if `A`
+    /// isn't added.
+    fn base_after<A: Attribute>(
+        &mut self,
+        actor: Entity,
+        base: f32,
+        op: Operation,
+        value: f32,
+    ) -> Option<f32>;
+}
+
+impl AttributeWorld for World {
+    fn attribute_id<A: Attribute>(&self) -> Option<AttributeId> {
+        self.get_resource::<AttributeRegistry>()?.id_of::<A>()
+    }
+
+    fn value<A: Attribute>(&self, actor: Entity, context: &AttributeContext) -> Option<f32> {
+        self.value_at(actor, self.attribute_id::<A>()?, context)
+    }
+
+    fn breakdown<A: Attribute>(
         &self,
         actor: Entity,
         context: &AttributeContext,
     ) -> Option<Breakdown> {
-        self.breakdown_at(actor, self.registry.id_of::<A>()?, context)
+        self.breakdown_at(actor, self.attribute_id::<A>()?, context)
     }
 
-    /// `actor`'s `attribute`'s modifiers in `context`, summed but not applied.
-    #[must_use]
-    pub fn breakdown_at(
-        &self,
+    fn base<A: Attribute>(&self, actor: Entity) -> Option<f32> {
+        self.base_at(actor, self.attribute_id::<A>()?)
+    }
+
+    fn apply_to_base<A: Attribute>(&mut self, actor: Entity, op: Operation, value: f32) -> bool {
+        self.attribute_id::<A>()
+            .is_some_and(|attribute| self.apply_to_base_at(actor, attribute, op, value))
+    }
+
+    fn base_after<A: Attribute>(
+        &mut self,
         actor: Entity,
-        attribute: AttributeId,
-        context: &AttributeContext,
-    ) -> Option<Breakdown> {
-        let (state, owned) = self.actors.get(actor).ok()?;
-        state
-            .has(attribute)
-            .then(|| state.breakdown(&self.registry, owned, attribute, context))
-    }
-
-    /// `actor`'s owned tags, if it has attributes.
-    #[must_use]
-    pub fn owned(&self, actor: Entity) -> Option<&OwnedTags> {
-        self.actors.get(actor).ok().map(|(_, owned)| owned)
+        base: f32,
+        op: Operation,
+        value: f32,
+    ) -> Option<f32> {
+        let attribute = self.attribute_id::<A>()?;
+        self.base_after_at(actor, attribute, base, op, value)
     }
 }
 
-/// Reading and changing attributes on the world, without their types.
-///
-/// For exclusive systems, effects and tests.
-pub trait AttributeWorld {
-    /// `A`'s number in this world's app, if it's added: as
-    /// `world.component_id::<T>()` is to a component.
-    fn attribute_id<A: Attribute>(&self) -> Option<AttributeId>;
-
+/// [`AttributeWorld`] by number, for mettle's crates: what an effect's data
+/// and the network name attributes by.
+#[doc(hidden)]
+pub trait NumberedAttributes {
     /// `actor`'s `attribute` in `context`, if it has it.
     fn value_at(
         &self,
@@ -113,13 +184,11 @@ pub trait AttributeWorld {
         context: &AttributeContext,
     ) -> Option<Breakdown>;
 
-    /// Changes `actor`'s `attribute`'s base by `op` and `value`, as an instant
-    /// effect does (damage taken off life), rounded and kept within its limits:
-    /// as [`Operation::apply`] says. Whether it has `attribute`.
-    ///
-    /// The limits are read as the bases are now, though they changed since
-    /// attributes were last kept.
-    fn apply_to_base(
+    /// `actor`'s `attribute`'s base, if it has it.
+    fn base_at(&self, actor: Entity, attribute: AttributeId) -> Option<f32>;
+
+    /// As [`AttributeWorld::apply_to_base`].
+    fn apply_to_base_at(
         &mut self,
         actor: Entity,
         attribute: AttributeId,
@@ -127,11 +196,8 @@ pub trait AttributeWorld {
         value: f32,
     ) -> bool;
 
-    /// What `actor`'s `attribute`'s base would be were `base` changed by `op`
-    /// and `value`, as [`apply_to_base`](Self::apply_to_base) changes it:
-    /// rounded and kept within its limits, read as the bases are now. `None`
-    /// if there's no such attribute.
-    fn base_after(
+    /// As [`AttributeWorld::base_after`].
+    fn base_after_at(
         &mut self,
         actor: Entity,
         attribute: AttributeId,
@@ -139,16 +205,9 @@ pub trait AttributeWorld {
         op: Operation,
         value: f32,
     ) -> Option<f32>;
-
-    /// `actor`'s `attribute`'s base, if it has it.
-    fn base_at(&self, actor: Entity, attribute: AttributeId) -> Option<f32>;
 }
 
-impl AttributeWorld for World {
-    fn attribute_id<A: Attribute>(&self) -> Option<AttributeId> {
-        self.get_resource::<AttributeRegistry>()?.id_of::<A>()
-    }
-
+impl NumberedAttributes for World {
     fn value_at(
         &self,
         actor: Entity,
@@ -182,7 +241,7 @@ impl AttributeWorld for World {
         (registry.get(attribute)?.get_base)(self, actor)
     }
 
-    fn apply_to_base(
+    fn apply_to_base_at(
         &mut self,
         actor: Entity,
         attribute: AttributeId,
@@ -198,7 +257,7 @@ impl AttributeWorld for World {
         let Some(base) = (info.get_base)(self, actor) else {
             return false;
         };
-        let Some(kept) = self.base_after(actor, attribute, base, op, value) else {
+        let Some(kept) = self.base_after_at(actor, attribute, base, op, value) else {
             return false;
         };
         (info.set_base)(self, actor, kept);
@@ -208,7 +267,7 @@ impl AttributeWorld for World {
         true
     }
 
-    fn base_after(
+    fn base_after_at(
         &mut self,
         actor: Entity,
         attribute: AttributeId,

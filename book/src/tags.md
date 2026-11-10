@@ -174,12 +174,12 @@ In data, a set is written as a list of the tags as given, each by its name.
 ## Owned tags
 
 An actor's states are tags it owns: [`OwnedTags`], a component. The game
-marks the mage `state.casting` while it casts. Effects grant tags too: while
+marks the mage `state.casting` while it casts. Effects tag their owner too: while
 the mage burns, it owns `state.burning`. Every actor with an attribute has
 `OwnedTags`.
 
 Owned tags are counted. Each source adds one and later takes its one away.
-If two effects both grant `immune.fire`, the mage stays immune until both
+If two effects both give it `immune.fire`, the mage stays immune until both
 are gone:
 
 ```rust
@@ -213,7 +213,7 @@ index, not a comparison of names.
 
 When an actor comes to own a tag, [`TagAdded`] is triggered on it. When it
 stops, [`TagRemoved`] is. Each tag above counts too: the first fire
-immunity tells both `immune.fire` and `immune`. Observe them on the actor,
+immune state tells both `immune.fire` and `immune`. Observe them on the actor,
 or globally:
 
 ```rust

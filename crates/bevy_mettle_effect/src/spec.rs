@@ -1,15 +1,13 @@
 //! What's applied: an effect, at a level, with what code set, from whom.
 
-use std::any::TypeId;
-
 use bevy::prelude::*;
 use bevy_mettle_core::Activation;
-use bevy_mettle_core::registry::{AttributeId, EffectId};
+use bevy_mettle_core::registry::{AnyEffect, AttributeId, EffectId, Keyed, Ref};
 use bevy_mettle_core::tag::{TagKey, Tags};
 
 use crate::EffectRegistry;
-use crate::context::{AbilityRef, ContextData, EffectContext, Hit};
-use crate::data::{Capture, CaptureDef, Read};
+use crate::context::{ContextData, EffectContext};
+use crate::data::{CaptureDef, Read, Side};
 
 /// An effect code names: a marker type, its content's name on it.
 ///
@@ -33,10 +31,7 @@ use crate::data::{Capture, CaptureDef, Read};
     label = "not an effect",
     note = "derive it: `#[derive(Effect)]`"
 )]
-pub trait Effect: Send + Sync + 'static {
-    /// The name content defines it by: `"burning"`.
-    const NAME: &'static str;
-
+pub trait Effect: Keyed<Kind = AnyEffect> + Send + Sync + 'static {
     /// It, at level 1, from no one.
     #[must_use]
     fn spec(self) -> EffectSpec
@@ -76,55 +71,26 @@ pub trait Effect: Send + Sync + 'static {
 
 pub use bevy_mettle_macros::Effect;
 
-/// What names an effect, not a spec of it: an [`Effect`] type, or its number.
-///
-/// What's taken where the spec is made from it, as an ability's
-/// [`effect_spec`](https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.ActiveAbility.html#method.effect_spec)
-/// makes it: nothing set on it to be overridden.
-pub trait IntoEffectId: Send + Sync + 'static {
-    /// A spec of it, at level 1, from no one.
-    fn into_spec(self) -> EffectSpec;
-}
-
-impl<E: Effect> IntoEffectId for E {
-    fn into_spec(self) -> EffectSpec {
-        self.spec()
-    }
-}
-
-impl IntoEffectId for EffectId {
-    fn into_spec(self) -> EffectSpec {
-        EffectSpec::from_id(self)
-    }
-}
-
 impl<E: Effect> From<E> for EffectSpec {
     fn from(effect: E) -> Self {
         effect.spec()
     }
 }
 
-/// Which effect a spec applies: by type, as code names it, or by number.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Which {
-    Type { type_id: TypeId, name: &'static str },
-    Number(EffectId),
-}
-
 /// An effect about to be applied: which, at what level, with what, from whom.
 ///
 /// Unreal's `GameplayEffectSpec`: with what the applying code set. Made from
-/// an [`Effect`] type (`Burning.level(3.0)`), or from a number
-/// ([`from_id`](Self::from_id)); its effect is resolved to its number as it's
-/// applied. An active effect keeps the spec it was applied with.
+/// an [`Effect`] type (`Burning.level(3.0)`); its effect is resolved to its
+/// number as it's applied. An active effect keeps the spec it was applied
+/// with.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EffectSpec {
-    effect: Which,
+    effect: Ref<AnyEffect>,
     /// Its level: what curves are read at. 1 unless it says.
     pub level: f32,
     /// What the applying code set, for `Param` magnitudes.
     pub params: Vec<(TagKey, f32)>,
-    /// What it carries beyond them: who applied it, what struck, where.
+    /// What it carries beyond them: who applied it, and context data.
     pub context: EffectContext,
     /// Its source's attributes as they were when it was made, for its
     /// effect's snapshot captures: taken by
@@ -140,20 +106,18 @@ impl EffectSpec {
     /// `E`, at level 1, from no one.
     #[must_use]
     pub fn of<E: Effect>() -> Self {
-        Self::new(Which::Type {
-            type_id: TypeId::of::<E>(),
-            name: E::NAME,
-        })
+        Self::new(Ref::of::<E>())
     }
 
-    /// The effect numbered `effect`, at level 1, from no one: for one code
-    /// doesn't name by type, found by its number.
+    /// The effect numbered `effect`, at level 1, from no one: for mettle's
+    /// crates, which know effects by number (an ability's cost, a replica).
+    #[doc(hidden)]
     #[must_use]
     pub fn from_id(effect: EffectId) -> Self {
-        Self::new(Which::Number(effect))
+        Self::new(Ref::Id(effect))
     }
 
-    fn new(effect: Which) -> Self {
+    fn new(effect: Ref<AnyEffect>) -> Self {
         Self {
             effect,
             level: 1.0,
@@ -190,43 +154,9 @@ impl EffectSpec {
         self
     }
 
-    /// Struck by `causer`: the arrow, the trap.
-    #[must_use]
-    pub fn causer(mut self, causer: Entity) -> Self {
-        self.context = self.context.causer(causer);
-        self
-    }
-
-    /// Come from `object`: the bow, the item.
-    #[must_use]
-    pub fn object(mut self, object: Entity) -> Self {
-        self.context = self.context.object(object);
-        self
-    }
-
-    /// Applied by `ability`, at the level it was activated at.
-    #[must_use]
-    pub fn ability(mut self, ability: AbilityRef) -> Self {
-        self.context = self.context.ability(ability);
-        self
-    }
-
-    /// Hit at `hit`.
-    #[must_use]
-    pub fn hit(mut self, hit: Hit) -> Self {
-        self.context = self.context.hit(hit);
-        self
-    }
-
-    /// Come from `origin`.
-    #[must_use]
-    pub fn origin(mut self, origin: Vec3) -> Self {
-        self.context = self.context.origin(origin);
-        self
-    }
-
-    /// With `data`, the game's own on its context: in place of any of its
-    /// type.
+    /// With `data` on its context, in place of any of its type: mettle's own
+    /// ([`Causer`](crate::context::Causer), [`Hit`](crate::context::Hit), ..)
+    /// or the game's.
     #[must_use]
     pub fn with<C: ContextData>(mut self, data: C) -> Self {
         self.context = self.context.with(data);
@@ -254,7 +184,7 @@ impl EffectSpec {
     /// spec took it.
     #[must_use]
     pub fn snapshot_of(&self, capture: &CaptureDef) -> Option<f32> {
-        if capture.from != Capture::Source {
+        if capture.from != Side::Source {
             return None;
         }
         self.snapshot
@@ -271,16 +201,13 @@ impl EffectSpec {
     /// its type isn't added.
     #[must_use]
     pub fn effect_id(&self, registry: &EffectRegistry) -> Option<EffectId> {
-        match self.effect {
-            Which::Type { type_id, .. } => registry.id_of_type(type_id),
-            Which::Number(id) => registry.get(id).map(|_| id),
-        }
+        registry.find(self.effect)
     }
 
     /// The same, for `effect`: what an effect it chains is applied with.
     pub(crate) fn for_effect(&self, effect: EffectId) -> Self {
         Self {
-            effect: Which::Number(effect),
+            effect: Ref::Id(effect),
             ..self.clone()
         }
     }
@@ -288,10 +215,7 @@ impl EffectSpec {
     /// What its effect is called, for a warning: its type's name, or its
     /// number.
     pub(crate) fn label(&self) -> String {
-        match self.effect {
-            Which::Type { name, .. } => name.to_owned(),
-            Which::Number(id) => format!("{id:?}"),
-        }
+        self.effect.label()
     }
 }
 

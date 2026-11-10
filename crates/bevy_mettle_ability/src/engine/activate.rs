@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy_mettle_core::Activation;
 use bevy_mettle_core::registry::AbilityId;
 use bevy_mettle_core::tag::OwnedTags;
-use bevy_mettle_effect::cue::{Cue, CueWorld};
+use bevy_mettle_effect::cue::CueWorld;
 
 use super::check::can_activate;
 use super::commit::{Commitment, Committed, pay};
@@ -168,7 +168,7 @@ pub(crate) fn mirror<I: Component + Clone>(
     start(world, ability, actor, &def, level, None, activation, input);
 }
 
-/// Starts `ability`, checked and paid for: what it cancels ended, its tags
+/// Starts `ability`, checked and paid for: what it ends ended, its tags
 /// granted, its cues played, and its behaviour put on with its input.
 #[expect(
     clippy::too_many_arguments,
@@ -191,20 +191,20 @@ fn start<I: Component + Clone>(
                 && world.get::<ActiveAbility>(*other).is_some()
                 && world
                     .get::<GrantedAbility>(*other)
-                    .is_some_and(|other| other.def.tags.contains_any(&def.cancels))
+                    .is_some_and(|other| other.def.tags.contains_any(&def.ends))
         })
         .collect();
     for other in cancelled {
         end(world, other, true);
     }
     if let Some(mut owned) = world.get_mut::<OwnedTags>(actor) {
-        owned.add_all(&def.grants);
+        owned.add_all(&def.owner_tags);
     }
     for cue in def.cues.written() {
-        world.add_cue(actor, &Cue::new(cue));
+        world.add_cue(actor, cue);
     }
     if let Some(mut granted) = world.get_mut::<GrantedAbility>(ability) {
-        granted.granted = def.grants.clone();
+        granted.owner_tags = def.owner_tags.clone();
         granted.cues = def.cues.clone();
         granted.running = Some(def.behaviour);
     }

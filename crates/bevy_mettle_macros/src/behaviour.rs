@@ -38,7 +38,6 @@ pub(crate) fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     );
     Ok(quote! {
         impl #krate::behaviour::Behaviour for #ident {
-            const NAME: &'static str = #name;
             type Input = #input;
         }
         #keyed

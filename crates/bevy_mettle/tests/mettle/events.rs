@@ -5,7 +5,9 @@ use bevy::prelude::*;
 use bevy_harness::TestApp;
 use bevy_mettle::prelude::*;
 
-use crate::common::{AttackSpeed, Damage, FIRE, Life, Resistance, actor, app, id, own, set_base};
+use crate::common::{
+    AttackSpeed, Damage, FIRE, Life, Resistance, actor, app, modifiers, own, set_base,
+};
 
 /// Records everything these tests ask about.
 fn watch(app: &mut TestApp) {
@@ -52,7 +54,7 @@ fn told(app: &mut TestApp) -> Vec<String> {
 fn a_change_is_told_once_with_what_it_was() {
     let mut app = app();
     watch(&mut app);
-    let npc = actor(&mut app, [Modifier::flat(id::<Damage>(), 5.0)]);
+    let npc = actor(&mut app, [ModifierSpec::flat::<Damage>(5.0)]);
     assert!(told(&mut app).is_empty(), "its first value isn't a change");
     app.tick();
     assert!(told(&mut app).is_empty(), "nothing changed");
@@ -69,9 +71,9 @@ fn a_change_with_nothing_in_play_is_told_and_one_only_some_reads_see_isnt() {
     told(&mut app);
     app.spawn((
         ModifierOf(npc),
-        Modifiers(vec![
-            Modifier::flat(id::<Resistance>(), 0.25),
-            Modifier::flat(id::<Resistance>(), 0.25).read_tagged(FIRE),
+        modifiers([
+            ModifierSpec::flat::<Resistance>(0.25),
+            ModifierSpec::flat::<Resistance>(0.25).read_tagged(FIRE),
         ]),
     ));
     app.tick();
@@ -84,7 +86,7 @@ fn an_owned_tag_coming_and_going_is_told_and_changes_what_counts_while_it() {
     watch(&mut app);
     let npc = actor(
         &mut app,
-        [Modifier::multiplicative(id::<AttackSpeed>(), 1.0).owner_has("state.moving")],
+        [ModifierSpec::multiplicative::<AttackSpeed>(1.0).owner_has("state.moving")],
     );
     told(&mut app);
     own(&mut app, npc, "state.moving", true);
@@ -123,7 +125,7 @@ fn a_parent_tag_is_told_only_with_its_first_and_last_child() {
 #[test]
 fn current_is_written_only_when_its_value_changes() {
     let mut app = app();
-    let npc = actor(&mut app, [Modifier::flat(id::<Damage>(), 5.0)]);
+    let npc = actor(&mut app, [ModifierSpec::flat::<Damage>(5.0)]);
     let last = |app: &TestApp| {
         app.world()
             .entity(npc)

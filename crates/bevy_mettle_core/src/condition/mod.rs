@@ -338,7 +338,7 @@ impl Condition {
 
     /// Checks its numbers, and its tags against `tags` if they're given.
     fn walk(&self, tags: Option<&TagRegistry>, within: Option<&str>) -> Result<(), Error> {
-        let known = |tag: &TagKey| tags.map_or(Ok(()), |tags| tags.known(*tag, within));
+        let known = |tag: &TagKey| tags.map_or(Ok(()), |tags| tags.resolve(*tag, within).map(drop));
         match self {
             Self::All(terms) | Self::Any(terms) => {
                 terms.iter().try_for_each(|term| term.walk(tags, within))

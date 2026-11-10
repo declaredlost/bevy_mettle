@@ -146,31 +146,29 @@ impl TagRegistry {
         self.registry.get(id).copied()
     }
 
-    /// `tag`, if it's defined, named within `within` (what names it) if it's
+    /// The number of `tag`, named within `within` (what names it) if it's
     /// named in something.
     ///
     /// # Errors
     ///
-    /// If it isn't.
-    pub fn known(&self, tag: TagKey, within: Option<&str>) -> Result<(), Error> {
-        if self.contains(tag) {
-            Ok(())
-        } else {
-            Err(unknown(tag, within))
-        }
+    /// If it isn't defined.
+    pub fn resolve(&self, tag: TagKey, within: Option<&str>) -> Result<TagId, Error> {
+        self.id(tag).ok_or_else(|| unknown(tag, within))
     }
 
-    /// Every one of `tags`, if they're defined.
+    /// Whether every one of `tags` is defined, as [`resolve`](Self::resolve)
+    /// says.
     ///
     /// # Errors
     ///
     /// The first that isn't.
-    pub fn known_all(
+    pub fn resolve_all(
         &self,
         tags: impl IntoIterator<Item = TagKey>,
         within: Option<&str>,
     ) -> Result<(), Error> {
-        tags.into_iter().try_for_each(|tag| self.known(tag, within))
+        tags.into_iter()
+            .try_for_each(|tag| self.resolve(tag, within).map(drop))
     }
 
     /// Every tag, in order of name.

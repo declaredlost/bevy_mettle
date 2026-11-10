@@ -137,7 +137,7 @@ impl<A: Attribute> PartialEq for Base<A> {
 
 impl<A: Attribute> fmt::Debug for Base<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Base<{}>({})", A::NAME, self.value)
+        write!(f, "Base<{}>({})", A::KEY, self.value)
     }
 }
 
@@ -159,7 +159,7 @@ impl<A: Attribute> PartialEq for Current<A> {
 
 impl<A: Attribute> fmt::Debug for Current<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Current<{}>({})", A::NAME, self.get())
+        write!(f, "Current<{}>({})", A::KEY, self.get())
     }
 }
 
@@ -171,13 +171,13 @@ macro_rules! type_path {
             fn type_path() -> &'static str {
                 static CELL: GenericTypePathCell = GenericTypePathCell::new();
                 CELL.get_or_insert::<Self, _>(|| {
-                    format!("bevy_mettle_attribute::{}<{}>", stringify!($ty), A::NAME)
+                    format!("bevy_mettle_attribute::{}<{}>", stringify!($ty), A::KEY)
                 })
             }
 
             fn short_type_path() -> &'static str {
                 static CELL: GenericTypePathCell = GenericTypePathCell::new();
-                CELL.get_or_insert::<Self, _>(|| format!("{}<{}>", stringify!($ty), A::NAME))
+                CELL.get_or_insert::<Self, _>(|| format!("{}<{}>", stringify!($ty), A::KEY))
             }
 
             fn type_ident() -> Option<&'static str> {

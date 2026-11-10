@@ -13,9 +13,9 @@ use bevy::prelude::*;
 use bevy::reflect::TypePath;
 use bevy_mettle_ability::AbilitySystems;
 use bevy_mettle_ability::active::AbilityOf;
+use bevy_mettle_ability::behaviour::NoInput;
 use bevy_mettle_ability::net::{
-    AbilityCancelRequest, AbilityEnd, AbilityInput, AbilityReplica, AbilityRequest,
-    AbilityRequestWith, AbilityStarted, AbilityStartedWith,
+    AbilityCancelRequest, AbilityEnd, AbilityInput, AbilityReplica, AbilityRequest, AbilityStarted,
 };
 use bevy_mettle_attribute::authority::Served;
 use bevy_mettle_attribute::modifier::ModifiersReplica;
@@ -32,8 +32,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use self::abilities::{
-    Answer, Held, ask, ask_cancels, ask_with, hear, hear_cancels, hear_input, hear_replies,
-    hear_requests, reply, tell,
+    Answer, Held, ask, ask_cancels, hear, hear_cancels, hear_replies, hear_requests, reply, tell,
 };
 use self::attributes::{remote, serve};
 pub use self::content::{ContentFingerprint, ContentMismatch};
@@ -152,7 +151,8 @@ impl Plugin for MettleNetPlugin {
                 (
                     (hear_replies, hear::<AbilityEnd>, hear::<AbilityStarted>)
                         .run_if(resource_equals(NetRole::Client)),
-                    (hear_requests, hear_cancels).run_if(resource_equals(NetRole::Server)),
+                    (hear_requests::<NoInput>, hear_cancels)
+                        .run_if(resource_equals(NetRole::Server)),
                 )
                     .after(MessageSystems::Receive)
                     .after(ReplicationSystems::Receive)
@@ -163,7 +163,7 @@ impl Plugin for MettleNetPlugin {
                 Update,
                 (
                     (
-                        ask.in_set(Asking),
+                        ask::<NoInput>.in_set(Asking),
                         ask_cancels.after(Asking),
                         remote,
                         compare_content,
@@ -222,20 +222,20 @@ impl MettleNetApp for App {
     where
         I: Component + Clone + Serialize + DeserializeOwned + MapEntities,
     {
-        self.register_message::<AbilityRequestWith<I>>()
+        self.register_message::<AbilityRequest<I>>()
             .add_map_entities()
             .add_direction(NetworkDirection::ClientToServer);
         self.register_message::<AbilityInput<I>>()
             .add_map_entities()
             .add_direction(NetworkDirection::ClientToServer);
-        self.register_message::<AbilityStartedWith<I>>()
+        self.register_message::<AbilityStarted<I>>()
             .add_map_entities()
             .add_direction(NetworkDirection::ServerToClient);
         self.add_systems(
             PreUpdate,
             (
-                hear_input::<I>.run_if(resource_equals(NetRole::Server)),
-                hear::<AbilityStartedWith<I>>.run_if(resource_equals(NetRole::Client)),
+                hear_requests::<I>.run_if(resource_equals(NetRole::Server)),
+                hear::<AbilityStarted<I>>.run_if(resource_equals(NetRole::Client)),
             )
                 .after(MessageSystems::Receive)
                 .before(AbilitySystems),
@@ -243,10 +243,10 @@ impl MettleNetApp for App {
         .add_systems(
             Update,
             (
-                ask_with::<I>
+                ask::<I>
                     .in_set(Asking)
                     .run_if(resource_equals(NetRole::Client)),
-                tell::<AbilityStartedWith<I>>
+                tell::<AbilityStarted<I>>
                     .in_set(Starting)
                     .run_if(resource_equals(NetRole::Server)),
             ),

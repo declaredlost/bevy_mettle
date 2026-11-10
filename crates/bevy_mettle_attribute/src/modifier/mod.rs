@@ -7,7 +7,7 @@ mod spec;
 
 use bevy::prelude::*;
 use bevy_mettle_core::Error;
-use bevy_mettle_core::condition::{Condition, ConditionOver};
+use bevy_mettle_core::condition::ConditionOver;
 use bevy_mettle_core::registry::AttributeId;
 use bevy_mettle_core::tag::{TagKey, TagRegistry};
 use serde::{Deserialize, Serialize};
@@ -22,15 +22,15 @@ use crate::registry::AttributeRegistry;
 /// A modifier: one line on an item, a passive or an effect.
 ///
 /// Changes an attribute by an [op](Operation) and a value, while its
-/// [`Condition`] holds and as much as it does, once for each whole so much of
-/// another attribute if it's [`per`](Self::per) one.
+/// [`Condition`](bevy_mettle_core::condition::Condition) holds and as much
+/// as it does, once for each whole so much of another attribute if it's
+/// [`per`](Self::per) one.
 ///
 /// It names its attribute by number, as an app has it, as Bevy names a
-/// component by its `ComponentId`. Code writes one by type, as a
-/// [`ModifierSpec`], which [`modifiers`](ModifierCommands::modifiers) makes a
-/// `Modifier` as it's put on an entity; with a number in hand (from
-/// [`AttributeRegistry`]), make one directly. What's written in data, an item's
-/// stats, is an effect's modifier, which names its attribute by name.
+/// component by its `ComponentId`: what's read back. Code writes one by type,
+/// as a [`ModifierSpec`], which [`modifiers`](ModifierCommands::modifiers)
+/// makes a `Modifier` as it's put on an entity. What's written in data, an
+/// item's stats, is an effect's modifier, which names its attribute by name.
 ///
 /// Its condition's tags are [`TagKey`]s, `T`; sent over a network, a
 /// `Modifier<TagId>` ([`map_tags`](Self::map_tags), [`ModifiersReplica`]).
@@ -97,7 +97,9 @@ impl<T: Copy> Modifier<T> {
 }
 
 impl Modifier {
-    /// `op` of `value` to `attribute`, everywhere and always.
+    /// `op` of `value` to `attribute`, everywhere and always: for mettle's
+    /// crates, as code writes a [`ModifierSpec`].
+    #[doc(hidden)]
     #[must_use]
     pub fn new(attribute: AttributeId, op: Operation, value: f32) -> Self {
         Self {
@@ -108,90 +110,6 @@ impl Modifier {
             per: None,
             local: false,
         }
-    }
-
-    /// Replaces `attribute`'s base.
-    #[must_use]
-    pub fn base(attribute: AttributeId, value: f32) -> Self {
-        Self::new(attribute, Operation::Base, value)
-    }
-
-    /// Adds `value` to `attribute`'s base.
-    #[must_use]
-    pub fn flat(attribute: AttributeId, value: f32) -> Self {
-        Self::new(attribute, Operation::Flat, value)
-    }
-
-    /// `attribute` by a fraction (`0.2` for +20%), summed with the other
-    /// additive ones.
-    #[must_use]
-    pub fn additive(attribute: AttributeId, value: f32) -> Self {
-        Self::new(attribute, Operation::Additive, value)
-    }
-
-    /// `attribute` by a fraction (`0.2` for +20%), multiplied in on its own.
-    #[must_use]
-    pub fn multiplicative(attribute: AttributeId, value: f32) -> Self {
-        Self::new(attribute, Operation::Multiplicative, value)
-    }
-
-    /// `attribute` divided by one more than a fraction, summed with the other
-    /// dividing ones.
-    #[must_use]
-    pub fn divide(attribute: AttributeId, value: f32) -> Self {
-        Self::new(attribute, Operation::Divide, value)
-    }
-
-    /// Adds `value` to `attribute` after everything else.
-    #[must_use]
-    pub fn unscaled(attribute: AttributeId, value: f32) -> Self {
-        Self::new(attribute, Operation::Unscaled, value)
-    }
-
-    /// `attribute` is `value`, whatever else there is.
-    #[must_use]
-    pub fn overriding(attribute: AttributeId, value: f32) -> Self {
-        Self::new(attribute, Operation::Override, value)
-    }
-
-    /// Only counting as `condition` says, and as much: added to any other
-    /// condition it has, all of which have to hold.
-    #[must_use]
-    pub fn condition(mut self, condition: Condition) -> Self {
-        self.condition = Some(match self.condition.take() {
-            Some(before) => before.and(condition),
-            None => condition,
-        });
-        self
-    }
-
-    /// Only counting where the read has `tag`, or one under it.
-    #[must_use]
-    pub fn read_tagged(self, tag: impl Into<TagKey>) -> Self {
-        self.condition(Condition::read_tagged(tag))
-    }
-
-    /// Only counting while the owner owns `tag`, or one under it.
-    #[must_use]
-    pub fn owner_has(self, tag: impl Into<TagKey>) -> Self {
-        self.condition(Condition::owner_has(tag))
-    }
-
-    /// Counting once for each whole `every` of `attribute` (more than 0).
-    ///
-    /// Not for a `Base` or an `Override`, which count only in full: such a
-    /// modifier is skipped.
-    #[must_use]
-    pub fn per(mut self, attribute: AttributeId, every: f32) -> Self {
-        self.per = Some(Per { attribute, every });
-        self
-    }
-
-    /// Only counting for reads naming its source.
-    #[must_use]
-    pub fn local(mut self) -> Self {
-        self.local = true;
-        self
     }
 
     /// Whether it always counts: no condition, not local, not per anything.

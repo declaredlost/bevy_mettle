@@ -85,14 +85,14 @@ impl Magnitude {
     /// say more of how it's read; a magnitude wherever one's taken.
     #[must_use]
     pub fn source<A: Attribute>() -> AttributeRead {
-        AttributeRead::new::<A>(Capture::Source)
+        AttributeRead::new::<A>(Side::Source)
     }
 
     /// `A` of the target's, its current value, captured as it's applied. An
     /// [`AttributeRead`], to say more of how it's read.
     #[must_use]
     pub fn target<A: Attribute>() -> AttributeRead {
-        AttributeRead::new::<A>(Capture::Target)
+        AttributeRead::new::<A>(Side::Target)
     }
 
     /// What the code applying it set as `param`.
@@ -186,8 +186,8 @@ pub struct AttributeRead {
     /// The attribute.
     pub attribute: Key<AnyAttribute>,
     /// Whose: the source's, unless it says.
-    #[serde(default)]
-    pub from: Capture,
+    #[serde(default = "from_source")]
+    pub from: Side,
     /// Which of its values: its current, unless it says.
     #[serde(default)]
     pub value: Read,
@@ -216,9 +216,9 @@ fn is_yes(snapshot: &bool) -> bool {
 }
 
 impl AttributeRead {
-    pub(crate) fn new<A: Attribute>(from: Capture) -> Self {
+    pub(crate) fn new<A: Attribute>(from: Side) -> Self {
         Self {
-            attribute: Key::from_static(A::NAME),
+            attribute: Key::of::<A>(),
             from,
             value: Read::Current,
             snapshot: true,
@@ -268,24 +268,23 @@ impl AttributeRead {
     }
 }
 
-/// Whose attribute a magnitude reads: the source's or the target's.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize
-)]
-pub enum Capture {
+/// One side of an effect: its source, the caster, or its target.
+///
+/// Whose attribute a read reads ([`AttributeRead::from`], the source's
+/// unless it says), and whose base a change changes
+/// ([`BaseChange::on`](crate::code::BaseChange::on), the target's unless it
+/// says).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Side {
     /// The source's: the caster, the attacker. None without a source.
-    #[default]
     Source,
-    /// The target's.
+    /// The target's: what it's applied to.
     Target,
+}
+
+/// What a read reads from unless it says: its source.
+fn from_source() -> Side {
+    Side::Source
 }
 
 /// Which of an attribute's values a magnitude reads: current, base or bonus.

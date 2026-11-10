@@ -39,7 +39,10 @@ mod tests {
             struct Burning;
         };
         let expanded = expand(&input).unwrap().to_string();
-        assert!(expanded.contains("NAME"), "{expanded}");
+        assert!(
+            expanded.contains("const KEY : & 'static str = \"burning\""),
+            "{expanded}"
+        );
     }
 
     #[test]
@@ -49,8 +52,11 @@ mod tests {
             struct Burning;
         };
         let expanded = expand(&input).unwrap().to_string();
-        assert!(expanded.contains("Keyed < "), "{expanded}");
-        assert!(expanded.contains("AnyEffect"), "{expanded}");
+        assert!(expanded.contains("Keyed for Burning"), "{expanded}");
+        assert!(
+            expanded.contains("__core :: registry :: AnyEffect ;"),
+            "{expanded}"
+        );
         assert!(
             expanded.contains("const KEY : & 'static str = \"fire.burning\""),
             "{expanded}"

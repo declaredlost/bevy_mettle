@@ -38,65 +38,61 @@ registry is an error.
 
 Each lasting cue on an actor is an entity of its own: an [`ActiveCue`] with
 its tag, [`CueOf`] the actor. It's spawned as the cue starts and despawned
-as it ends, or as the actor is. Hang what you play on it, and it goes when
-the cue does:
+as it ends, or as the actor is. Observe it being added and removed, or
+query it, and hang what you play on it: it goes when the cue does.
 
 ```rust
 # use bevy::prelude::*;
 # use bevy_mettle::prelude::*;
 /// Flames on every burning actor, for as long as it burns.
 fn flames(added: On<Add<ActiveCue>>, cues: Query<&ActiveCue>, mut commands: Commands) {
-    if cues.get(added.entity).is_ok_and(|cue| cue.tag.name() == "cue.burning") {
+    let Ok(cue) = cues.get(added.entity) else {
+        return;
+    };
+    if cue.tag.is_within("cue.burning") && !cue.joined {
         commands.entity(added.entity).insert(Name::new("flames"));
     }
 }
+
+/// A last puff of smoke as the burning ends: the cue's still readable.
+fn smoke(removed: On<Remove<ActiveCue>>, cues: Query<(&ActiveCue, &CueOf)>) {
+    if let Ok((cue, of)) = cues.get(removed.entity)
+        && cue.tag.is_within("cue.burning")
+    {
+        info!("smoke on {}", of.0);
+    }
+}
+# App::new().add_observer(flames).add_observer(smoke);
 ```
 
 Nothing has to remember to stop a looping effect: despawning the cue's entity
 does. The actor's [`ActiveCues`] lists them.
 
+An `ActiveCue` carries its `tag`; `joined`, whether it was going already as
+this world came to see the actor; and `unreplicated`, whether only sources
+a server doesn't replicate hold it. Its actor is its `CueOf`.
+
 A cue held by two things, two burns or a burn and your own, is one entity,
 held until both let go.
 
-## Being told
+## One-shots trigger
 
-[`CueAdded`] and [`CueRemoved`] are told on the actor as a lasting cue starts
-and ends, with its entity. [`CueExecuted`] is told as a one-shot plays, with
-how much it dealt, the level of what played it, what played it carried
-(its [context](applying-effects.md#context): who caused it, what struck,
-where it hit), the activation it was played under, and the effect, if one
-did.
-
-`magnitude` is what the execution changed the first attribute it changes
-by, the one the effect is about: a fireball's hit for 15 is `-15.0`. Every
-attribute it changed is in `changes`, in the order it first changed each,
-for a drain that shows the life it took and the mana it gave. Where it hit
-is carried if the applying code said, in the context's `hit`:
-`location()` and `normal()` read it, for where the spark goes and which way
-it faces. Otherwise, read positions from the actor and the source in the
-world showing the cue, so the spark lands where that world shows the
-target.
-
-## Handlers
-
-To play cues by tag, add handlers. Each is a system, given a [`CueEvent`]:
+[`CueExecuted`] is triggered on the actor as a one-shot plays, with what
+the effect playing it changed, the level of what played it, what played it
+carried (its [context](applying-effects.md#context): who caused it, and the
+game's own data), the activation it was played under, and the effect, if
+one did.
 
 ```rust
 # use bevy::prelude::*;
 # use bevy_mettle::prelude::*;
 # #[derive(Attribute)] #[attribute(base = 100.0, min = 0.0)] struct Life;
-/// Every hit: a spark.
-fn spark(In(event): In<CueEvent>) {
-    if let CueEvent::Executed(hit) = event {
-        info!("spark on {}", hit.entity);
-    }
-}
-
-/// A fire hit: embers and a damage number.
-fn embers(In(event): In<CueEvent>, mut shown: Local<u32>) {
-    if let CueEvent::Executed(hit) = event {
-        *shown += 1;
-        info!("embers on {}: {}", hit.entity, -hit.magnitude);
+/// A fire hit: embers and a damage number. Any other hit: a spark.
+fn hits(played: On<CueExecuted>) {
+    if played.tag.is_within("cue.hit.fire") {
+        info!("embers on {}: {}", played.entity, -played.magnitude());
+    } else if played.tag.is_within("cue.hit") {
+        info!("spark on {}", played.entity);
     }
 }
 
@@ -108,8 +104,7 @@ let mut app = App::new();
 app.add_plugins((MinimalPlugins, MettlePlugins))
     .add_attribute::<Life>()
     .add_effect::<FireballHit>()
-    .add_cue_handler("cue.hit", spark)
-    .add_cue_handler("cue.hit.fire", embers)
+    .add_observer(hits)
     .insert_resource(MettleContent {
         tags: ["cue", "cue.hit", "cue.hit.fire"]
             .into_iter()
@@ -125,10 +120,18 @@ let mage = app.world_mut().spawn(Base::<Life>::default()).id();
 app.world_mut().apply_effect(mage, FireballHit);
 ```
 
-A cue runs the handler for its most specific tag, alone: a fire hit runs
-`embers`, not `spark` too. A cold hit, with no handler of its own, runs
-`spark`. Observers of the events see every cue, for what plays on all of
-them.
+`is_within` matches a tag and every tag under it: `cue.hit` matches a fire
+hit too. Every observer sees every cue, so to play only the most specific,
+check the child tag first, as `hits` does.
+
+`magnitude()` is what the execution changed the first attribute it changes
+by, the one the effect is about: a fireball's hit for 15 is `-15.0`. Every
+attribute it changed is in `changes`, in the order it first changed each,
+for a drain that shows the life it took and the mana it gave. Where it hit
+is carried if the applying code put a [`Hit`] on the context:
+`played.context.get::<Hit>()`. Otherwise, read positions from the actor and
+the source in the world showing the cue, so the spark lands where that world
+shows the target.
 
 ## Cues from code
 
@@ -137,17 +140,30 @@ Not everything shown is an effect. Play cues yourself, on an actor, with
 
 ```rust
 # use bevy::prelude::*;
+# use bevy::ecs::entity::MapEntities;
 # use bevy_mettle::prelude::*;
+# use serde::{Deserialize, Serialize};
+/// How hard something landed: what a landing's cue plays by.
+#[derive(Reflect, Clone, PartialEq, Serialize, Deserialize, MapEntities)]
+#[reflect(ContextData)]
+struct Impact(f32);
+
 /// Called as the mage lands hard.
 fn land(commands: &mut Commands, mage: Entity) {
-    // A one-shot: the mage lands hard.
-    commands.entity(mage).execute_cue(Cue::new("cue.land").magnitude(8.0));
+    // A one-shot, with how hard it landed as its own data.
+    commands.entity(mage).execute_cue(Cue::new("cue.land").with(Impact(8.0)));
     // A lasting cue, held until removed as often as it was added.
-    commands.entity(mage).add_cue(Cue::new("cue.dust"));
+    commands.entity(mage).add_cue("cue.dust");
 }
 ```
 
-A cue made [`local`] stays in the world that plays it: a server
+A one-shot from code changes nothing, so its `magnitude()` is 0: what it
+plays by is its [context data](applying-effects.md#context), registered
+(`app.register_type::<Impact>()`) so a server can send it.
+
+`remove_cue(tag)` lets go of one source of the tag, whichever holds it,
+and warns if none does. [`add_unreplicated_cue`] and
+[`Cue::unreplicated`] keep a cue in the world that plays it: a server
 doesn't send it to its clients. On a client, cues from code are always its
 own: a client can't send them.
 
@@ -174,7 +190,7 @@ are tags like any other, so define them in content or add them with
 `add_tag`.
 
 A client coming to see an actor joins what's going: its lasting cues are
-added with `joined` set, for a quiet start rather than a burst, and it plays
+spawned with `joined` set, for a quiet start rather than a burst, and it plays
 the one-shots of the last half second, what's just happened: a projectile's
 launch, spawned with it. Older ones are past.
 
@@ -192,20 +208,19 @@ alone, unless you say, following control as it changes hands.
   made, but never sent.
 - **Cues are shown late in the frame.** Lasting cues are worked out in
   `PostUpdate`, in [`CueSystems`]. One-shots play at once.
-- **Handlers are for showing.** They run where the cue is shown, a client
-  too. Change gameplay in effects and abilities, not in cues.
+- **Cue observers are for showing.** They run where the cue is shown, a
+  client too. Change gameplay in effects and abilities, not in cues.
 
 [`ActiveCue`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/struct.ActiveCue.html
 [`CueOf`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/struct.CueOf.html
 [`ActiveCues`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/struct.ActiveCues.html
-[`CueAdded`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/struct.CueAdded.html
-[`CueRemoved`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/struct.CueRemoved.html
 [`CueExecuted`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/struct.CueExecuted.html
-[`CueEvent`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/enum.CueEvent.html
+[`Hit`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/context/struct.Hit.html
 [`execute_cue`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/trait.CueCommands.html#tymethod.execute_cue
 [`add_cue`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/trait.CueCommands.html#tymethod.add_cue
 [`remove_cue`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/trait.CueCommands.html#tymethod.remove_cue
-[`local`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/struct.Cue.html#method.local
+[`add_unreplicated_cue`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/trait.CueCommands.html#tymethod.add_unreplicated_cue
+[`Cue::unreplicated`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/struct.Cue.html#method.unreplicated
 [`ServedCues`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/struct.ServedCues.html
 [`CueBursts`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/cue/struct.CueBursts.html
 [`EffectId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.EffectId.html

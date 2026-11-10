@@ -18,7 +18,7 @@ use crate::{EffectSpec, engine};
 /// Unreal's active gameplay effect. While it counts, it carries its modifiers
 /// as [`Modifiers`](bevy_mettle_attribute::modifier::Modifiers)
 /// [`ModifierOf`](bevy_mettle_attribute::modifier::ModifierOf) the target, and
-/// the target owns the tags it grants; while it's inhibited, neither, and its
+/// the target owns its owner tags; while it's inhibited, neither, and its
 /// time stands still.
 #[derive(Component, Debug)]
 #[component(on_discard = take_back)]
@@ -33,8 +33,8 @@ pub struct ActiveEffect {
     pub(crate) period: Option<f32>,
     pub(crate) until_period: f32,
     pub(crate) inhibited: bool,
-    /// The tags it granted, to take back.
-    pub(crate) granted: Tags,
+    /// The tags it gave its owner, to take back.
+    pub(crate) owner_tags: Tags,
     /// The cues it holds on its target, to let go of.
     pub(crate) cues: Tags,
     /// What its source owned as it applied.
@@ -86,14 +86,15 @@ impl ActiveEffect {
     }
 }
 
-/// Takes back the tags `ActiveEffect` granted, and lets go of the cues it
-/// held, as it's taken off its entity however: removed, despawned with its
+/// Takes back the tags `ActiveEffect` gave its owner, and lets go of the cues
+/// it held, as it's taken off its entity however: removed, despawned with its
 /// target, or replicated away.
 ///
 /// Taken off by the game (despawned, or the component removed) rather than by
-/// mettle, it's told and chained as `remove_effect` would: once commands are
-/// applied, if its target's still there. A client's shown effect, the
-/// server's, goes as the server says, with nothing told.
+/// mettle, it's told as removed and its `on_remove` chained: once commands
+/// are applied, if its target's still there. Removing an effect is
+/// despawning it. A client's shown effect, the server's, goes as the server
+/// says, with nothing told.
 fn take_back(mut world: DeferredWorld, context: HookContext) {
     let Some(target) = world.get::<EffectOf>(context.entity).map(|of| of.0) else {
         return;
@@ -101,14 +102,14 @@ fn take_back(mut world: DeferredWorld, context: HookContext) {
     let Some(active) = world.get::<ActiveEffect>(context.entity) else {
         return;
     };
-    let granted = active.granted.clone();
+    let owner_tags = active.owner_tags.clone();
     let cues = active.cues.clone();
     let unasked = (!active.removing && world.get::<Proxy>(context.entity).is_none())
         .then(|| (active.def.clone(), active.spec.clone()));
-    if !granted.is_empty()
+    if !owner_tags.is_empty()
         && let Some(mut owned) = world.get_mut::<OwnedTags>(target)
     {
-        owned.remove_all(&granted);
+        owned.remove_all(&owner_tags);
     }
     if !cues.is_empty()
         && let Some(mut sources) = world.get_mut::<CueSources>(target)

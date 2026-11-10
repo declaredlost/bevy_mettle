@@ -7,6 +7,9 @@ use bevy_mettle_core::tag::Tags;
 use crate::{EffectSpec, engine};
 
 /// Applying and removing effects on an entity, as commands.
+///
+/// One active effect is taken off by despawning it: told as removed, and its
+/// `on_remove` chained.
 pub trait EffectCommands {
     /// Applies `spec` to this actor: an [`Effect`](crate::Effect) type
     /// (`Burning`, `Burning.level(3.0)`), or a spec of one by number.
@@ -18,9 +21,6 @@ pub trait EffectCommands {
     /// Takes every effect applied under `activation` off this actor: what a
     /// rejected prediction does.
     fn remove_activation(&mut self, activation: Activation) -> &mut Self;
-
-    /// Takes this active effect off its actor.
-    fn remove_effect(&mut self) -> &mut Self;
 }
 
 impl EffectCommands for EntityCommands<'_> {
@@ -45,13 +45,6 @@ impl EffectCommands for EntityCommands<'_> {
             engine::remove_activation(entity.into_world_mut(), target, activation);
         })
     }
-
-    fn remove_effect(&mut self) -> &mut Self {
-        self.queue(|entity: EntityWorldMut| {
-            let effect = entity.id();
-            engine::remove(entity.into_world_mut(), effect, false, 0);
-        })
-    }
 }
 
 /// Applying and removing effects on the world at once, not as commands.
@@ -64,9 +57,6 @@ pub trait EffectWorld {
 
     /// Takes every effect tagged any of `tags` off `target`.
     fn remove_effects(&mut self, target: Entity, tags: &Tags);
-
-    /// Takes the active effect `effect` off its actor.
-    fn remove_effect(&mut self, effect: Entity);
 
     /// The server confirmed `activation`: what was predicted under it stays,
     /// until the server's own effects replace it; its base changes, and the
@@ -103,10 +93,6 @@ impl EffectWorld for World {
 
     fn remove_effects(&mut self, target: Entity, tags: &Tags) {
         engine::remove_tagged(self, target, tags, 0);
-    }
-
-    fn remove_effect(&mut self, effect: Entity) {
-        engine::remove(self, effect, false, 0);
     }
 
     fn confirm_prediction(&mut self, activation: Activation) {

@@ -3,7 +3,7 @@ use bevy_mettle_core::net::NetRole;
 use bevy_mettle_core::{Mettle, MettleCorePlugin, MettleSet};
 
 use crate::code::{CalculationRegistry, ExecutionRegistry, RouteRegistry};
-use crate::context::ContextDataRegistry;
+use crate::context::{AbilityRef, Causer, ContextDataRegistry, Hit, Origin, SourceObject};
 use crate::cue::{self, CueSystems};
 use crate::{EffectRegistry, engine, net, systems};
 
@@ -25,6 +25,11 @@ impl Plugin for EffectPlugin {
             .init_resource::<CalculationRegistry>()
             .init_resource::<RouteRegistry>()
             .init_resource::<ContextDataRegistry>()
+            .register_type::<Causer>()
+            .register_type::<SourceObject>()
+            .register_type::<AbilityRef>()
+            .register_type::<Hit>()
+            .register_type::<Origin>()
             .init_resource::<NetRole>()
             .init_resource::<net::Predictions>()
             .init_resource::<systems::DueEffects>()
@@ -45,7 +50,6 @@ impl Plugin for EffectPlugin {
                     engine::settle_live.in_set(MettleSet::Settle),
                 ),
             )
-            .init_resource::<cue::CueHandlers>()
             .init_resource::<cue::Predicted>()
             .add_systems(
                 PostUpdate,

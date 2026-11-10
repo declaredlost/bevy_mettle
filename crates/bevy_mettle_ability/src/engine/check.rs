@@ -3,7 +3,7 @@
 
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
-use bevy_mettle_attribute::read::{AttributeContext, AttributeWorld};
+use bevy_mettle_attribute::read::{AttributeContext, NumberedAttributes};
 use bevy_mettle_core::tag::{OwnedTags, Tags};
 use bevy_mettle_effect::active::{ActiveEffect, ActiveEffects};
 use bevy_mettle_effect::code::Changes;
@@ -29,21 +29,20 @@ pub(crate) fn can_activate(world: &World, ability: Entity) -> Result<(), Failure
         return Err(Failure::NotGranted);
     };
     let def = &granted.def;
-    if cooldown_grants(world, granted).is_some_and(|cooling| owner.contains_any(cooling)) {
+    if cooldown_tags(world, granted).is_some_and(|cooling| owner.contains_any(cooling)) {
         return Err(Failure::Cooldown);
     }
     if !affords(world, actor, granted) {
         return Err(Failure::Cost);
     }
-    let blocked_by_owner = def.blocked_by.written().any(|tag| owner.contains(tag));
-    let blocked_by_active = abilities_of(world, actor).into_iter().any(|other| {
+    let blocked = abilities_of(world, actor).into_iter().any(|other| {
         other != ability
             && world.get::<ActiveAbility>(other).is_some()
             && world
                 .get::<GrantedAbility>(other)
                 .is_some_and(|other| def.tags.contains_any(&other.def.blocks))
     });
-    if blocked_by_owner || blocked_by_active {
+    if blocked {
         return Err(Failure::Blocked);
     }
     if def
@@ -59,13 +58,13 @@ pub(crate) fn can_activate(world: &World, ability: Entity) -> Result<(), Failure
     Ok(())
 }
 
-/// What `granted`'s cooldown grants: while its owner owns any of it, it's
-/// cooling down.
-fn cooldown_grants<'w>(world: &'w World, granted: &GrantedAbility) -> Option<&'w Tags> {
+/// What `granted`'s cooldown gives its owner: while its owner owns any of it,
+/// it's cooling down.
+fn cooldown_tags<'w>(world: &'w World, granted: &GrantedAbility) -> Option<&'w Tags> {
     world
         .get_resource::<EffectRegistry>()?
         .get(granted.def.cooldown?)
-        .map(|effect| &effect.grants)
+        .map(|effect| &effect.owner_tags)
 }
 
 /// Whether the granted `ability`'s owner could pay its cost now.
@@ -81,8 +80,8 @@ pub(crate) fn can_afford(world: &World, ability: Entity) -> bool {
 
 /// The seconds left on the granted `ability`'s cooldown, if it's cooling down
 /// (as [`can_activate`] weighs it): the longest of its owner's counting
-/// effects granting what its cooldown grants. Cooling down with no such effect,
-/// or one lasting until taken off, it's forever.
+/// effects giving its owner what its cooldown does. Cooling down with no such
+/// effect, or one lasting until taken off, it's forever.
 pub(crate) fn cooldown_remaining(world: &World, ability: Entity) -> Option<f32> {
     let (Some(granted), Some(of)) = (
         world.get::<GrantedAbility>(ability),
@@ -90,7 +89,7 @@ pub(crate) fn cooldown_remaining(world: &World, ability: Entity) -> Option<f32> 
     ) else {
         return None;
     };
-    let cooling = cooldown_grants(world, granted)?;
+    let cooling = cooldown_tags(world, granted)?;
     if !world
         .get::<OwnedTags>(of.0)
         .is_some_and(|owner| owner.contains_any(cooling))
@@ -102,7 +101,7 @@ pub(crate) fn cooldown_remaining(world: &World, ability: Entity) -> Option<f32> 
         .into_iter()
         .flat_map(ActiveEffects::iter)
         .filter_map(|effect| world.get::<ActiveEffect>(effect))
-        .filter(|effect| !effect.is_inhibited() && effect.def().grants.contains_any(cooling))
+        .filter(|effect| !effect.is_inhibited() && effect.def().owner_tags.contains_any(cooling))
         .map(|effect| effect.remaining().unwrap_or(f32::INFINITY))
         .reduce(f32::max);
     Some(longest.unwrap_or(f32::INFINITY))

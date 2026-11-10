@@ -18,8 +18,8 @@ curves, the condition language, and the registries everything is numbered in.
 
 ## Overview
 
-- A [`Key<K>`] names what content defines: a tag, a curve, an effect, of a
-  [`Kind`] such as `AnyEffect`. Checked, it's known by its number, an
+- A [`Key<K>`] names what content defines: a tag, a curve, an effect, of
+  one of mettle's [`Kind`]s, such as `AnyEffect`. Checked, it's known by its number, an
   [`Id<K>`], in a [`Registry`]: entries by number, numbers by name and by
   type, as Bevy keeps components.
 - A [`TagRegistry`] is the gameplay tags there are, from [`Tag`]s in data, each a

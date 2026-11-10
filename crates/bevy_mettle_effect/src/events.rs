@@ -47,13 +47,13 @@ pub struct EffectBlocked {
     pub reason: Blocked,
 }
 
-/// Why an effect didn't apply: a requirement, an immunity, or a stack limit.
+/// Why an effect didn't apply: a requirement, an effect blocking it, a limit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Blocked {
     /// Its requirement didn't hold.
     Requirement,
-    /// An effect on the actor makes it immune.
-    Immunity,
+    /// An effect on the actor blocks it.
+    Effect,
     /// It's at its stacking limit.
     StackLimit,
 }
@@ -68,12 +68,12 @@ pub struct Delta {
     pub delta: f32,
 }
 
-/// What an execution dealt one route, before its router turned it into changes.
+/// What an effect routed into one route, before its router ran.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Routed {
     /// The route.
     pub route: RouteId,
-    /// All the execution dealt it.
+    /// All the effect routed into it.
     pub amount: f32,
 }
 
@@ -94,8 +94,8 @@ pub struct EffectExecuted {
     pub changes: Vec<Delta>,
     /// What it changed its source's bases by: life stolen back.
     pub source_changes: Vec<Delta>,
-    /// What each route was dealt, before its router: a hit's damage before
-    /// shields took their share.
+    /// What it routed into each route, before its router: a hit's damage
+    /// before shields took their share.
     pub routed: Vec<Routed>,
 }
 

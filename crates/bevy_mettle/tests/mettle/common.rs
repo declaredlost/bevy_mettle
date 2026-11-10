@@ -78,13 +78,7 @@ pub fn attributes(app: &mut App) {
 /// [`attributes`] numbers it: the same code adds them in the same order, so
 /// the same number, in every app here, as on a server and its clients.
 pub fn id<A: Attribute>() -> AttributeId {
-    static REGISTRY: OnceLock<AttributeRegistry> = OnceLock::new();
-    REGISTRY
-        .get_or_init(|| {
-            let mut app = App::new();
-            attributes(&mut app);
-            app.world().resource::<AttributeRegistry>().clone()
-        })
+    registry()
         .id_of::<A>()
         .expect("one of the tests' attributes")
 }
@@ -94,8 +88,28 @@ pub fn app() -> TestApp {
     TestApp::builder().with(attributes).build()
 }
 
+/// `spec`, resolved as every app adding the tests' attributes numbers them.
+pub fn modifier(spec: ModifierSpec) -> Modifier {
+    spec.resolve(registry()).expect("of the tests' attributes")
+}
+
+/// `specs`, resolved, as a source's modifiers.
+pub fn modifiers(specs: impl IntoIterator<Item = ModifierSpec>) -> Modifiers {
+    specs.into_iter().map(modifier).collect()
+}
+
+/// The attributes every app adding the tests' attributes has.
+fn registry() -> &'static AttributeRegistry {
+    static REGISTRY: OnceLock<AttributeRegistry> = OnceLock::new();
+    REGISTRY.get_or_init(|| {
+        let mut app = App::new();
+        attributes(&mut app);
+        app.world().resource::<AttributeRegistry>().clone()
+    })
+}
+
 /// An actor with every attribute, `modifiers` of its own, folded.
-pub fn actor(app: &mut TestApp, modifiers: impl IntoIterator<Item = Modifier>) -> Entity {
+pub fn actor(app: &mut TestApp, modifiers: impl IntoIterator<Item = ModifierSpec>) -> Entity {
     let actor = app.spawn((
         (
             Base::<Strength>::default(),
@@ -112,8 +126,8 @@ pub fn actor(app: &mut TestApp, modifiers: impl IntoIterator<Item = Modifier>) -
             Base::<Resistance>::default(),
             Base::<MaxResistance>::default(),
         ),
-        modifiers.into_iter().collect::<Modifiers>(),
     ));
+    app.world_mut().entity_mut(actor).modifiers(modifiers);
     app.tick();
     actor
 }
@@ -126,11 +140,7 @@ pub fn get<A: Attribute>(app: &TestApp, actor: Entity) -> f32 {
 /// `actor`'s `A` for `query`, read now.
 pub fn value<A: Attribute>(app: &TestApp, actor: Entity, query: &AttributeContext<'_>) -> f32 {
     app.world()
-        .value_at(
-            actor,
-            app.world().attribute_id::<A>().expect("an attribute"),
-            query,
-        )
+        .value::<A>(actor, query)
         .expect("the actor has it")
 }
 

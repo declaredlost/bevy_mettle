@@ -9,7 +9,7 @@ use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 use bevy_mettle_attribute::modifier::{Modifier, ModifierOf, Modifiers, Operation, Provisional};
-use bevy_mettle_attribute::read::AttributeWorld;
+use bevy_mettle_attribute::read::NumberedAttributes;
 use bevy_mettle_core::Activation;
 use bevy_mettle_core::net::NetRole;
 use bevy_mettle_core::registry::{AttributeId, EffectId, TagId};
@@ -309,7 +309,7 @@ pub(crate) fn change_base(
 ) -> f32 {
     let Some(activation) = activation else {
         let before = world.base_at(actor, attribute);
-        world.apply_to_base(actor, attribute, op, value);
+        world.apply_to_base_at(actor, attribute, op, value);
         let after = world.base_at(actor, attribute);
         return after
             .zip(before)
@@ -320,7 +320,7 @@ pub(crate) fn change_base(
     };
     let overlays = overlays(world, actor);
     let shown = base + overlaid(world, &overlays, attribute);
-    let Some(after) = world.base_after(actor, attribute, shown, op, value) else {
+    let Some(after) = world.base_after_at(actor, attribute, shown, op, value) else {
         return 0.0;
     };
     let difference = after - shown;
@@ -335,12 +335,14 @@ pub(crate) fn change_base(
             .find(|modifier| modifier.attribute == attribute)
         {
             Some(modifier) => modifier.value += difference,
-            None => modifiers.0.push(Modifier::flat(attribute, difference)),
+            None => modifiers
+                .0
+                .push(Modifier::new(attribute, Operation::Flat, difference)),
         }
     } else {
         let overlay = world
             .spawn((
-                Modifiers(vec![Modifier::flat(attribute, difference)]),
+                Modifiers(vec![Modifier::new(attribute, Operation::Flat, difference)]),
                 ModifierOf(actor),
                 PredictedUnder(activation),
                 Provisional,

@@ -95,7 +95,7 @@ every actor a client receives.
   its source's tags as tag numbers, [`TagId`]s. The replica is sent again as
   it changes, but not as its time runs down.
 - **On a client**, an effect whose replica arrives is shown as a [`Proxy`]: it
-  counts, grants its tags, and its time runs down, but it isn't ticked
+  counts, tags its owner, and its time runs down, but it isn't ticked
   otherwise. Its replica says how it stands. Its despawn takes it off.
 
 ## Modifier sources from the server
@@ -129,9 +129,10 @@ On a client, `activate_ability` predicts:
 1. The fireball activates at once, under a new [`Activation`]. Its
    behaviour runs, and its cost and cooldown are applied as predictions.
 2. An [`AbilityRequest`] is written, as a message, for your transport to send
-   to the server: the actor, the ability by its number, and the activation.
-   One activated with [input](input.md) is an [`AbilityRequestWith`], the input too; new
-   input as it runs is an [`AbilityInput`].
+   to the server: the actor, the ability by its number, the activation, and
+   its [input](input.md), `NoInput` for a behaviour that takes none (the
+   default, `AbilityRequest<NoInput>`). New input as it runs is an
+   [`AbilityInput`].
 
 What's applied under a predicted activation is marked:
 
@@ -143,7 +144,7 @@ What's applied under a predicted activation is marked:
 - **An instant change**, the cost, is never written to a base. The server
   owns bases, and replicates them. The change is worked out on the base as
   shown, kept within its limits, and the difference shown as a flat
-  modifier until the server answers. A cost dealt to a
+  modifier until the server answers. A cost routed into a
   [route](effect-code.md#routes) is routed first, as the server routes it,
   and what's routed to the source is shown on the source the same way.
 
@@ -249,7 +250,7 @@ Here's a client predicting the fireball, and the server saying no:
 #     tags: ["cooldown", "cooldown.fireball"].map(TagKey::named).to_vec(),
 #     effects: vec![
 #         EffectData::instant("fireball.cost").modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-#         EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
+#         EffectData::lasting("fireball.cooldown", 2.0).owner_tag("cooldown.fireball"),
 #     ],
 #     abilities: vec![AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>()).cost("fireball.cost").cooldown("fireball.cooldown")],
 #     ..default()
@@ -382,7 +383,6 @@ Ability requests, replies and replicas are handled in [`AbilitySystems`], in
 [`AbilityEnd`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityEnd.html
 [`AbilityCancelRequest`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityCancelRequest.html
 [`AbilityRequest`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityRequest.html
-[`AbilityRequestWith`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityRequestWith.html
 [`AbilityInput`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityInput.html
 [`AbilitySystems`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilitySystems.html
 [`AttributeChanged`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/registry/struct.AttributeChanged.html

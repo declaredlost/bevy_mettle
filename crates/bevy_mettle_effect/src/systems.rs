@@ -58,7 +58,7 @@ pub(crate) fn advance(
             source: &active.source_tags,
         };
         let holds = |condition: &Condition| condition.holds(&check);
-        if active.def.remove_if.as_ref().is_some_and(holds) {
+        if active.def.end_if.as_ref().is_some_and(holds) {
             due.0.push((effect, Due { executions: 0 }));
             continue;
         }

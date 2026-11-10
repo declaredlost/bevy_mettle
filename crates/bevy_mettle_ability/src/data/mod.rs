@@ -25,11 +25,13 @@ use crate::behaviour::AnyBehaviour;
 ///     .tag("ability.spell.fire")
 ///     .cost("fireball.cost")
 ///     .cooldown("fireball.cooldown")
-///     .require(!Condition::owner_has("state.silenced"))
-///     .blocked_by("state.stunned")
-///     .cancels("ability.channel")
+///     .require(Condition::all([
+///         !Condition::owner_has("state.silenced"),
+///         !Condition::owner_has("state.stunned"),
+///     ]))
+///     .ends("ability.channel")
 ///     .blocks("ability.spell")
-///     .grant("state.casting");
+///     .owner_tag("state.casting");
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -53,22 +55,21 @@ pub struct AbilityData {
     /// (`ReadTagged`) and its owner's (`OwnerHas`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub require: Option<Condition>,
-    /// What interrupts it: while active, it's cancelled as soon as this holds,
-    /// weighed as `require` is; holding already, it can't activate.
+    /// What interrupts it: while active, it's ended (cancelled) as soon as
+    /// this holds, weighed as `require` is; holding already, it can't
+    /// activate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cancel_if: Option<Condition>,
-    /// It can't activate while its owner owns any of these.
+    pub end_if: Option<Condition>,
+    /// Active abilities tagged any of these are ended (cancelled) as it
+    /// activates.
     #[serde(default, skip_serializing_if = "Tags::is_empty")]
-    pub blocked_by: Tags,
-    /// Active abilities tagged any of these are cancelled as it activates.
-    #[serde(default, skip_serializing_if = "Tags::is_empty")]
-    pub cancels: Tags,
+    pub ends: Tags,
     /// Abilities tagged any of these can't activate while it's active.
     #[serde(default, skip_serializing_if = "Tags::is_empty")]
     pub blocks: Tags,
-    /// Tags its owner owns while it's active.
+    /// Tags its owner holds while it's active.
     #[serde(default, skip_serializing_if = "Tags::is_empty")]
-    pub grants: Tags,
+    pub owner_tags: Tags,
     /// Lasting cues held on its owner while it's active: a cast's glow.
     #[serde(default, skip_serializing_if = "Tags::is_empty")]
     pub cues: Tags,
@@ -164,11 +165,10 @@ impl AbilityData {
             cost: None,
             cooldown: None,
             require: None,
-            cancel_if: None,
-            blocked_by: Tags::new(),
-            cancels: Tags::new(),
+            end_if: None,
+            ends: Tags::new(),
             blocks: Tags::new(),
-            grants: Tags::new(),
+            owner_tags: Tags::new(),
             cues: Tags::new(),
             triggers: Vec::new(),
             commit: Commit::OnActivate,
@@ -204,25 +204,18 @@ impl AbilityData {
         self
     }
 
-    /// Interrupted as soon as `cancel_if` holds while it's active: stunned
+    /// Interrupted as soon as `end_if` holds while it's active: stunned
     /// mid-cast.
     #[must_use]
-    pub fn cancel_if(mut self, cancel_if: Condition) -> Self {
-        self.cancel_if = Some(cancel_if);
+    pub fn end_if(mut self, end_if: Condition) -> Self {
+        self.end_if = Some(end_if);
         self
     }
 
-    /// Kept from activating while its owner owns `tag`.
+    /// Ending (cancelling) active abilities tagged `tag` as it activates.
     #[must_use]
-    pub fn blocked_by(mut self, tag: impl Into<TagKey>) -> Self {
-        self.blocked_by.insert(tag.into());
-        self
-    }
-
-    /// Cancelling active abilities tagged `tag` as it activates.
-    #[must_use]
-    pub fn cancels(mut self, tag: impl Into<TagKey>) -> Self {
-        self.cancels.insert(tag.into());
+    pub fn ends(mut self, tag: impl Into<TagKey>) -> Self {
+        self.ends.insert(tag.into());
         self
     }
 
@@ -240,10 +233,10 @@ impl AbilityData {
         self
     }
 
-    /// Granting its owner `tag` while it's active.
+    /// Its owner holding `tag` while it's active.
     #[must_use]
-    pub fn grant(mut self, tag: impl Into<TagKey>) -> Self {
-        self.grants.insert(tag.into());
+    pub fn owner_tag(mut self, tag: impl Into<TagKey>) -> Self {
+        self.owner_tags.insert(tag.into());
         self
     }
 

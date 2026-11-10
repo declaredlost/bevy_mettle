@@ -176,17 +176,6 @@ impl CurveRegistry {
     pub fn curve(&self, curve: CurveId) -> Option<&(dyn BevyCurve<f32> + Send + Sync)> {
         self.0.get(curve).map(AsRef::as_ref)
     }
-
-    /// The number of the curve called `curve`, named within `within` if it's
-    /// named in something.
-    ///
-    /// # Errors
-    ///
-    /// If there's no such curve.
-    pub fn known(&self, curve: &Key<AnyCurve>, within: Option<&str>) -> Result<CurveId, Error> {
-        self.id(curve.as_str())
-            .ok_or_else(|| Error::unknown::<AnyCurve>(curve.as_str(), within))
-    }
 }
 
 /// Read as the [`Registry`] of each curve, built, by number.

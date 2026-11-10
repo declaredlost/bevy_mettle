@@ -62,14 +62,14 @@ assert_eq!(world.resource::<AbilityRegistry>().granted_by(staff_id), [channel]);
 let staff = world.get::<GrantedBy>(granted[0]).unwrap().0;
 
 // Taking it off takes channel away.
-world.remove_effect(staff);
+world.despawn(staff);
 world.flush();
 assert!(world.get_entity(granted[0]).is_err());
 ```
 
 The granted ability is [`GrantedBy`] the effect, and the effect lists what it
-granted in [`GrantedAbilities`]. It's granted at the effect's level. Its
-`GrantedAbility::source()` is the effect. [`AbilityRegistry::granted_by`]
+granted in [`GrantedAbilities`]. It's granted at the effect's level.
+[`AbilityRegistry::granted_by`]
 lists what an effect grants, by its number.
 
 Grants are applied by an observer of the effect being applied, so they land
@@ -96,14 +96,15 @@ event or a tag has no aim to give it. Content with one is rejected.
 ### Gameplay events
 
 A [`GameplayEvent`] is a tag sent to an actor, with who caused it, who it's
-about, and how much. The mage ripostes with a fireball when it parries: its
+about, and how much: an entity event, triggered on the actor with
+`commands.trigger(..)` or `world.trigger(..)`. The mage ripostes with a fireball when it parries: its
 fireball has the trigger `Trigger::Event(TagKey::named("event.parried"))`.
 
 ```rust
 # use bevy::prelude::*;
 # use bevy_mettle::prelude::*;
 fn parried(commands: &mut Commands, mage: Entity, attacker: Entity) {
-    commands.entity(mage).send_event(GameplayEvent {
+    commands.trigger(GameplayEvent {
         instigator: Some(attacker),
         target: Some(attacker),
         magnitude: 1.0,
@@ -130,8 +131,10 @@ fn aim(casting: Query<&ActiveAbility, Added<CastFireball>>) {
 }
 ```
 
-A [`GameplayEvent`] is an entity event too, triggered on the actor whether or
-not an ability is listening. Observe it for anything else a parry should do.
+The abilities it triggers activate as it's triggered, whether or not
+anything else is listening. Triggered on a `World` in an exclusive system or
+a test, they activate as the world's commands are applied: call
+`world.flush()` to have them at once. Observe it for anything else a parry should do.
 
 #### Sent by an ability
 
@@ -170,7 +173,7 @@ The mage lashes out with `smolder` while it's burning: its trigger is
 #     .add_ability::<SmolderAbility>()
 #     .insert_resource(MettleContent {
 #         tags: ["state", "state.burning"].map(TagKey::named).to_vec(),
-#         effects: vec![EffectData::lasting(Key::of::<Burning>(), 4.0).grant("state.burning")],
+#         effects: vec![EffectData::lasting(Key::of::<Burning>(), 4.0).owner_tag("state.burning")],
 #         abilities: vec![AbilityData::new(Key::of::<SmolderAbility>(), Key::of::<Smolder>())
 #             .trigger(Trigger::TagPresent(TagKey::named("state.burning")))],
 #         ..default()
@@ -195,7 +198,7 @@ assert_eq!(smoldering(&mut app), 1);
 // Put out: smolder is cancelled.
 let burning: Vec<Entity> = app.world().get::<ActiveEffects>(mage).unwrap().iter().collect();
 for effect in burning {
-    app.world_mut().remove_effect(effect);
+    app.world_mut().despawn(effect);
 }
 app.update();
 app.update();

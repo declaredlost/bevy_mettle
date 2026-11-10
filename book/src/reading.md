@@ -36,22 +36,17 @@ struct Fire;
 #[tag(parent = Elemental)]
 struct Cold;
 
-let resistance = app.world().attribute_id::<Resistance>().unwrap();
-let max = app.world().attribute_id::<MaxResistance>().unwrap();
 // A ring: +90% elemental resistance, +5% maximum fire resistance.
-app.world_mut().spawn((
-    ModifierOf(mage),
-    Modifiers(vec![
-        Modifier::flat(resistance, 0.9).read_tagged(Elemental),
-        Modifier::flat(max, 0.05).read_tagged(Fire),
-    ]),
-));
+app.world_mut().spawn(ModifierOf(mage)).modifiers([
+    ModifierSpec::flat::<Resistance>(0.9).read_tagged(Elemental),
+    ModifierSpec::flat::<MaxResistance>(0.05).read_tagged(Fire),
+]);
 app.update();
 
 let world = app.world();
 let fire = AttributeContext::new().tag(Fire);
 let cold = AttributeContext::new().tag(Cold);
-let resists = |context: &AttributeContext| world.value_at(mage, resistance, context).unwrap();
+let resists = |context: &AttributeContext| world.value::<Resistance>(mage, context).unwrap();
 assert!((resists(&fire) - 0.8).abs() < 1e-4); // capped at 75% + 5%
 assert!((resists(&cold) - 0.75).abs() < 1e-4); // capped at 75%
 assert_eq!(resists(&AttributeContext::new()), 0.0); // nothing in play
@@ -117,15 +112,11 @@ fn fireball_damage(
 #     .add_attribute::<SpellPower>()
 #     .init_resource::<Dealt>()
 #     .add_systems(Update, fireball_damage.after(MettleSystems));
-# let power = app.world().attribute_id::<SpellPower>().unwrap();
-# app.world_mut().spawn((
-#     Mage,
-#     Base::<SpellPower>::default(),
-#     Modifiers(vec![
-#         Modifier::additive(power, 0.5).read_tagged("ability.spell.fire"),
-#         Modifier::flat(power, 10.0).condition(Condition::fact_ramp("fact.flown", 2.0, 12.0)),
-#     ]),
-# ));
+# app.world_mut().spawn((Mage, Base::<SpellPower>::default())).modifiers([
+#     ModifierSpec::additive::<SpellPower>(0.5).read_tagged("ability.spell.fire"),
+#     ModifierSpec::flat::<SpellPower>(10.0)
+#         .condition(Condition::fact_ramp("fact.flown", 2.0, 12.0)),
+# ]);
 # app.update();
 # // (10 + 10 × half) × 1.5: the ramp is half-way at 7.
 # assert!((app.world().resource::<Dealt>().0 - 22.5).abs() < 1e-4);
@@ -134,15 +125,14 @@ fn fireball_damage(
 `value` is `None` if the actor doesn't have the attribute. With nothing in
 play, read `Current<A>` instead: it's already worked out.
 
-The reader also has `value_at`, which names the attribute by number rather than
-by type, `breakdown` and `breakdown_at` (below), and `owned`, an actor's
-owned tags.
+The reader also has `breakdown` (below), and `owned`, an actor's owned
+tags. Each names its attribute by type.
 
 ## On the world
 
-[`AttributeWorld`] does the same on a `World`, for exclusive systems, effect
-code and tests. It names attributes by number: `value_at`, `breakdown_at` and
-`base_at`.
+[`AttributeWorld`] does the same on a `World`, for exclusive systems and
+tests: `value`, `breakdown` and `base`, by type. `attribute_id::<A>()` is
+`A`'s number, what events such as `EffectExecuted` name it by.
 
 It also changes a base the way an instant effect does. `apply_to_base`
 changes it by an operation and a value, then rounds it and keeps it within
@@ -164,14 +154,13 @@ anything:
 #     .id();
 # app.update();
 let world = app.world_mut();
-let life = world.attribute_id::<Life>().unwrap();
 // A fireball for 130: life stops at its minimum, 0.
 assert_eq!(
-    world.base_after(mage, life, 100.0, Operation::Flat, -130.0),
+    world.base_after::<Life>(mage, 100.0, Operation::Flat, -130.0),
     Some(0.0)
 );
-world.apply_to_base(mage, life, Operation::Flat, -30.0);
-assert_eq!(world.base_at(mage, life), Some(70.0));
+world.apply_to_base::<Life>(mage, Operation::Flat, -30.0);
+assert_eq!(world.base::<Life>(mage), Some(70.0));
 ```
 
 Limits are read as the bases are now, even if they changed since attributes
@@ -194,21 +183,18 @@ into one hit:
 # let mut app = App::new();
 # app.add_plugins((MinimalPlugins, MettlePlugins.set(MettleCorePlugin::new(Update))))
 #     .add_attribute::<SpellPower>();
-# let power = app.world().attribute_id::<SpellPower>().unwrap();
 # let mage = app
 #     .world_mut()
-#     .spawn((
-#         Base::<SpellPower>::default(),
-#         Modifiers(vec![
-#             Modifier::flat(power, 5.0),
-#             Modifier::additive(power, 0.2),
-#         ]),
-#     ))
+#     .spawn(Base::<SpellPower>::default())
+#     .modifiers([
+#         ModifierSpec::flat::<SpellPower>(5.0),
+#         ModifierSpec::additive::<SpellPower>(0.2),
+#     ])
 #     .id();
 # app.update();
 let parts = app
     .world()
-    .breakdown_at(mage, power, &AttributeContext::new())
+    .breakdown::<SpellPower>(mage, &AttributeContext::new())
     .unwrap();
 assert_eq!((parts.base, parts.flat), (10.0, 5.0));
 assert!((parts.total() - 18.0).abs() < 1e-4);
@@ -228,18 +214,15 @@ spells, not to every spell:
 # app.add_plugins((MinimalPlugins, MettlePlugins.set(MettleCorePlugin::new(Update))))
 #     .add_attribute::<SpellPower>();
 # let mage = app.world_mut().spawn(Base::<SpellPower>::default()).id();
-let power = app.world().attribute_id::<SpellPower>().unwrap();
 let staff = app
     .world_mut()
-    .spawn((
-        ModifierOf(mage),
-        Modifiers(vec![Modifier::flat(power, 100.0).local()]),
-    ))
+    .spawn(ModifierOf(mage))
+    .modifiers([ModifierSpec::flat::<SpellPower>(100.0).local()])
     .id();
 app.update();
 let world = app.world();
 let with_staff = AttributeContext::new().source(staff);
-assert_eq!(world.value_at(mage, power, &with_staff), Some(110.0));
+assert_eq!(world.value::<SpellPower>(mage, &with_staff), Some(110.0));
 assert_eq!(world.get::<Current<SpellPower>>(mage).unwrap().get(), 10.0);
 ```
 

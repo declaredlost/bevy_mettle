@@ -11,8 +11,7 @@ use bevy_mettle::effect::data::MagnitudeDef;
 use bevy_mettle::prelude::*;
 
 use crate::common::{
-    AttackSpeed, Damage, FIRE, Life, Mana, Strength, actor, attributes, close, get, id, own,
-    set_base,
+    AttackSpeed, Damage, FIRE, Life, Mana, Strength, actor, attributes, close, get, own, set_base,
 };
 
 #[derive(Effect)]
@@ -51,8 +50,8 @@ fn curves() -> CurveRegistry {
 }
 
 /// What effects are checked against: what `world` has.
-fn checks(world: &World) -> EffectChecks<'_> {
-    EffectChecks {
+fn scope(world: &World) -> EffectScope<'_> {
+    EffectScope {
         tags: world.resource(),
         curves: world.resource(),
         attributes: world.resource(),
@@ -77,7 +76,7 @@ fn app(effects: &[EffectData], code: impl FnOnce(&mut App)) -> TestApp {
             let world = app.world();
             let registry = world
                 .resource::<EffectRegistry>()
-                .recheck(effects, checks(world))
+                .rebuild(effects, scope(world))
                 .unwrap();
             app.insert_resource(registry);
         })
@@ -98,7 +97,7 @@ fn errors(effects: &[EffectData], code: impl FnOnce(&mut App)) -> String {
     let world = app.world();
     world
         .resource::<EffectRegistry>()
-        .recheck(effects, checks(world))
+        .rebuild(effects, scope(world))
         .unwrap_err()
         .to_string()
 }
@@ -114,8 +113,8 @@ fn apply(app: &mut TestApp, target: Entity, spec: impl Into<EffectSpec>) {
 }
 
 /// `actor`'s own modifiers, replaced by `modifiers`.
-fn modify(app: &mut TestApp, actor: Entity, modifiers: impl IntoIterator<Item = Modifier>) {
-    *app.world_mut().get_mut::<Modifiers>(actor).unwrap() = modifiers.into_iter().collect();
+fn modify(app: &mut TestApp, actor: Entity, modifiers: impl IntoIterator<Item = ModifierSpec>) {
+    app.world_mut().entity_mut(actor).modifiers(modifiers);
     app.tick();
 }
 
@@ -311,7 +310,7 @@ fn a_read_takes_the_current_value_the_base_or_the_bonus() {
         app.add_effect::<Blast>();
     });
     let npc = actor(&mut app, []);
-    let caster = actor(&mut app, [Modifier::flat(id::<Strength>(), 5.0)]);
+    let caster = actor(&mut app, [ModifierSpec::flat::<Strength>(5.0)]);
     apply(&mut app, npc, Blast.source(caster));
     assert!(close(get::<Damage>(&app, npc), 25.0), "current: 15");
     assert!(close(get::<Mana>(&app, npc), 40.0), "base: 10");
@@ -338,7 +337,7 @@ fn a_tagged_read_counts_the_modifiers_that_count_in_its_tags() {
     let npc = actor(&mut app, []);
     let caster = actor(
         &mut app,
-        [Modifier::flat(id::<Strength>(), 7.0).read_tagged(FIRE)],
+        [ModifierSpec::flat::<Strength>(7.0).read_tagged(FIRE)],
     );
     apply(&mut app, npc, Blast.source(caster));
     assert!(close(get::<Damage>(&app, npc), 20.0), "untagged: 10");
@@ -366,8 +365,8 @@ fn a_capture_is_read_as_the_hit_its_part_of() {
         &mut app,
         [
             // +7 with fire hits, +5 against burning targets.
-            Modifier::flat(id::<Strength>(), 7.0).read_tagged(FIRE),
-            Modifier::flat(id::<Strength>(), 5.0).condition(Condition::target_has(BURNING)),
+            ModifierSpec::flat::<Strength>(7.0).read_tagged(FIRE),
+            ModifierSpec::flat::<Strength>(5.0).condition(Condition::target_has(BURNING)),
         ],
     );
     app.tick();
@@ -419,7 +418,7 @@ fn a_snapshot_keeps_its_value_and_a_live_read_follows_the_source() {
         get::<Mana>(&app, npc)
     );
     // And back down, by a modifier this time.
-    modify(&mut app, caster, [Modifier::flat(id::<Strength>(), -20.0)]);
+    modify(&mut app, caster, [ModifierSpec::flat::<Strength>(-20.0)]);
     app.tick(); // followed in the same step
     assert!(close(get::<Damage>(&app, npc), 20.0));
     assert!(close(get::<Mana>(&app, npc), 35.0), "followed: 5");
@@ -481,7 +480,7 @@ fn a_system_snapshots_a_spec_through_snapshots() {
         app.add_effect::<Blast>();
     });
     let npc = actor(&mut app, []);
-    let caster = actor(&mut app, [Modifier::flat(id::<Strength>(), 4.0)]);
+    let caster = actor(&mut app, [ModifierSpec::flat::<Strength>(4.0)]);
     let made = app
         .world_mut()
         .run_system_once(move |snapshots: Snapshots| snapshots.take(Blast.source(caster)))
@@ -636,12 +635,12 @@ struct Siphon(Reads);
 impl ExecutionFn for Siphon {
     fn execute(&self, cx: &ExecutionContext) -> Vec<BaseChange> {
         self.0.note([
-            cx.captured::<Strength>(Capture::Source),
-            cx.captured::<Damage>(Capture::Target),
-            cx.captured::<Mana>(Capture::Source),
+            cx.captured::<Strength>(Side::Source),
+            cx.captured::<Damage>(Side::Target),
+            cx.captured::<Mana>(Side::Source),
         ]);
         assert_eq!(
-            cx.captured::<Strength>(Capture::Target),
+            cx.captured::<Strength>(Side::Target),
             None,
             "the source's declared, not the target's"
         );
@@ -682,9 +681,9 @@ struct Following(Reads);
 impl CalculationFn for Following {
     fn calculate(&self, cx: &ExecutionContext) -> f32 {
         let read = [
-            cx.captured::<Strength>(Capture::Source),
-            cx.captured::<Strength>(Capture::Target),
-            cx.captured::<Mana>(Capture::Source),
+            cx.captured::<Strength>(Side::Source),
+            cx.captured::<Strength>(Side::Target),
+            cx.captured::<Mana>(Side::Source),
         ];
         self.0.note(read);
         read[0].unwrap_or(-100.0)
@@ -698,7 +697,7 @@ struct Kept;
 
 impl CalculationFn for Kept {
     fn calculate(&self, cx: &ExecutionContext) -> f32 {
-        cx.captured::<Strength>(Capture::Source).unwrap_or(-100.0)
+        cx.captured::<Strength>(Side::Source).unwrap_or(-100.0)
     }
 }
 
@@ -747,7 +746,7 @@ fn a_live_read_follows_what_the_hit_owns() {
     modify(
         &mut app,
         caster,
-        [Modifier::flat(id::<Strength>(), 5.0).condition(Condition::target_has(BURNING))],
+        [ModifierSpec::flat::<Strength>(5.0).condition(Condition::target_has(BURNING))],
     );
     app.tick();
     app.world_mut().apply_effect(npc, Aura.source(caster));

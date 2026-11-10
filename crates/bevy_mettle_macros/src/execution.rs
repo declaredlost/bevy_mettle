@@ -25,14 +25,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn it_has_a_name_and_captures() {
+    fn it_has_a_name_captures_and_routes() {
         let input = parse_quote! {
             #[execution(base = 1.0)]
             struct FireDamage;
         };
         let error = expand(&input).expect_err("an error");
         assert!(
-            error.to_string().contains("has a name and captures"),
+            error.to_string().contains("routes it routes into"),
             "{error}"
         );
     }
@@ -43,6 +43,9 @@ mod tests {
             struct FireDamage;
         };
         let expanded = expand(&input).unwrap().to_string();
-        assert!(expanded.contains("NAME"), "{expanded}");
+        assert!(
+            expanded.contains("const KEY : & 'static str = \"fire_damage\""),
+            "{expanded}"
+        );
     }
 }

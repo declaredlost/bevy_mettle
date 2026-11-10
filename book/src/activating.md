@@ -29,12 +29,10 @@ fn spawn_mage(mut commands: Commands) {
 Granting takes an [`AbilitySpec`]: which ability, and at what level. The
 ability type is its own spec, at level 1, so `grant_ability(Fireball)`
 grants it at level 1 and `grant_ability(Fireball.level(2.0))` at level 2.
-Code that doesn't know the type, such as a tool listing every ability, grants
-one by its number, an [`AbilityId`]: `AbilitySpec::from_id(id).level(2.0)`.
 
-Activating takes an [`Ability`] type, or an `AbilityId`, for code that
-doesn't know the type: a hotbar listing whatever the actor was granted.
-Either is an [`IntoAbilityId`].
+Activating takes an [`Ability`] type: `activate_ability(Fireball)`. Code
+that doesn't know the type, such as a hotbar listing whatever the actor was
+granted, activates the granted ability's entity: `activate(ability)`.
 
 The granted ability is an entity of its own, with a [`GrantedAbility`] and
 an [`AbilityOf`] pointing at the mage. The mage gets [`Abilities`], the list
@@ -42,10 +40,11 @@ of what it's been granted. Despawning the mage despawns its abilities.
 
 [`GrantedAbility`] tells you which ability it is (`id()`, its number, and
 `def()`), its level
-(`level()`), the effect that granted it if one did (`source()`), and whether
+(`level()`), and whether
 this activation has paid its cost (`is_cost_paid()`), started its cooldown
 (`is_cooldown_started()`), or both (`is_committed()`). The level is what the
-cost's and cooldown's curves are read at.
+cost's and cooldown's curves are read at. The effect that granted it, if one
+did, is its [`GrantedBy`].
 
 Granting the same ability twice gives the actor two entities. Activating by
 type or number uses the first.
@@ -59,22 +58,23 @@ Aim(at))`. [Input and targets](input.md) covers that. Mettle checks, in this ord
 
 1. **Granted.** The mage has a fireball, and it isn't active already.
    Otherwise `Failure::NotGranted` or `Failure::Active`.
-2. **Not cooling down.** The mage owns no tag the cooldown effect grants.
+2. **Not cooling down.** The mage owns none of the cooldown effect's owner
+   tags.
    Otherwise `Failure::Cooldown`.
 3. **Affordable.** Paying the cost leaves no attribute below 0. Otherwise
    `Failure::Cost`.
-4. **Not blocked.** The mage owns none of `blocked_by`, and no other active
-   ability `blocks` the fireball's tags. Otherwise `Failure::Blocked`.
+4. **Not blocked.** No other active ability `blocks` the fireball's tags.
+   Otherwise `Failure::Blocked`.
 5. **Required.** `require` holds. Otherwise `Failure::Requirement`.
-6. **Not interrupted.** `cancel_if` doesn't hold. Otherwise
+6. **Not interrupted.** `end_if` doesn't hold. Otherwise
    `Failure::Interrupted`.
 
 Then it activates:
 
 - with `Commit::OnActivate`, its cost and cooldown are applied first, so
   its behaviour starts paid for;
-- active abilities it `cancels` are cancelled;
-- the mage owns what it `grants`;
+- active abilities it `ends` are cancelled;
+- the mage owns its `owner_tags`;
 - [`ActiveAbility`] is put on the ability's entity, with its behaviour's
   component;
 - [`AbilityActivated`] is triggered on the mage.
@@ -108,12 +108,12 @@ Here's the whole round, run on the world directly:
 # let fireball = AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>())
 #     .cost("fireball.cost")
 #     .cooldown("fireball.cooldown")
-#     .grant("state.casting");
+#     .owner_tag("state.casting");
 # app.insert_resource(MettleContent {
 #     tags: ["state", "state.casting", "cooldown", "cooldown.fireball"].map(TagKey::named).to_vec(),
 #     effects: vec![
 #         EffectData::instant("fireball.cost").modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-#         EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
+#         EffectData::lasting("fireball.cooldown", 2.0).owner_tag("cooldown.fireball"),
 #     ],
 #     abilities: vec![fireball],
 #     ..default()
@@ -189,8 +189,8 @@ it, if one did.
 A behaviour applies effects through it, with `effect_spec`, Unreal's
 `MakeOutgoingGameplayEffectSpec`. The spec it makes is from the actor,
 struck by it, at the ability's level, under this activation, its
-[context](applying-effects.md#context) told the ability. A projectile says
-it struck instead, with `.causer(..)`:
+[context](applying-effects.md#context) told the ability, an `AbilityRef`.
+A projectile says it struck instead, with `.with(Causer(..))`:
 
 ```rust
 # use bevy::prelude::*;
@@ -207,13 +207,13 @@ fn hit(fireballs: Query<(&ActiveAbility, &Fireball)>, mut commands: Commands) {
         if let (Some(target), Some(projectile)) = (fireball.target, fireball.projectile) {
             commands
                 .entity(target)
-                .apply_effect(active.effect_spec(FireballHit).causer(projectile));
+                .apply_effect(active.effect_spec::<FireballHit>().with(Causer(projectile)));
         }
     }
 }
 ```
 
-It takes the effect, by type or number, and the builders set more after:
+It takes the effect by type, and the builders set more after:
 another level, params, what struck. Apply what an ability does this way, not
 with a spec of your own. Under the
 activation, a client's prediction of it is taken back if the server rejects
@@ -251,18 +251,20 @@ These are commands on the ability's entity:
 | `commit_cooldown()` | Starts the cooldown alone. |
 | `end_ability()` | Ends it: its behaviour's component taken off, the tags it granted taken back. On a client, its own prediction alone. |
 | `cancel_ability()` | The same, but told as cancelled. On a client, the server's copy is cancelled too. |
-| `revoke_ability()` | Takes it away from the actor, cancelling it first if it's active. |
 
 Ending an ability doesn't refund anything. The cost is paid and the cooldown
 runs its course.
 
-An ability despawned while it's active takes back the tags it granted too.
-So does one whose entity loses its [`GrantedAbility`] some other way, such as
-replication taking it away.
+Revoking an ability is despawning it: `commands.entity(ability).despawn()`,
+or `world.despawn(ability)`. One that's active is cancelled first, as
+`cancel_ability` ends it: its behaviour's component and the tags and cues it
+held taken back, [`AbilityEnded`] told, and on a server, the client running
+it told too. So is one whose entity loses its [`GrantedAbility`] some other
+way, such as replication taking it away. One despawned with its actor tells
+nothing: there's no one left to tell.
 
 On the actor, the commands are `grant_ability`, `activate_ability`,
-`activate_tagged` and `send_event` (see [Grants and triggers](grants-triggers.md)),
-and `cancel_abilities(tags)` and `cancel_all_abilities()`: every active
+`activate_tagged`, and `cancel_abilities(tags)` and `cancel_all_abilities()`: every active
 ability tagged any of `tags` cancelled, or every one, as the actor dies.
 In an exclusive system or a test, [`AbilityWorld`] does the same on the
 `World` at once, and says how it went: `activate_ability` returns the
@@ -272,8 +274,8 @@ ability or the [`Failure`], `commit_ability` whether it could pay;
 ## Asking
 
 A UI greys out what can't be cast and sweeps cooldowns; an AI picks what it
-can cast. [`AbilityReader`], a system parameter, asks about a granted
-ability with nothing done:
+can cast. [`AbilityWorld`] asks about a granted ability with nothing done,
+from a system taking `&World`:
 
 - `can_activate(ability)`: every check activating it makes, `Ok` or the
   [`Failure`] it would fail with;
@@ -285,10 +287,10 @@ ability with nothing done:
 ```rust
 # use bevy::prelude::*;
 # use bevy_mettle::prelude::*;
-fn buttons(abilities: Query<Entity, With<GrantedAbility>>, reader: AbilityReader) {
+fn buttons(abilities: Query<Entity, With<GrantedAbility>>, world: &World) {
     for ability in &abilities {
-        let usable = reader.can_activate(ability).is_ok();
-        let sweep = reader.cooldown_remaining(ability).unwrap_or(0.0);
+        let usable = world.can_activate(ability).is_ok();
+        let sweep = world.cooldown_remaining(ability).unwrap_or(0.0);
         // Grey the button out unless usable; sweep it by what's left.
 #       let _ = (usable, sweep);
     }
@@ -297,12 +299,12 @@ fn buttons(abilities: Query<Entity, With<GrantedAbility>>, reader: AbilityReader
 ```
 
 It reads the whole world, so it doesn't run alongside systems that change
-abilities, effects or tags. [`AbilityWorld`] asks the same of the `World`.
+abilities, effects or tags.
 
 ## Interrupted
 
 A stun landing mid-cast should stop the cast. Say what interrupts an ability
-with `cancel_if`, a [condition](conditions.md) weighed as `require` is: in the
+with `end_if`, a [condition](conditions.md) weighed as `require` is: in the
 ability's own tags and its owner's.
 
 ```rust
@@ -316,7 +318,7 @@ ability's own tags and its owner's.
 struct Fireball;
 
 let fireball = AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>())
-    .cancel_if(Condition::owner_has("state.stunned"));
+    .end_if(Condition::owner_has("state.stunned"));
 
 # use std::time::Duration;
 # use bevy::time::TimeUpdateStrategy;
@@ -357,15 +359,15 @@ assert_eq!(
 ```
 
 It's weighed whenever its owner's tags change, once however many changed,
-so a `cancel_if` of `!Condition::owner_has("state.raging")` ends a rage as the
-raging stops. It's weighed as the ability activates too, past what it
-grants and cancels, and as its definition is replaced. An interrupted
+so an `end_if` of `!Condition::owner_has("state.raging")` ends a rage as the
+raging stops. It's weighed as the ability activates too, past its owner
+tags and what it ends, and as its definition is replaced. An interrupted
 ability is cancelled: [`AbilityEnded`] says so, its cost stays paid and its
 cooldown runs. Over a network, the server interrupts: see
 [Prediction](prediction.md#endings-both-ways).
 
-`cancel_if` keeps an ability from starting as well as stopping it once it
-has, so an interruption needs nothing more. `blocked_by` only keeps it from
+`end_if` keeps an ability from starting as well as stopping it once it
+has, so an interruption needs nothing more. A `require` only keeps it from
 starting: for what shouldn't stop a cast already under way.
 
 ## Told
@@ -408,16 +410,15 @@ fn out_of_mana(failed: On<AbilityFailed>, registry: Res<AbilityRegistry>) {
 
 [`Ability`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/trait.Ability.html
 [`AbilitySpec`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilitySpec.html
-[`IntoAbilityId`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/trait.IntoAbilityId.html
 [`AbilityId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.AbilityId.html
 [`Abilities`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.Abilities.html
 [`AbilityOf`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.AbilityOf.html
 [`AbilityActivated`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityActivated.html
 [`AbilityEnded`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityEnded.html
 [`AbilityFailed`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityFailed.html
-[`AbilityReader`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilityReader.html
 [`AbilityWorld`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/trait.AbilityWorld.html
 [`ActiveAbility`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.ActiveAbility.html
 [`Failure`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/enum.Failure.html
 [`GrantedAbility`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.GrantedAbility.html
 [`OwnedTags`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.OwnedTags.html
+[`GrantedBy`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.GrantedBy.html

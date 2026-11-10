@@ -6,8 +6,8 @@ use bevy_mettle_core::condition::Condition;
 use bevy_mettle_core::registry::{AnyEffect, AttributeId, CurveId, EffectId, Key};
 use bevy_mettle_core::tag::{TagKey, Tags};
 
-use super::{Capture, EffectDuration, Period, Read, Stacking};
-use crate::code::{CalculationId, Changes, ExecutionId};
+use super::{EffectDuration, Period, Read, Side, Stacking};
+use crate::code::{CalculationId, Changes, ExecutionId, RouteId};
 
 /// An effect as an app has it: its data checked, and what it names numbered.
 ///
@@ -32,24 +32,27 @@ pub struct EffectDef {
     /// What it changes.
     pub modifiers: Vec<ModifierDef>,
     /// What it captures: the slots its magnitudes' attributes, and its
-    /// executions' and calculations' captures, are read from.
+    /// executions', calculations' and routers' captures, are read from.
     pub captures: Vec<CaptureDef>,
-    /// The executions it runs, each with the slots of what it captures.
-    pub executions: Vec<(ExecutionId, Vec<usize>)>,
-    /// What its target owns while it counts.
-    pub grants: Tags,
+    /// The executions it runs, each with what it captures and routes into.
+    pub executions: Vec<ExecutionDef>,
+    /// The routes it routes into, each with the slots of what its router
+    /// captures: those its modifiers name, and its executions declare.
+    pub routes: Vec<(RouteId, Vec<usize>)>,
+    /// What its target, the owner, holds while it counts.
+    pub owner_tags: Tags,
     /// The cues it plays.
     pub cues: Tags,
     /// What has to hold for it to apply.
     pub require: Option<Condition>,
     /// What has to hold for it to count.
     pub ongoing: Option<Condition>,
-    /// What takes it off as soon as it holds.
-    pub remove_if: Option<Condition>,
-    /// The effects it takes off as it applies.
-    pub removes: Tags,
-    /// The effects it keeps from applying.
-    pub immunity: Tags,
+    /// What ends it as soon as it holds.
+    pub end_if: Option<Condition>,
+    /// The effects it ends as it applies.
+    pub ends: Tags,
+    /// The effects it keeps from applying while it lasts.
+    pub blocks: Tags,
     /// How it stacks.
     pub stacking: Option<Stacking<EffectId>>,
     /// The effects it applies as it applies.
@@ -68,10 +71,25 @@ impl EffectDef {
     }
 }
 
+/// An execution as an effect runs it: its number, captures and routes.
+///
+/// What it captures as slots in the effect's
+/// [`captures`](EffectDef::captures), and the routes it declares it routes
+/// into, numbered.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExecutionDef {
+    /// Its number.
+    pub id: ExecutionId,
+    /// The slots of what it captures.
+    pub reads: Vec<usize>,
+    /// The routes it routes into: any other it routes into is dropped.
+    pub routes: Vec<RouteId>,
+}
+
 /// A modifier as an app has it: what it changes by number.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModifierDef {
-    /// What it changes: an attribute, or what's dealt a route.
+    /// What it changes: an attribute, or what's routed into a route.
     pub changes: Changes,
     /// How.
     pub op: Operation,
@@ -136,7 +154,7 @@ pub struct CaptureDef {
     /// The attribute.
     pub attribute: AttributeId,
     /// Whose.
-    pub from: Capture,
+    pub from: Side,
     /// Which of its values.
     pub value: Read,
     /// Captured as early as it can be and kept, or read live.
