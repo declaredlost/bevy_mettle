@@ -41,7 +41,7 @@ fn content() -> MettleContent {
             EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
         ],
         abilities: vec![
-            AbilityData::new("fireball", "cast_fireball")
+            AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>())
                 .cost("fireball.cost")
                 .cooldown("fireball.cooldown"),
         ],

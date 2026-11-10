@@ -41,6 +41,10 @@ fn content() -> MettleContent {
 # assert_eq!(content().effects.len(), 2);
 ```
 
+Code with a type for something can name it by type instead,
+`AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>())`, and a
+typo is a compile error (see [Data and code](concepts.md#data-and-code)).
+
 ## Its serde shape
 
 `MettleContent` is `Serialize` and `Deserialize`, and so is everything in
@@ -89,7 +93,7 @@ and abilities code names, before any part runs. If it all holds, the
 #             EffectData::instant("fireball.cost").modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
 #             EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
 #         ],
-#         abilities: vec![AbilityData::new("fireball", "cast_fireball").cost("fireball.cost").cooldown("fireball.cooldown").blocked_by("state.stunned")],
+#         abilities: vec![AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>()).cost("fireball.cost").cooldown("fireball.cooldown").blocked_by("state.stunned")],
 #         ..Default::default()
 #     }
 # }

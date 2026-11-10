@@ -61,24 +61,26 @@ fn content() -> MettleContent {
     MettleContent {
         tags: TAGS.iter().map(|&name| TagKey::named(name)).collect(),
         effects: vec![
-            EffectData::lasting("burning", 4.0)
+            EffectData::lasting(Key::of::<Burning>(), 4.0)
                 .cue("cue.burning")
                 .ongoing(!Condition::owner_has("state.wet")),
-            EffectData::lasting("smoulder", 4.0)
+            EffectData::lasting(Key::of::<Smoulder>(), 4.0)
                 .period(1.0, false)
                 .modifier(EffectModifier::new::<Life>(Operation::Flat, -2.0))
                 .cue("cue.burning")
                 .cue("cue.hit.fire"),
-            EffectData::instant("fireball.hit")
+            EffectData::instant(Key::of::<FireballHit>())
                 .modifier(EffectModifier::new::<Life>(Operation::Flat, -15.0))
                 .cue("cue.hit.fire"),
-            EffectData::instant("drain")
+            EffectData::instant(Key::of::<Drain>())
                 .modifier(EffectModifier::new::<Life>(Operation::Flat, -20.0))
                 .modifier(EffectModifier::new::<Mana>(Operation::Flat, 10.0))
                 .modifier(EffectModifier::new::<Life>(Operation::Flat, -10.0))
                 .cue("cue.hit"),
         ],
-        abilities: vec![AbilityData::new("fireball", "cast").cue("cue.casting")],
+        abilities: vec![
+            AbilityData::new(Key::of::<Fireball>(), Key::of::<Cast>()).cue("cue.casting"),
+        ],
         ..default()
     }
 }
@@ -408,7 +410,7 @@ fn an_ability_reloaded_mid_cast_ends_what_it_started_with() {
     // A reload mid-cast: the fireball's run by another behaviour now, and
     // plays another cue.
     app.resource_mut::<MettleContent>().abilities =
-        vec![AbilityData::new("fireball", "channel").cue("cue.burning")];
+        vec![AbilityData::new(Key::of::<Fireball>(), Key::of::<Channel>()).cue("cue.burning")];
     app.tick();
     app.world_mut().end_ability(fireball);
     app.tick();

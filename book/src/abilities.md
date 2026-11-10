@@ -236,7 +236,7 @@ let effects = vec![
     EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
 ];
 
-let fireball = AbilityData::new("fireball", "cast_fireball")
+let fireball = AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>())
     .tag("ability.spell.fire")
     .cost("fireball.cost")
     .cooldown("fireball.cooldown")

@@ -210,7 +210,7 @@ This mage burns for 5 every half second, gets wet, and dries off:
 #     .to_vec()
 # }
 # fn burning() -> EffectData {
-#     EffectData::lasting("burning", 4.0)
+#     EffectData::lasting(Key::of::<Burning>(), 4.0)
 #         .tag("effect.affliction.burning")
 #         .period(0.5, true)
 #         .modifier(EffectModifier::new::<Life>(Operation::Flat, Magnitude::param("param.damage")))
@@ -305,7 +305,7 @@ struct FireballHit;
 
 /// As much damage as the caster has spell power.
 fn hit() -> EffectData {
-    EffectData::instant("fireball.hit").modifier(EffectModifier::new::<Life>(
+    EffectData::instant(Key::of::<FireballHit>()).modifier(EffectModifier::new::<Life>(
         Operation::Flat,
         Magnitude::source::<SpellPower>().times(-1.0),
     ))

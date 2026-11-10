@@ -15,7 +15,7 @@ use smol_str::SmolStr;
 
 pub use self::id::{AbilityId, AttributeId, CurveId, EffectId, Id, TagId};
 pub use self::key::Key;
-pub use self::kind::{AnyAbility, AnyAttribute, AnyCurve, AnyEffect, AnyTag, Kind};
+pub use self::kind::{AnyAbility, AnyAttribute, AnyCurve, AnyEffect, AnyTag, Keyed, Kind};
 use self::numbering::Numbering;
 
 mod id;

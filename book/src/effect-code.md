@@ -161,13 +161,13 @@ A caster with 25 spell power hits a mage with 50% fire resistance for 20:
 # }
 fn effects() -> Vec<EffectData> {
     vec![
-        EffectData::instant("fireball.hit")
+        EffectData::instant(Key::of::<FireballHit>())
             .tag("damage.elemental.fire")
-            .execution("fire_damage"),
-        EffectData::lasting("burning", Magnitude::Custom("burn_time".into()))
+            .execution(Key::of::<FireDamage>()),
+        EffectData::lasting(Key::of::<Burning>(), Magnitude::Custom(Key::of::<BurnTime>()))
             .tag("effect.affliction.burning")
             .period(0.5, false)
-            .execution("fire_damage"),
+            .execution(Key::of::<FireDamage>()),
     ]
 }
 # let mut app = App::new();
@@ -302,7 +302,7 @@ app.add_plugins((MinimalPlugins, MettlePlugins))
     .add_execution(Sear)
     .add_effect::<Searing>()
     .insert_resource(MettleContent {
-        effects: vec![EffectData::lasting("searing", 10.0).period(1.0, true).execution("sear")],
+        effects: vec![EffectData::lasting(Key::of::<Searing>(), 10.0).period(1.0, true).execution(Key::of::<Sear>())],
         ..default()
     });
 app.update();
@@ -431,7 +431,7 @@ app.add_plugins((MinimalPlugins, MettlePlugins))
     .add_route(IncomingDamage)
     .add_effect::<Hit>()
     .insert_resource(MettleContent {
-        effects: vec![EffectData::instant("hit").modifier(EffectModifier::route::<IncomingDamage>(40.0))],
+        effects: vec![EffectData::instant(Key::of::<Hit>()).modifier(EffectModifier::route::<IncomingDamage>(40.0))],
         ..default()
     });
 app.update();

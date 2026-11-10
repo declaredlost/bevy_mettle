@@ -257,7 +257,7 @@ fn told(app: &mut TestApp) -> Vec<String> {
 
 #[test]
 fn an_effect_despawned_by_the_game_is_told_and_chained_as_removed() {
-    let burning = EffectData::infinite("burning")
+    let burning = EffectData::infinite(Key::of::<Burning>())
         .grant("state.burning")
         .modifier(flat::<Damage>(5.0))
         .on_remove("singed");
@@ -281,7 +281,7 @@ fn an_effect_despawned_by_the_game_is_told_and_chained_as_removed() {
 
 #[test]
 fn an_effect_removed_by_mettle_is_told_once() {
-    let burning = EffectData::infinite("burning").grant("state.burning");
+    let burning = EffectData::infinite(Key::of::<Burning>()).grant("state.burning");
     let mut app = app(&[burning], |app| {
         app.add_effect::<Burning>();
     });
@@ -297,7 +297,7 @@ fn an_effect_removed_by_mettle_is_told_once() {
 
 #[test]
 fn an_actors_effects_despawned_with_it_tell_nothing() {
-    let burning = EffectData::infinite("burning").on_remove("burning");
+    let burning = EffectData::infinite(Key::of::<Burning>()).on_remove(Key::of::<Burning>());
     let mut app = app(&[burning], |app| {
         app.add_effect::<Burning>();
     });
@@ -312,8 +312,8 @@ fn an_actors_effects_despawned_with_it_tell_nothing() {
 
 #[test]
 fn an_instant_effect_changes_the_base_within_its_limits() {
-    let hit = EffectData::instant("hit").modifier(flat::<Life>(-20.0));
-    let crush = EffectData::instant("crush").modifier(flat::<Life>(-100.0));
+    let hit = EffectData::instant(Key::of::<Hit>()).modifier(flat::<Life>(-20.0));
+    let crush = EffectData::instant(Key::of::<Crush>()).modifier(flat::<Life>(-100.0));
     let mut app = app(&[hit, crush], |app| {
         app.add_effect::<Hit>().add_effect::<Crush>();
     });
@@ -334,7 +334,7 @@ fn an_instant_effect_changes_the_base_within_its_limits() {
 
 #[test]
 fn a_lasting_effect_counts_and_grants_while_it_lasts() {
-    let haste = EffectData::lasting("haste", 1.0)
+    let haste = EffectData::lasting(Key::of::<Haste>(), 1.0)
         .modifier(EffectModifier::new::<AttackSpeed>(Operation::Additive, 0.5))
         .grant("effect.buff");
     let mut app = app(&[haste], |app| {
@@ -352,7 +352,7 @@ fn a_lasting_effect_counts_and_grants_while_it_lasts() {
 
 #[test]
 fn a_periodic_effect_executes_each_period_and_on_apply() {
-    let burning = EffectData::lasting("burning", 2.0)
+    let burning = EffectData::lasting(Key::of::<Burning>(), 2.0)
         .period(0.5, true)
         .modifier(flat::<Life>(-1.0));
     let mut app = app(&[burning], |app| {
@@ -372,10 +372,10 @@ fn a_periodic_effect_executes_each_period_and_on_apply() {
 
 #[test]
 fn a_requirement_or_an_immunity_blocks_an_effect() {
-    let burning = EffectData::lasting("burning", 4.0)
+    let burning = EffectData::lasting(Key::of::<Burning>(), 4.0)
         .tag("effect.affliction.burning")
         .require(!Condition::owner_has("state.wet"));
-    let warded = EffectData::infinite("warded").immunity("effect.affliction");
+    let warded = EffectData::infinite(Key::of::<Warded>()).immunity("effect.affliction");
     let mut app = app(&[burning, warded], |app| {
         app.add_effect::<Burning>().add_effect::<Warded>();
     });
@@ -393,8 +393,8 @@ fn a_requirement_or_an_immunity_blocks_an_effect() {
 
 #[test]
 fn an_effect_removes_those_tagged_as_it_says() {
-    let poison = EffectData::lasting("poison", 10.0).tag("effect.affliction.poison");
-    let cure = EffectData::instant("cure").removes("effect.affliction");
+    let poison = EffectData::lasting(Key::of::<Poison>(), 10.0).tag("effect.affliction.poison");
+    let cure = EffectData::instant(Key::of::<Cure>()).removes("effect.affliction");
     let mut app = app(&[poison, cure], |app| {
         app.add_effect::<Poison>().add_effect::<Cure>();
     });
@@ -407,7 +407,7 @@ fn an_effect_removes_those_tagged_as_it_says() {
 
 #[test]
 fn stacks_count_their_modifiers_up_to_a_limit_then_overflow() {
-    let rage = EffectData::lasting("rage", 1.0)
+    let rage = EffectData::lasting(Key::of::<Rage>(), 1.0)
         .modifier(flat::<Damage>(2.0))
         .stacking(Stacking {
             by: StackBy::Target,
@@ -447,7 +447,7 @@ fn stacks_count_their_modifiers_up_to_a_limit_then_overflow() {
 
 #[test]
 fn an_effect_is_inhibited_while_its_ongoing_requirement_fails() {
-    let rage = EffectData::infinite("rage")
+    let rage = EffectData::infinite(Key::of::<Rage>())
         .modifier(flat::<Damage>(5.0))
         .grant("state.enraged")
         .ongoing(!Condition::owner_has("state.wet"));
@@ -469,7 +469,8 @@ fn an_effect_is_inhibited_while_its_ongoing_requirement_fails() {
 
 #[test]
 fn an_effect_comes_off_once_its_removal_requirement_holds() {
-    let burning = EffectData::infinite("burning").remove_if(Condition::owner_has("state.wet"));
+    let burning =
+        EffectData::infinite(Key::of::<Burning>()).remove_if(Condition::owner_has("state.wet"));
     let mut app = app(&[burning], |app| {
         app.add_effect::<Burning>();
     });
@@ -482,21 +483,20 @@ fn an_effect_comes_off_once_its_removal_requirement_holds() {
 
 #[test]
 fn magnitudes_come_from_curves_params_attributes_and_code() {
-    let curve = EffectData::instant("curve").modifier(EffectModifier::new::<Damage>(
+    let curve = EffectData::instant(Key::of::<Curve>()).modifier(EffectModifier::new::<Damage>(
         Operation::Flat,
         Magnitude::scaled(0.5, "damage"),
     ));
-    let param = EffectData::instant("param").modifier(EffectModifier::new::<Life>(
+    let param = EffectData::instant(Key::of::<Param>()).modifier(EffectModifier::new::<Life>(
         Operation::Flat,
         Magnitude::param("param.damage"),
     ));
-    let captured = EffectData::instant("captured").modifier(EffectModifier::new::<Damage>(
+    let captured = EffectData::instant(Key::of::<Captured>()).modifier(
+        EffectModifier::new::<Damage>(Operation::Flat, Magnitude::source::<Strength>().times(0.5)),
+    );
+    let custom = EffectData::instant(Key::of::<Custom>()).modifier(EffectModifier::new::<Damage>(
         Operation::Flat,
-        Magnitude::source::<Strength>().times(0.5),
-    ));
-    let custom = EffectData::instant("custom").modifier(EffectModifier::new::<Damage>(
-        Operation::Flat,
-        Magnitude::Custom(Key::from_static("level_squared")),
+        Magnitude::Custom(Key::of::<LevelSquared>()),
     ));
     let mut app = app(&[curve, param, captured, custom], |app| {
         app.add_calculation(LevelSquared)
@@ -521,7 +521,7 @@ fn magnitudes_come_from_curves_params_attributes_and_code() {
 
 #[test]
 fn an_execution_works_damage_out_from_both_sides() {
-    let strike = EffectData::instant("strike").execution("strike");
+    let strike = EffectData::instant(Key::of::<Strike>()).execution(Key::of::<StrikeDamage>());
     let mut app = app(&[strike], |app| {
         app.add_effect::<Strike>().add_execution(StrikeDamage);
     });
@@ -537,7 +537,7 @@ fn an_execution_works_damage_out_from_both_sides() {
 
 #[test]
 fn an_effect_chained_is_applied_as_itself() {
-    let fuse = EffectData::lasting("fuse", 2.0).on_apply("spark");
+    let fuse = EffectData::lasting(Key::of::<Fuse>(), 2.0).on_apply("spark");
     let spark = EffectData::lasting("spark", 2.0);
     let mut app = app(&[fuse, spark], |app| {
         app.add_effect::<Fuse>();
@@ -563,7 +563,7 @@ fn an_effect_chained_is_applied_as_itself() {
 
 #[test]
 fn effects_apply_effects_as_they_apply_and_expire() {
-    let fuse = EffectData::lasting("fuse", 0.5)
+    let fuse = EffectData::lasting(Key::of::<Fuse>(), 0.5)
         .on_apply("spark")
         .on_expire("blast");
     let spark = EffectData::instant("spark").modifier(flat::<Life>(-1.0));
@@ -580,7 +580,7 @@ fn effects_apply_effects_as_they_apply_and_expire() {
 
 #[test]
 fn a_source_term_counts_as_the_source_was_when_applied() {
-    let rally = EffectData::infinite("rally")
+    let rally = EffectData::infinite(Key::of::<Rally>())
         .modifier(flat::<Damage>(5.0).condition(Condition::source_has("state.enraged")));
     let mut app = app(&[rally], |app| {
         app.add_effect::<Rally>();
@@ -601,7 +601,7 @@ fn a_source_term_counts_as_the_source_was_when_applied() {
 
 #[test]
 fn effects_come_off_by_activation_tag_or_with_their_actor() {
-    let ward = EffectData::infinite("ward").tag("effect.buff");
+    let ward = EffectData::infinite(Key::of::<Ward>()).tag("effect.buff");
     let mut app = app(&[ward], |app| {
         app.add_effect::<Ward>();
     });
@@ -625,14 +625,14 @@ fn effects_come_off_by_activation_tag_or_with_their_actor() {
 
 #[test]
 fn a_new_registry_gives_active_effects_their_new_definitions() {
-    let haste = EffectData::infinite("haste").modifier(flat::<AttackSpeed>(1.0));
+    let haste = EffectData::infinite(Key::of::<Haste>()).modifier(flat::<AttackSpeed>(1.0));
     let mut app = app(&[haste], |app| {
         app.add_effect::<Haste>();
     });
     let npc = actor(&mut app, []);
     apply(&mut app, npc, Haste);
     assert!(close(get::<AttackSpeed>(&app, npc), 2.0));
-    let faster = EffectData::infinite("haste").modifier(flat::<AttackSpeed>(3.0));
+    let faster = EffectData::infinite(Key::of::<Haste>()).modifier(flat::<AttackSpeed>(3.0));
     let reloaded = registry(app.world(), &[faster]);
     app.insert_resource(reloaded);
     app.ticks(2);
@@ -649,7 +649,7 @@ fn an_effect_left_out_is_as_new() {
     use serde_test::{Token, assert_de_tokens};
 
     assert_de_tokens(
-        &EffectData::lasting("burning", 4.0),
+        &EffectData::lasting(Key::of::<Burning>(), 4.0),
         &[
             Token::Struct {
                 name: "EffectData",
@@ -674,7 +674,7 @@ fn an_effect_left_out_is_as_new() {
 
 #[test]
 fn an_effect_with_everything_checks() {
-    let def = EffectData::lasting("burning", 4.0)
+    let def = EffectData::lasting(Key::of::<Burning>(), 4.0)
         .tag("effect.affliction.burning")
         .period(0.5, true)
         .modifier(EffectModifier::new::<Life>(
@@ -755,25 +755,25 @@ fn executions_need_an_instant_effect_or_a_period() {
             },
         )
     };
-    let errors = build(EffectData::lasting("smoulder", 4.0).execution("burn"))
+    let errors = build(EffectData::lasting("smoulder", 4.0).execution(Key::of::<Burn>()))
         .unwrap_err()
         .to_string();
     assert!(
         errors.contains("executions on a lasting effect with no period: it never executes"),
         "{errors}"
     );
-    build(EffectData::instant("singe").execution("burn")).unwrap();
+    build(EffectData::instant("singe").execution(Key::of::<Burn>())).unwrap();
     build(
         EffectData::lasting("burn", 4.0)
             .period(1.0, false)
-            .execution("burn"),
+            .execution(Key::of::<Burn>()),
     )
     .unwrap();
 }
 
 #[test]
 fn an_effect_whose_duration_cant_be_isnt_applied() {
-    let numb = EffectData::lasting("numb", Magnitude::Custom(Key::from_static("nan")))
+    let numb = EffectData::lasting(Key::of::<Numb>(), Magnitude::Custom(Key::of::<Nan>()))
         .modifier(flat::<Damage>(5.0));
     let mut app = app(&[numb], |app| {
         app.add_calculation(Nan).add_effect::<Numb>();
@@ -788,7 +788,7 @@ fn an_effect_whose_duration_cant_be_isnt_applied() {
 
 #[test]
 fn a_stack_keeps_the_spec_it_was_first_applied_with() {
-    let rage = EffectData::lasting("rage", 5.0)
+    let rage = EffectData::lasting(Key::of::<Rage>(), 5.0)
         .modifier(EffectModifier::new::<Damage>(
             Operation::Flat,
             Magnitude::param("param.damage"),
@@ -816,7 +816,7 @@ fn a_stack_keeps_the_spec_it_was_first_applied_with() {
 
 #[test]
 fn applying_again_at_the_limit_refreshes_the_time() {
-    let rage = EffectData::lasting("rage", 1.0)
+    let rage = EffectData::lasting(Key::of::<Rage>(), 1.0)
         .modifier(flat::<Damage>(2.0))
         .stacking(Stacking {
             by: StackBy::Target,
@@ -840,7 +840,7 @@ fn applying_again_at_the_limit_refreshes_the_time() {
 
 #[test]
 fn an_attribute_magnitude_is_captured_as_the_effect_applies() {
-    let might = EffectData::infinite("might")
+    let might = EffectData::infinite(Key::of::<Might>())
         .modifier(EffectModifier::new::<Damage>(
             Operation::Flat,
             Magnitude::source::<Strength>(),
@@ -876,8 +876,8 @@ fn an_attribute_magnitude_is_captured_as_the_effect_applies() {
 fn an_effect_refreshed_earlier_in_a_tick_doesnt_run_out_in_it() {
     // The relay runs out as the buff does, and applies the buff again as it
     // does: whichever settles first, the buff is there after.
-    let relay = EffectData::lasting("relay", 0.5).on_expire("buff");
-    let buff = EffectData::lasting("buff", 0.5)
+    let relay = EffectData::lasting(Key::of::<Relay>(), 0.5).on_expire(Key::of::<Buff>());
+    let buff = EffectData::lasting(Key::of::<Buff>(), 0.5)
         .modifier(flat::<Damage>(4.0))
         .stacking(Stacking {
             by: StackBy::Target,
@@ -923,7 +923,7 @@ fn code_naming_an_effect_content_lacks_fails_the_check() {
     };
     let named = world.resource::<EffectRegistry>();
     let errors = named
-        .recheck(&[EffectData::instant("hit")], checks)
+        .recheck(&[EffectData::instant(Key::of::<Hit>())], checks)
         .unwrap_err();
     let missing = Error::NotInContent {
         kind: "effect",
@@ -937,8 +937,8 @@ fn code_naming_an_effect_content_lacks_fails_the_check() {
         "{errors}"
     );
     // Checked afresh, nothing named: it's content's to leave out.
-    EffectRegistry::check(&[EffectData::instant("hit")], checks).unwrap();
+    EffectRegistry::check(&[EffectData::instant(Key::of::<Hit>())], checks).unwrap();
     named
-        .recheck(&[EffectData::instant("burning")], checks)
+        .recheck(&[EffectData::instant(Key::of::<Burning>())], checks)
         .unwrap();
 }

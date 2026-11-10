@@ -127,23 +127,24 @@ fn tags() -> TagRegistry {
 
 /// Every ability both sides have, as data.
 fn abilities() -> [AbilityData; 8] {
-    let fireball = AbilityData::new("fireball", "cast")
+    let fireball = AbilityData::new(Key::of::<Fireball>(), Key::of::<Cast>())
         .cost("fireball.cost")
-        .cooldown("fireball.cooldown")
+        .cooldown(Key::of::<FireballCooldown>())
         .blocked_by("state.stunned")
         .cancel_if(Condition::owner_has("state.stunned"));
-    let charge = AbilityData::new("charge", "cast")
+    let charge = AbilityData::new(Key::of::<Charge>(), Key::of::<Cast>())
         .cost("fireball.cost")
         .commit(Commit::Manual);
-    let focus = AbilityData::new("focus", "cast").cost("focus.cost");
-    let shot = AbilityData::new("shot", "shoot").cost("fireball.cost");
-    let bolt = AbilityData::new("bolt", "cast")
+    let focus = AbilityData::new(Key::of::<Focus>(), Key::of::<Cast>()).cost("focus.cost");
+    let shot = AbilityData::new(Key::of::<Shot>(), Key::of::<Shoot>()).cost("fireball.cost");
+    let bolt = AbilityData::new(Key::of::<Bolt>(), Key::of::<Cast>())
         .cost("bolt.cost")
         .blocked_by("state.stunned");
-    let kindle = AbilityData::new("kindle", "kindling").blocked_by("state.stunned");
-    let flare = AbilityData::new("flare", "flaring").cost("fireball.cost");
-    let spark =
-        AbilityData::new("spark", "sparking").trigger(Trigger::Event(TagKey::named("event.spark")));
+    let kindle =
+        AbilityData::new(Key::of::<Kindle>(), Key::of::<Kindling>()).blocked_by("state.stunned");
+    let flare = AbilityData::new(Key::of::<Flare>(), Key::of::<Flaring>()).cost("fireball.cost");
+    let spark = AbilityData::new(Key::of::<Spark>(), Key::of::<Sparking>())
+        .trigger(Trigger::Event(TagKey::named("event.spark")));
     [fireball, charge, focus, shot, bolt, kindle, flare, spark]
 }
 
@@ -191,13 +192,13 @@ fn world(role: NetRole) -> TestApp {
                 EffectData::instant("fireball.cost")
                     .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
                 EffectData::instant("bolt.cost").modifier(EffectModifier::route::<Price>(20.0)),
-                EffectData::lasting("fireball.cooldown", 1.0).grant("cooldown.fireball"),
+                EffectData::lasting(Key::of::<FireballCooldown>(), 1.0).grant("cooldown.fireball"),
                 EffectData::instant("focus.cost")
                     .modifier(EffectModifier::new::<Mana>(Operation::Additive, -0.5)),
-                EffectData::lasting("burn", 5.0)
+                EffectData::lasting(Key::of::<Burn>(), 5.0)
                     .period(0.5, false)
                     .modifier(EffectModifier::new::<Mana>(Operation::Flat, -1.0)),
-                EffectData::lasting("ward", 5.0)
+                EffectData::lasting(Key::of::<Ward>(), 5.0)
                     .modifier(EffectModifier::new::<Mana>(Operation::Flat, 1.0))
                     .stacking(Stacking {
                         by: StackBy::Target,
@@ -207,7 +208,7 @@ fn world(role: NetRole) -> TestApp {
                         expire: Expire::ClearAll,
                         overflow: Vec::new(),
                     }),
-                EffectData::infinite("blessed").modifier(
+                EffectData::infinite(Key::of::<Blessed>()).modifier(
                     EffectModifier::new::<Mana>(Operation::Flat, 10.0)
                         .condition(Condition::source_has("state.stunned")),
                 ),

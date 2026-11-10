@@ -105,7 +105,7 @@ app.add_plugins((MinimalPlugins, MettlePlugins))
     .insert_resource(MettleContent {
         effects: vec![EffectData::instant("fireball.cost")
             .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0))],
-        abilities: vec![AbilityData::new("fireball", "cast_fireball").cost("fireball.cost")],
+        abilities: vec![AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>()).cost("fireball.cost")],
         ..default()
     });
 app.update();

@@ -26,7 +26,7 @@ struct Fireball;
 
 /// The fireball, as content defines it.
 fn fireball() -> AbilityData {
-    AbilityData::new("fireball", "cast_fireball")
+    AbilityData::new(Key::of::<Fireball>(), "cast_fireball")
         .tag("ability.spell.fire")
         .cost("fireball.cost")
         .cooldown("fireball.cooldown")

@@ -131,14 +131,14 @@ const TAGS: &[&str] = &["cue", "cue.hit"];
 
 fn effects() -> Vec<EffectData> {
     vec![
-        EffectData::instant("strike")
-            .execution("shot_damage")
+        EffectData::instant(Key::of::<Strike>())
+            .execution(Key::of::<ShotDamage>())
             .cue("cue.hit"),
-        EffectData::instant("graze").modifier(EffectModifier::new::<Life>(
+        EffectData::instant(Key::of::<Graze>()).modifier(EffectModifier::new::<Life>(
             Operation::Flat,
-            Magnitude::Custom(Key::from_static("falloff")),
+            Magnitude::Custom(Key::of::<Falloff>()),
         )),
-        EffectData::lasting("fuse", 0.5)
+        EffectData::lasting(Key::of::<Fuse>(), 0.5)
             .on_apply("echo")
             .on_remove("echo")
             .on_expire("echo")
@@ -150,7 +150,7 @@ fn effects() -> Vec<EffectData> {
                 expire: Expire::ClearAll,
                 overflow: vec![Key::from_static("echo")],
             }),
-        EffectData::instant("echo").execution("witness"),
+        EffectData::instant("echo").execution(Key::of::<Witness>()),
     ]
 }
 

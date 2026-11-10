@@ -12,6 +12,8 @@ pub(crate) fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         "route",
         "a route",
         &quote::quote!(#krate::code::Route),
+        &krate,
+        &quote::quote!(#krate::code::AnyRoute),
     )
 }
 

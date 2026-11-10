@@ -251,7 +251,7 @@ Here's a client predicting the fireball, and the server saying no:
 #         EffectData::instant("fireball.cost").modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
 #         EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
 #     ],
-#     abilities: vec![AbilityData::new("fireball", "cast_fireball").cost("fireball.cost").cooldown("fireball.cooldown")],
+#     abilities: vec![AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>()).cost("fireball.cost").cooldown("fireball.cooldown")],
 #     ..default()
 # });
 # client.update();

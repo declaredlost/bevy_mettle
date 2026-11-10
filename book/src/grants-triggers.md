@@ -40,9 +40,9 @@ struct Staff;
 #     .add_attribute::<Mana>()
 #     .add_behaviour::<Channel>();
 app.add_effect::<Staff>().insert_resource(MettleContent {
-    effects: vec![EffectData::infinite("staff")],
-    abilities: vec![AbilityData::new("channel", "channel")],
-    grants: vec![Grant::new("staff", ["channel"])],
+    effects: vec![EffectData::infinite(Key::of::<Staff>())],
+    abilities: vec![AbilityData::new("channel", Key::of::<Channel>())],
+    grants: vec![Grant::new(Key::of::<Staff>(), ["channel"])],
     ..default()
 });
 app.update();
@@ -170,8 +170,8 @@ The mage lashes out with `smolder` while it's burning: its trigger is
 #     .add_ability::<SmolderAbility>()
 #     .insert_resource(MettleContent {
 #         tags: ["state", "state.burning"].map(TagKey::named).to_vec(),
-#         effects: vec![EffectData::lasting("burning", 4.0).grant("state.burning")],
-#         abilities: vec![AbilityData::new("smolder", "smolder")
+#         effects: vec![EffectData::lasting(Key::of::<Burning>(), 4.0).grant("state.burning")],
+#         abilities: vec![AbilityData::new(Key::of::<SmolderAbility>(), Key::of::<Smolder>())
 #             .trigger(Trigger::TagPresent(TagKey::named("state.burning")))],
 #         ..default()
 #     });

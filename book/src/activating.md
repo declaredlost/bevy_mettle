@@ -105,7 +105,7 @@ Here's the whole round, run on the world directly:
 #     .add_attribute::<Mana>()
 #     .add_behaviour::<CastFireball>()
 #     .add_ability::<Fireball>();
-# let fireball = AbilityData::new("fireball", "cast_fireball")
+# let fireball = AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>())
 #     .cost("fireball.cost")
 #     .cooldown("fireball.cooldown")
 #     .grant("state.casting");
@@ -195,7 +195,7 @@ it struck instead, with `.causer(..)`:
 ```rust
 # use bevy::prelude::*;
 # use bevy_mettle::prelude::*;
-# #[derive(Effect)] struct FireballHit;
+# #[derive(Effect)] #[effect(name = "fireball.hit")] struct FireballHit;
 #[derive(Component, Default, Behaviour)]
 struct Fireball {
     target: Option<Entity>,
@@ -315,7 +315,7 @@ ability's own tags and its owner's.
 #[derive(Ability)]
 struct Fireball;
 
-let fireball = AbilityData::new("fireball", "cast_fireball")
+let fireball = AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>())
     .cancel_if(Condition::owner_has("state.stunned"));
 
 # use std::time::Duration;

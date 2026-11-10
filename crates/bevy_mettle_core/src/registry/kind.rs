@@ -29,6 +29,23 @@ pub trait Kind: 'static {
 
 pub use bevy_mettle_macros::Kind;
 
+/// A type that names something of kind `K`: its key, without constructing it.
+///
+/// Implemented by the derives (`#[derive(Effect)]`, `#[derive(Ability)]`,
+/// `#[derive(Behaviour)]`, ...) with the name they give the type, for
+/// [`Key::of`](super::Key::of). One type can be keyed as more than one kind:
+/// an ability and its effect, say.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` doesn't name a {K}",
+    label = "not keyed as this kind",
+    note = "derive what it is: `#[derive(Effect)]`, `#[derive(Ability)]`, ..."
+)]
+pub trait Keyed<K: Kind> {
+    /// Its name as a `K`, as content writes it and its key holds it:
+    /// `"burning"`.
+    const KEY: &'static str;
+}
+
 /// The tag kind: what a [`TagId`](super::TagId) numbers, as the
 /// [`TagRegistry`](crate::tag::TagRegistry) holds them.
 ///

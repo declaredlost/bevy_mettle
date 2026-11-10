@@ -20,7 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Keys and ids, as Bevy's `ComponentId`: content names what it defines by
   a key, a `Key<K>` (`"fireball.cost"`), of a `Kind` (`#[derive(Kind)]`, an
   empty enum such as `AnyEffect`); checked, it's known by its number, an
-  `Id<K>`. Keys are written as strings; ids aren't written. `TagId`,
+  `Id<K>`. Keys are written as strings; ids aren't written. Code with a
+  type for something names it as `Key::of::<T>()`, by `Keyed<K>`, which the
+  derives implement for the kinds they're keyed as, so a typo doesn't
+  compile; one type can be keyed as more than one kind. `TagId`,
   `CurveId`, `AttributeId`, `EffectId` and `AbilityId`, with their `Any*`
   kinds, are in `registry`, so one part names another's without depending
   on it. Everything that runs, and everything sent, holds numbers; names

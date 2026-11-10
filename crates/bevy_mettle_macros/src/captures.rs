@@ -74,6 +74,7 @@ pub(crate) fn named_capturing(
     what: &str,
     trait_path: &TokenStream,
     krate: &TokenStream,
+    kind: &TokenStream,
 ) -> syn::Result<TokenStream> {
     if !input.generics.params.is_empty() {
         return Err(Error::new_spanned(
@@ -152,6 +153,7 @@ pub(crate) fn named_capturing(
         }
         read
     });
+    let keyed = crate::shared::keyed(ident, krate, kind, &name);
     Ok(quote! {
         impl #trait_path for #ident {
             const NAME: &'static str = #name;
@@ -160,6 +162,7 @@ pub(crate) fn named_capturing(
                 ::std::vec![#(#reads),*]
             }
         }
+        #keyed
     })
 }
 
@@ -176,6 +179,7 @@ mod tests {
             "an execution",
             &quote!(Execution),
             &quote!(::bevy_mettle_effect),
+            &quote!(::bevy_mettle_effect::code::AnyExecution),
         )
     }
 

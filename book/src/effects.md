@@ -333,12 +333,12 @@ struct Blessing;
 fn effects() -> Vec<EffectData> {
     vec![
         // Follows the caster's spell power.
-        EffectData::infinite("aura").modifier(EffectModifier::new::<Armour>(
+        EffectData::infinite(Key::of::<Aura>()).modifier(EffectModifier::new::<Armour>(
             Operation::Flat,
             Magnitude::source::<SpellPower>().live().times(0.5),
         )),
         // Keeps what it was as it applied.
-        EffectData::infinite("blessing").modifier(EffectModifier::new::<Armour>(
+        EffectData::infinite(Key::of::<Blessing>()).modifier(EffectModifier::new::<Armour>(
             Operation::Flat,
             Magnitude::source::<SpellPower>().times(0.5),
         )),
@@ -544,7 +544,7 @@ app.add_plugins((MinimalPlugins, MettlePlugins))
     .insert_resource(MettleContent {
         tags: ["cooldown", "cooldown.fireball"].map(TagKey::named).to_vec(),
         effects: vec![
-            EffectData::lasting("burning", 4.0),
+            EffectData::lasting(Key::of::<Burning>(), 4.0),
             EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
         ],
         ..default()

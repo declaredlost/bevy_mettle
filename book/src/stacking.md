@@ -30,7 +30,7 @@ per stack:
 # }
 fn effects() -> Vec<EffectData> {
     vec![
-        EffectData::lasting("burning", 4.0)
+        EffectData::lasting(Key::of::<Burning>(), 4.0)
             .tag("effect.affliction.burning")
             .period(0.5, false)
             .modifier(EffectModifier::new::<Life>(

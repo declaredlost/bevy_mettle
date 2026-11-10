@@ -14,6 +14,8 @@ pub(crate) fn named(
     attr: &str,
     what: &str,
     trait_path: &TokenStream,
+    krate: &TokenStream,
+    kind: &TokenStream,
 ) -> syn::Result<TokenStream> {
     if !input.generics.params.is_empty() {
         return Err(Error::new_spanned(
@@ -40,11 +42,29 @@ pub(crate) fn named(
     }
     let ident = &input.ident;
     let name = name.unwrap_or_else(|| LitStr::new(&snake(&ident.to_string()), Span::call_site()));
+    let keyed = keyed(ident, krate, kind, &name);
     Ok(quote! {
         impl #trait_path for #ident {
             const NAME: &'static str = #name;
         }
+        #keyed
     })
+}
+
+/// `impl Keyed<#kind> for #ident`: its key, `name`, as `kind`. `krate` is the
+/// derive's crate, `kind` a kind in core's registry, or `krate`'s own at a
+/// path.
+pub(crate) fn keyed(
+    ident: &syn::Ident,
+    krate: &TokenStream,
+    kind: &TokenStream,
+    name: &LitStr,
+) -> TokenStream {
+    quote! {
+        impl #krate::__core::registry::Keyed<#kind> for #ident {
+            const KEY: &'static str = #name;
+        }
+    }
 }
 
 /// Where `krate` is, where a derive's used: itself if it's a dependency, else

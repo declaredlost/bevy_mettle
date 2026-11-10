@@ -89,7 +89,7 @@ fn in_reach(In(check): In<InputCheck<Aim>>) -> bool {
 }
 
 fn shot() -> AbilityData {
-    AbilityData::new("shot", "shoot").cost("fireball.cost")
+    AbilityData::new(Key::of::<Shot>(), Key::of::<Shoot>()).cost("fireball.cost")
 }
 
 const TAGS: &[&str] = &[
@@ -118,7 +118,7 @@ fn effects() -> Vec<EffectData> {
         EffectData::instant("fireball.cost")
             .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
         EffectData::lasting("fireball.cooldown", 1.0).grant("cooldown.fireball"),
-        EffectData::infinite("staff"),
+        EffectData::infinite(Key::of::<Staff>()),
         EffectData::instant("surge.cost")
             .modifier(EffectModifier::new::<Mana>(Operation::Flat, -30.0))
             .modifier(EffectModifier::new::<Mana>(Operation::Flat, -30.0)),
@@ -126,7 +126,7 @@ fn effects() -> Vec<EffectData> {
 }
 
 fn fireball() -> AbilityData {
-    AbilityData::new("fireball", "cast")
+    AbilityData::new(Key::of::<Fireball>(), Key::of::<Cast>())
         .tag("ability.spell.fire")
         .cost("fireball.cost")
         .cooldown("fireball.cooldown")
@@ -135,7 +135,7 @@ fn fireball() -> AbilityData {
 }
 
 fn channel() -> AbilityData {
-    AbilityData::new("channel", "cast")
+    AbilityData::new(Key::of::<Channel>(), Key::of::<Cast>())
         .tag("ability.channel")
         .blocks("ability.spell")
 }
@@ -193,7 +193,7 @@ fn reload(world: &mut World, abilities: &[AbilityData]) {
         .resource::<AbilityRegistry>()
         .recheck(
             abilities,
-            &[Grant::new("staff", ["channel"])],
+            &[Grant::new(Key::of::<Staff>(), [Key::of::<Channel>()])],
             ability_checks(world),
         )
         .unwrap();
@@ -334,7 +334,8 @@ fn an_ability_is_blocked_by_its_owners_tags_and_active_abilities() {
 
 #[test]
 fn activating_cancels_what_it_cancels() {
-    let interrupt = AbilityData::new("interrupt", "cast").cancels("ability.channel");
+    let interrupt =
+        AbilityData::new(Key::of::<Interrupt>(), Key::of::<Cast>()).cancels("ability.channel");
     let mut app = app(&[channel(), interrupt]);
     let mage = caster(&mut app, &[&Channel, &Interrupt]);
     let channelling = activate(&mut app, mage, Channel).unwrap();
@@ -344,7 +345,8 @@ fn activating_cancels_what_it_cancels() {
 
 #[test]
 fn a_requirement_has_to_hold() {
-    let spell = AbilityData::new("spell", "cast").require(!Condition::owner_has("state.silenced"));
+    let spell = AbilityData::new(Key::of::<Spell>(), Key::of::<Cast>())
+        .require(!Condition::owner_has("state.silenced"));
     let mut app = app(&[spell]);
     let mage = caster(&mut app, &[&Spell]);
     own(&mut app, mage, "state.silenced", true);
@@ -385,9 +387,9 @@ fn a_commit_that_cant_pay_cancels() {
 
 #[test]
 fn triggers_activate_on_events_and_owned_tags() {
-    let riposte =
-        AbilityData::new("riposte", "cast").trigger(Trigger::Event(TagKey::named("event")));
-    let rage = AbilityData::new("rage", "cast")
+    let riposte = AbilityData::new(Key::of::<Riposte>(), Key::of::<Cast>())
+        .trigger(Trigger::Event(TagKey::named("event")));
+    let rage = AbilityData::new(Key::of::<Rage>(), Key::of::<Cast>())
         .trigger(Trigger::TagPresent(TagKey::named("state.raging")));
     let mut app = app(&[riposte, rage]);
     let knight = caster(&mut app, &[&Riposte, &Rage]);
@@ -477,7 +479,7 @@ fn an_ability_left_out_is_as_new() {
     use serde_test::{Token, assert_de_tokens};
 
     assert_de_tokens(
-        &AbilityData::new("fireball", "cast"),
+        &AbilityData::new(Key::of::<Fireball>(), Key::of::<Cast>()),
         &[
             Token::Struct {
                 name: "AbilityData",
@@ -497,7 +499,7 @@ fn an_abilitys_optional_fields_read_as_serde_reads_them() {
     use serde_test::{Token, assert_de_tokens};
 
     assert_de_tokens(
-        &AbilityData::new("fireball", "cast").cost("fireball.cost"),
+        &AbilityData::new(Key::of::<Fireball>(), Key::of::<Cast>()).cost("fireball.cost"),
         &[
             Token::Struct {
                 name: "AbilityData",
@@ -519,7 +521,7 @@ fn an_abilitys_optional_fields_read_as_serde_reads_them() {
 
 #[test]
 fn an_ability_with_everything_checks() {
-    let def = AbilityData::new("fireball", "cast")
+    let def = AbilityData::new(Key::of::<Fireball>(), Key::of::<Cast>())
         .tag("ability.spell.fire")
         .cost("fireball.cost")
         .cooldown("fireball.cooldown")
@@ -560,8 +562,8 @@ fn a_registry_reports_everything_wrong_at_once() {
         .cost("fireball.cooldown")
         .cooldown("missing");
     let grants = [
-        Grant::new("staff", ["channel"]),
-        Grant::new("staf", ["channel"]),
+        Grant::new(Key::of::<Staff>(), [Key::of::<Channel>()]),
+        Grant::new("staf", [Key::of::<Channel>()]),
         Grant::new("fireball.cost", ["bad"]),
     ];
     let errors = AbilityRegistry::check(
@@ -590,7 +592,7 @@ fn a_registry_reports_everything_wrong_at_once() {
 
 #[test]
 fn a_cost_is_checked_change_after_change() {
-    let surge = AbilityData::new("surge", "cast").cost("surge.cost");
+    let surge = AbilityData::new(Key::of::<Surge>(), Key::of::<Cast>()).cost("surge.cost");
     let mut app = app(&[surge]);
     let mage = caster(&mut app, &[&Surge]);
     app.world_mut()
@@ -764,7 +766,7 @@ fn new_input_replaces_the_old_and_input_that_fails_cancels_the_ability() {
 #[test]
 fn an_ability_whose_behaviour_takes_input_cant_be_triggered() {
     let app = app(&[]);
-    let triggered = AbilityData::new("snap_shot", "shoot")
+    let triggered = AbilityData::new("snap_shot", Key::of::<Shoot>())
         .trigger(Trigger::Event(TagKey::named("event.parried")));
     let effects = app.resource::<EffectRegistry>().clone();
     let errors = AbilityRegistry::check(
@@ -804,8 +806,8 @@ fn check(app: &TestApp, abilities: &[AbilityData]) -> Result<(), String> {
 fn an_ability_run_locally_only_cant_have_a_cost_or_a_cooldown() {
     let app = app(&[]);
     for local in [
-        AbilityData::new("zoom", "cast").cost("fireball.cost"),
-        AbilityData::new("zoom", "cast").cooldown("fireball.cooldown"),
+        AbilityData::new("zoom", Key::of::<Cast>()).cost("fireball.cost"),
+        AbilityData::new("zoom", Key::of::<Cast>()).cooldown("fireball.cooldown"),
     ] {
         let errors = check(&app, &[local.net(NetExecution::LocalOnly)]).unwrap_err();
         assert!(
@@ -818,7 +820,7 @@ fn an_ability_run_locally_only_cant_have_a_cost_or_a_cooldown() {
 #[test]
 fn an_ability_run_locally_only_without_a_cost_checks() {
     let app = app(&[]);
-    let zoom = AbilityData::new("zoom", "cast").net(NetExecution::LocalOnly);
+    let zoom = AbilityData::new("zoom", Key::of::<Cast>()).net(NetExecution::LocalOnly);
     assert_eq!(check(&app, &[zoom]), Ok(()));
     // Run otherwise, the same cost is fine.
     for net in [
@@ -826,7 +828,7 @@ fn an_ability_run_locally_only_without_a_cost_checks() {
         NetExecution::ServerOnly,
         NetExecution::ServerInitiated,
     ] {
-        let paid = AbilityData::new("zoom", "cast")
+        let paid = AbilityData::new("zoom", Key::of::<Cast>())
             .cost("fireball.cost")
             .net(net);
         assert_eq!(check(&app, &[paid]), Ok(()), "{net:?}");
@@ -852,10 +854,10 @@ fn input_for_another_behaviour_than_the_abilitys_cancels_it() {
 /// A cast a stun interrupts, and a rage that lasts only while raging.
 fn interruptible() -> [AbilityData; 2] {
     [
-        AbilityData::new("cast", "cast")
+        AbilityData::new(Key::of::<CastSpell>(), Key::of::<Cast>())
             .tag("ability.spell")
             .cancel_if(Condition::owner_has("state.stunned")),
-        AbilityData::new("rage", "cast")
+        AbilityData::new(Key::of::<Rage>(), Key::of::<Cast>())
             .tag("ability.channel")
             .cancel_if(!Condition::owner_has("state.raging")),
     ]
@@ -995,7 +997,9 @@ fn an_ability_is_asked_about_with_nothing_done() {
 
 #[test]
 fn an_ability_committing_as_it_activates_pays_before_it_starts() {
-    let mut app = app(&[AbilityData::new("witness", "witness").cost("fireball.cost")]);
+    let mut app = app(&[
+        AbilityData::new(Key::of::<WitnessMana>(), Key::of::<Witness>()).cost("fireball.cost"),
+    ]);
     let mage = caster(&mut app, &[&WitnessMana]);
     activate(&mut app, mage, WitnessMana).unwrap();
     let Witnessed(mana) = app.world().resource::<Witnessed>();
@@ -1007,9 +1011,11 @@ fn an_ability_committing_as_it_activates_pays_before_it_starts() {
 
 #[test]
 fn an_ability_without_a_cooldown_is_committed_once_it_pays() {
-    let mut app = app(&[AbilityData::new("witness", "witness")
-        .cost("fireball.cost")
-        .commit(Commit::Manual)]);
+    let mut app = app(&[
+        AbilityData::new(Key::of::<WitnessMana>(), Key::of::<Witness>())
+            .cost("fireball.cost")
+            .commit(Commit::Manual),
+    ]);
     let mage = caster(&mut app, &[&WitnessMana]);
     let ability = activate(&mut app, mage, WitnessMana).unwrap();
     let granted = app.entity(ability).get::<GrantedAbility>();
@@ -1021,7 +1027,7 @@ fn an_ability_without_a_cooldown_is_committed_once_it_pays() {
 
 #[test]
 fn an_ability_its_own_grants_interrupt_ends_as_it_starts() {
-    let reckless = AbilityData::new("reckless", "cast")
+    let reckless = AbilityData::new(Key::of::<Reckless>(), Key::of::<Cast>())
         .grant("state.stunned")
         .cancel_if(Condition::owner_has("state.stunned"));
     let mut app = app(&[reckless]);

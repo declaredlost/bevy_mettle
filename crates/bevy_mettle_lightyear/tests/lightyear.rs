@@ -20,7 +20,6 @@ use bevy_mettle_effect::prelude::*;
 use bevy_mettle_lightyear::prelude::*;
 use bevy_replicon::shared::server_entity_map::ServerEntityMap;
 use lightyear::crossbeam::CrossbeamIo;
-use lightyear::netcode::Key;
 use lightyear::netcode::auth::Authentication;
 use lightyear::prelude::client::{ClientPlugins, NetcodeClient};
 use lightyear::prelude::server::{NetcodeServer, ServerPlugins, Start};
@@ -212,10 +211,10 @@ fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
         .resource::<EffectRegistry>()
         .recheck(
             &[
-                EffectData::instant("fireball.cost")
+                EffectData::instant(Key::of::<FireballCost>())
                     .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0))
                     .cue("cue.hit"),
-                EffectData::lasting("fireball.cooldown", 1.0)
+                EffectData::lasting(Key::of::<FireballCooldown>(), 1.0)
                     .grant("cooldown.fireball")
                     .cue("cue.cooling"),
             ],
@@ -248,33 +247,35 @@ fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
 
 /// Every ability both sides have, as data.
 fn abilities() -> [AbilityData; 10] {
-    let fireball = AbilityData::new("fireball", "cast")
+    let fireball = AbilityData::new(Key::of::<Fireball>(), Key::of::<Cast>())
         .tag("ability")
-        .cost("fireball.cost")
-        .cooldown("fireball.cooldown")
+        .cost(Key::of::<FireballCost>())
+        .cooldown(Key::of::<FireballCooldown>())
         .blocked_by("state.stunned")
         .cancel_if(Condition::owner_has("state.stunned"));
-    let shot = AbilityData::new("shot", "shoot").cost("fireball.cost");
-    let smite = AbilityData::new("smite", "smiting")
-        .cost("fireball.cost")
+    let shot =
+        AbilityData::new(Key::of::<Shot>(), Key::of::<Shoot>()).cost(Key::of::<FireballCost>());
+    let smite = AbilityData::new(Key::of::<Smite>(), Key::of::<Smiting>())
+        .cost(Key::of::<FireballCost>())
         .net(NetExecution::ServerOnly);
-    let ward = AbilityData::new("ward", "warding")
-        .cost("fireball.cost")
+    let ward = AbilityData::new(Key::of::<Ward>(), Key::of::<Warding>())
+        .cost(Key::of::<FireballCost>())
         .trigger(Trigger::Event(TagKey::named("event.ward")))
         .net(NetExecution::ServerInitiated);
-    let zoom = AbilityData::new("zoom", "zooming").net(NetExecution::LocalOnly);
-    let flare = AbilityData::new("flare", "flaring")
-        .cost("fireball.cost")
+    let zoom =
+        AbilityData::new(Key::of::<Zoom>(), Key::of::<Zooming>()).net(NetExecution::LocalOnly);
+    let flare = AbilityData::new(Key::of::<Flare>(), Key::of::<Flaring>())
+        .cost(Key::of::<FireballCost>())
         .blocked_by("state.stunned");
-    let spark =
-        AbilityData::new("spark", "sparking").trigger(Trigger::Event(TagKey::named("event.spark")));
-    let beacon = AbilityData::new("beacon", "flaring")
+    let spark = AbilityData::new(Key::of::<Spark>(), Key::of::<Sparking>())
+        .trigger(Trigger::Event(TagKey::named("event.spark")));
+    let beacon = AbilityData::new(Key::of::<Beacon>(), Key::of::<Flaring>())
         .trigger(Trigger::Event(TagKey::named("event.beacon")))
         .net(NetExecution::ServerInitiated);
-    let lens = AbilityData::new("lens", "zooming")
+    let lens = AbilityData::new(Key::of::<Lens>(), Key::of::<Zooming>())
         .trigger(Trigger::Event(TagKey::named("event.lens")))
         .net(NetExecution::LocalOnly);
-    let scope = AbilityData::new("scope", "zooming")
+    let scope = AbilityData::new(Key::of::<Scope>(), Key::of::<Zooming>())
         .trigger(Trigger::TagAdded(TagKey::named("state.aiming")))
         .net(NetExecution::LocalOnly);
     [
@@ -341,7 +342,7 @@ fn net_with(replicas: Replicas) -> TestWorld {
             Authentication::Manual {
                 server_addr: SERVER,
                 protocol_id: 0,
-                private_key: Key::default(),
+                private_key: lightyear::netcode::Key::default(),
                 client_id: 0,
             },
             lightyear::netcode::client_plugin::NetcodeConfig::default(),
@@ -1120,10 +1121,10 @@ fn watch_mismatches(app: &mut TestApp) {
 /// numbers effects had kept, new ones after.
 fn reload_with(world: &mut World, effects: &[EffectData]) {
     let mut all = vec![
-        EffectData::instant("fireball.cost")
+        EffectData::instant(Key::of::<FireballCost>())
             .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0))
             .cue("cue.hit"),
-        EffectData::lasting("fireball.cooldown", 1.0)
+        EffectData::lasting(Key::of::<FireballCooldown>(), 1.0)
             .grant("cooldown.fireball")
             .cue("cue.cooling"),
     ];

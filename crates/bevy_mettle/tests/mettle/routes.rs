@@ -180,7 +180,7 @@ fn shielded(app: &mut TestApp, shield: f32, life: f32) -> Entity {
 }
 
 fn hit(damage: f32) -> EffectData {
-    EffectData::instant("hit").modifier(EffectModifier::route::<IncomingDamage>(damage))
+    EffectData::instant(Key::of::<Hit>()).modifier(EffectModifier::route::<IncomingDamage>(damage))
 }
 
 #[test]
@@ -217,7 +217,9 @@ fn damage_is_routed_through_the_shield_into_life() {
 
 #[test]
 fn an_execution_deals_a_route_routed_the_same() {
-    let mut app = app::<Strike>(&[EffectData::instant("strike").execution("strike")]);
+    let mut app = app::<Strike>(&[
+        EffectData::instant(Key::of::<Strike>()).execution(Key::of::<StrikeDamage>())
+    ]);
     let npc = shielded(&mut app, 5.0, 50.0);
     let caster = actor(&mut app, [Modifier::flat(id::<Damage>(), 15.0)]);
     app.world_mut().apply_effect(npc, Strike.source(caster));
@@ -272,7 +274,8 @@ fn routing_is_single_pass() {
 
 #[test]
 fn a_preview_sees_what_routes_are_routed_into() {
-    let price = EffectData::instant("price").modifier(EffectModifier::route::<BloodPrice>(20.0));
+    let price =
+        EffectData::instant(Key::of::<Price>()).modifier(EffectModifier::route::<BloodPrice>(20.0));
     let mut app = app::<Price>(&[price]);
     let mage = shielded(&mut app, 0.0, 50.0);
     let changes = app.world().preview_effect(mage, &Price.spec()).unwrap();
@@ -319,7 +322,7 @@ fn a_route_is_dealt_flat_by_what_executes_and_never_read() {
 #[test]
 fn a_modifier_changes_an_attribute_or_a_route() {
     let mut both = EffectModifier::route::<IncomingDamage>(1.0);
-    both.attribute = Some(Key::from_static("life"));
+    both.attribute = Some(Key::of::<Life>());
     let mut neither = EffectModifier::route::<IncomingDamage>(1.0);
     neither.route = None;
     let errors = errors(&[
@@ -354,7 +357,7 @@ fn an_ability_paid_through_a_route_is_checked_as_routed() {
     let abilities = world
         .resource::<AbilityRegistry>()
         .recheck(
-            &[AbilityData::new("bolt", "cast_bolt").cost("bolt.cost")],
+            &[AbilityData::new(Key::of::<Bolt>(), Key::of::<CastBolt>()).cost("bolt.cost")],
             &[],
             AbilityChecks {
                 tags: &tags(),
@@ -388,7 +391,10 @@ fn strayed(run: fn(&ExecutionContext) -> Vec<BaseChange>) -> (TestApp, Entity) {
         .with(move |app| {
             code(app);
             app.add_execution(Stray(run)).add_effect::<Strayed>();
-            load(app, &[EffectData::instant("strayed").execution("stray")]);
+            load(
+                app,
+                &[EffectData::instant(Key::of::<Strayed>()).execution(Key::of::<Stray>())],
+            );
         })
         .build();
     let npc = shielded(&mut app, 5.0, 50.0);

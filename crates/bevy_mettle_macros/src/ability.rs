@@ -12,6 +12,8 @@ pub(crate) fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         "ability",
         "an ability",
         &quote::quote!(#krate::Ability),
+        &krate,
+        &quote::quote!(#krate::__core::registry::AnyAbility),
     )
 }
 

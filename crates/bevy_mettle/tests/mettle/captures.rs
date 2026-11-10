@@ -130,7 +130,7 @@ fn checked(effect: EffectData) -> MagnitudeDef {
 #[test]
 fn a_scalable_float_is_a_value_times_a_curve_at_the_level() {
     let blast = adding::<Damage>(
-        EffectData::instant("blast"),
+        EffectData::instant(Key::of::<Blast>()),
         Magnitude::scaled(2.0, "growth"),
     );
     let mut app = app(&[blast], |app| {
@@ -145,7 +145,7 @@ fn a_scalable_float_is_a_value_times_a_curve_at_the_level() {
 #[test]
 fn a_curve_at_an_attribute_gives_diminishing_returns() {
     let blast = adding::<Damage>(
-        EffectData::instant("blast"),
+        EffectData::instant(Key::of::<Blast>()),
         Magnitude::curve_at("softcap", Magnitude::source::<Strength>()),
     );
     let mut app = app(&[blast], |app| {
@@ -170,7 +170,7 @@ fn a_curve_at_an_attribute_gives_diminishing_returns() {
 fn sums_products_and_clamps_compose() {
     // Half the caster's strength, plus the level, kept within 1 and 8.
     let blast = adding::<Damage>(
-        EffectData::instant("blast"),
+        EffectData::instant(Key::of::<Blast>()),
         Magnitude::source::<Strength>()
             .times(0.5)
             .plus(Magnitude::Level)
@@ -193,7 +193,7 @@ fn sums_products_and_clamps_compose() {
 
 #[test]
 fn the_level_is_a_magnitude() {
-    let blast = adding::<Damage>(EffectData::instant("blast"), Magnitude::Level);
+    let blast = adding::<Damage>(EffectData::instant(Key::of::<Blast>()), Magnitude::Level);
     let mut app = app(&[blast], |app| {
         app.add_effect::<Blast>();
     });
@@ -204,7 +204,7 @@ fn the_level_is_a_magnitude() {
 
 #[test]
 fn constants_are_folded_as_theyre_checked() {
-    let blast = |value: Magnitude| adding::<Damage>(EffectData::instant("blast"), value);
+    let blast = |value: Magnitude| adding::<Damage>(EffectData::instant(Key::of::<Blast>()), value);
     assert_eq!(
         checked(blast(Magnitude::Product(vec![
             Magnitude::Value(2.0),
@@ -248,7 +248,7 @@ fn constants_are_folded_as_theyre_checked() {
 #[test]
 fn durations_and_periods_are_expressions() {
     // Lasts twice the level; executes every quarter of the caster's cooldown.
-    let blast = EffectData::lasting("blast", Magnitude::Level.times(2.0))
+    let blast = EffectData::lasting(Key::of::<Blast>(), Magnitude::Level.times(2.0))
         .period(
             Magnitude::source::<crate::common::Cooldown>().times(0.25),
             false,
@@ -296,7 +296,7 @@ fn durations_and_periods_are_expressions() {
 #[test]
 fn a_read_takes_the_current_value_the_base_or_the_bonus() {
     let blast = adding::<Damage>(
-        EffectData::instant("blast"),
+        EffectData::instant(Key::of::<Blast>()),
         Magnitude::source::<Strength>(),
     )
     .modifier(EffectModifier::new::<Mana>(
@@ -321,7 +321,7 @@ fn a_read_takes_the_current_value_the_base_or_the_bonus() {
 #[test]
 fn a_tagged_read_counts_the_modifiers_that_count_in_its_tags() {
     let blast = adding::<Damage>(
-        EffectData::instant("blast"),
+        EffectData::instant(Key::of::<Blast>()),
         Magnitude::source::<Strength>(),
     )
     .modifier(EffectModifier::new::<Mana>(
@@ -353,7 +353,7 @@ fn a_tagged_read_counts_the_modifiers_that_count_in_its_tags() {
 fn a_capture_is_read_as_the_hit_its_part_of() {
     // A fire hit, reading its caster's strength with nothing more said.
     let blast = adding::<Damage>(
-        EffectData::instant("blast").tag(FIRE),
+        EffectData::instant(Key::of::<Blast>()).tag(FIRE),
         Magnitude::source::<Strength>(),
     );
     let mut app = app(&[blast], |app| {
@@ -393,8 +393,8 @@ fn a_capture_is_read_as_the_hit_its_part_of() {
 /// An app with `might`, snapshotting the caster's strength, and `aura`,
 /// reading it live; and an npc and a caster.
 fn snapshot_and_live(from: fn() -> AttributeRead) -> (TestApp, Entity, Entity) {
-    let might = adding::<Damage>(EffectData::infinite("might"), from());
-    let aura = adding::<Mana>(EffectData::infinite("aura"), from().live());
+    let might = adding::<Damage>(EffectData::infinite(Key::of::<Might>()), from());
+    let aura = adding::<Mana>(EffectData::infinite(Key::of::<Aura>()), from().live());
     let mut app = app(&[might, aura], |app| {
         app.add_effect::<Might>().add_effect::<Aura>();
     });
@@ -445,7 +445,7 @@ fn a_snapshot_keeps_its_value_and_a_live_read_follows_the_target() {
 #[test]
 fn a_spec_snapshotted_as_its_made_applies_with_its_snapshot() {
     let blast = adding::<Damage>(
-        EffectData::instant("blast"),
+        EffectData::instant(Key::of::<Blast>()),
         Magnitude::source::<Strength>(),
     );
     let mut app = app(&[blast], |app| {
@@ -470,7 +470,7 @@ fn a_spec_snapshotted_as_its_made_applies_with_its_snapshot() {
 #[test]
 fn a_system_snapshots_a_spec_through_snapshots() {
     let blast = adding::<Damage>(
-        EffectData::instant("blast"),
+        EffectData::instant(Key::of::<Blast>()),
         Magnitude::source::<Strength>().bonus(),
     )
     .modifier(EffectModifier::new::<Mana>(
@@ -505,7 +505,7 @@ fn a_system_snapshots_a_spec_through_snapshots() {
 #[test]
 fn a_snapshotted_spec_outlives_its_source() {
     let blast = adding::<Damage>(
-        EffectData::instant("blast"),
+        EffectData::instant(Key::of::<Blast>()),
         Magnitude::source::<Strength>(),
     );
     let mut app = app(&[blast], |app| {
@@ -528,7 +528,7 @@ fn a_snapshotted_spec_outlives_its_source() {
 #[test]
 fn what_a_snapshot_cant_read_yet_is_captured_as_it_applies() {
     let blast = adding::<Damage>(
-        EffectData::instant("blast"),
+        EffectData::instant(Key::of::<Blast>()),
         Magnitude::source::<Strength>(),
     );
     let mut app = app(&[blast], |app| {
@@ -593,17 +593,17 @@ fn content_accepts_reads_that_dont_follow_themselves() {
         &[
             // Snapshotted: read once.
             adding::<Strength>(
-                EffectData::infinite("might"),
+                EffectData::infinite(Key::of::<Might>()),
                 Magnitude::target::<Strength>(),
             ),
             // The source's: not what it changes.
             adding::<Strength>(
-                EffectData::infinite("aura"),
+                EffectData::infinite(Key::of::<Aura>()),
                 Magnitude::source::<Strength>().live(),
             ),
             // Instant: nothing to follow.
             adding::<Strength>(
-                EffectData::instant("blast"),
+                EffectData::instant(Key::of::<Blast>()),
                 Magnitude::target::<Strength>().live(),
             ),
         ],
@@ -652,9 +652,9 @@ impl ExecutionFn for Siphon {
 #[test]
 fn an_execution_reads_what_it_declares_it_captures() {
     let reads = Reads::default();
-    let siphon = EffectData::lasting("blast", 10.0)
+    let siphon = EffectData::lasting(Key::of::<Blast>(), 10.0)
         .period(1.0, false)
-        .execution("siphon");
+        .execution(Key::of::<Siphon>());
     let mut app = app(&[siphon], |app| {
         app.add_effect::<Blast>()
             .add_execution(Siphon(reads.clone()));
@@ -706,12 +706,12 @@ impl CalculationFn for Kept {
 fn a_calculation_reads_what_it_declares_it_captures() {
     let reads = Reads::default();
     let might = adding::<Damage>(
-        EffectData::infinite("might"),
-        Magnitude::Custom(Key::from_static("kept")),
+        EffectData::infinite(Key::of::<Might>()),
+        Magnitude::Custom(Key::of::<Kept>()),
     );
     let aura = adding::<Mana>(
-        EffectData::infinite("aura"),
-        Magnitude::Custom(Key::from_static("following")),
+        EffectData::infinite(Key::of::<Aura>()),
+        Magnitude::Custom(Key::of::<Following>()),
     );
     let mut app = app(&[might, aura], |app| {
         app.add_effect::<Might>()
@@ -798,7 +798,7 @@ fn a_live_read_is_followed_and_published_once_in_the_step_it_moved() {
 fn effects_reading_each_other_live_settle() {
     // Each adds half the other's strength to its own: both come to 20.
     let mirror = adding::<Strength>(
-        EffectData::infinite("mirror"),
+        EffectData::infinite(Key::of::<Mirror>()),
         Magnitude::source::<Strength>().live().times(0.5),
     );
     let mut app = app(&[mirror], |app| {

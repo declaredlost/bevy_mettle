@@ -20,6 +20,25 @@ ability it grants a `#[derive(Ability)]` type. A misspelled one doesn't
 compile. Each type carries its content's name, checked once, as content
 loads.
 
+Content built in code can name by type too. A [`Key`] comes from a string,
+or from a type with `Key::of::<Burning>()`, keyed by the name its derive
+gives it. Builders take either:
+
+```rust
+# use bevy_mettle::prelude::*;
+#[derive(Effect)]
+struct Burning;
+
+let named: Key<AnyEffect> = "burning".into();
+assert_eq!(Key::of::<Burning>(), named);
+let burning = EffectData::lasting(Key::of::<Burning>(), 4.0);
+# assert_eq!(burning.name, named);
+```
+
+One type can be keyed as more than one kind. A `Fireball` deriving both
+`Ability` and `Effect` gives `AbilityData::new` the ability's key and
+`EffectData::instant` the effect's, each by its own name.
+
 Code is added to the app: attributes with `add_attribute`, behaviours with
 `add_behaviour`, effect code with `add_execution`, `add_calculation` and
 `add_route`, and the tags, effects and abilities code names with `add_tag`,

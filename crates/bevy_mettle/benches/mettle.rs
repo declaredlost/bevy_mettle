@@ -373,19 +373,21 @@ fn bench_tags(c: &mut Criterion) {
 /// The effects the benches apply, as content defines them.
 fn effects() -> Vec<EffectData> {
     vec![
-        EffectData::instant("hit").modifier(EffectModifier::new::<Life>(Operation::Flat, -1.0)),
-        EffectData::instant("routed").modifier(EffectModifier::route::<IncomingDamage>(2.0)),
-        EffectData::instant("struck").execution("strike"),
-        EffectData::lasting("burning", 1_000_000.0)
+        EffectData::instant(Key::of::<Hit>())
+            .modifier(EffectModifier::new::<Life>(Operation::Flat, -1.0)),
+        EffectData::instant(Key::of::<Routed>())
+            .modifier(EffectModifier::route::<IncomingDamage>(2.0)),
+        EffectData::instant(Key::of::<Struck>()).execution(Key::of::<Strike>()),
+        EffectData::lasting(Key::of::<Burning>(), 1_000_000.0)
             .tag("effect.affliction.burning")
             .period(0.016, false)
             .grant("state.burning")
             .modifier(EffectModifier::new::<Life>(Operation::Flat, 0.0)),
-        EffectData::lasting("scorching", 1_000_000.0)
+        EffectData::lasting(Key::of::<Scorching>(), 1_000_000.0)
             .period(0.016, false)
-            .execution("scorch"),
+            .execution(Key::of::<Scorch>()),
         // A tenth of the source's `A0`, a third of it in fire, followed live.
-        EffectData::infinite("aura")
+        EffectData::infinite(Key::of::<Aura>())
             .modifier(EffectModifier::new::<A2>(
                 Operation::Flat,
                 Magnitude::source::<A0>().live().times(0.1),
@@ -398,7 +400,7 @@ fn effects() -> Vec<EffectData> {
                     .times(1.0 / 3.0),
             )),
         // Its source's `A0` bonus and fire `A3`, as the spec was made.
-        EffectData::instant("snapped")
+        EffectData::instant(Key::of::<Snapped>())
             .modifier(EffectModifier::new::<Life>(
                 Operation::Flat,
                 Magnitude::source::<A0>().bonus().times(-0.01),
@@ -408,7 +410,7 @@ fn effects() -> Vec<EffectData> {
                 Magnitude::source::<A3>().tagged(FIRE).times(-0.01),
             )),
         // Up to 5 stacks on a target, each refreshing its time.
-        EffectData::lasting("stacked", 1_000_000.0)
+        EffectData::lasting(Key::of::<Stacked>(), 1_000_000.0)
             .tag("effect.affliction")
             .stacking(Stacking {
                 by: StackBy::Target,
@@ -419,20 +421,20 @@ fn effects() -> Vec<EffectData> {
                 overflow: Vec::new(),
             })
             .modifier(EffectModifier::new::<A5>(Operation::Flat, 1.0)),
-        EffectData::lasting("ward", 1_000_000.0)
+        EffectData::lasting(Key::of::<Ward>(), 1_000_000.0)
             .modifier(EffectModifier::new::<A6>(Operation::Flat, 1.0)),
-        EffectData::instant("flare")
+        EffectData::instant(Key::of::<Flare>())
             .modifier(EffectModifier::new::<Life>(Operation::Flat, -1.0))
             .cue("cue.hit"),
         // Damage over time: every half second.
-        EffectData::lasting("dot", 1_000_000.0)
+        EffectData::lasting(Key::of::<Dot>(), 1_000_000.0)
             .period(0.5, false)
             .modifier(EffectModifier::new::<Life>(Operation::Flat, -1.0)),
         // What an ability costs, and its cooldown: shorter than an update, run
         // out by the next.
-        EffectData::instant("bolt.cost")
+        EffectData::instant(Key::of::<BoltCost>())
             .modifier(EffectModifier::new::<Life>(Operation::Flat, -1.0)),
-        EffectData::lasting("bolt.cooldown", 0.01).grant("cooldown.fireball"),
+        EffectData::lasting(Key::of::<BoltCooldown>(), 0.01).grant("cooldown.fireball"),
     ]
 }
 
@@ -723,9 +725,9 @@ fn ability_app(role: NetRole) -> (App, Vec<Entity>) {
         let abilities = world
             .resource::<AbilityRegistry>()
             .recheck(
-                &[AbilityData::new("bolt", "cast")
-                    .cost("bolt.cost")
-                    .cooldown("bolt.cooldown")],
+                &[AbilityData::new(Key::of::<Bolt>(), Key::of::<Cast>())
+                    .cost(Key::of::<BoltCost>())
+                    .cooldown(Key::of::<BoltCooldown>())],
                 &[],
                 AbilityChecks {
                     tags: world.resource(),

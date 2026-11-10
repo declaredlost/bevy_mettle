@@ -13,7 +13,7 @@ struct Buff;
 
 /// A buff to `Strength` for a few ticks.
 fn buff() -> EffectData {
-    EffectData::lasting("buff", 0.05)
+    EffectData::lasting(Key::of::<Buff>(), 0.05)
         .modifier(EffectModifier::new::<Strength>(Operation::Flat, 5.0))
 }
 

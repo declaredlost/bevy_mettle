@@ -11,7 +11,7 @@ use bevy_reflect::utility::GenericTypePathCell;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use smol_str::SmolStr;
 
-use super::Kind;
+use super::{Keyed, Kind};
 
 /// The key of something content defines: its name, typed by its [`Kind`].
 ///
@@ -38,6 +38,27 @@ impl<T: Kind> Key<T> {
             name: name.into(),
             kind: PhantomData,
         }
+    }
+
+    /// The key of `N`, a type, as its derive names it: `Key::of::<Burning>()`.
+    ///
+    /// Where a builder takes a key, it's typed by its type, and nothing's
+    /// constructed:
+    ///
+    /// ```
+    /// use bevy_mettle_core::registry::{AnyEffect, Key, Keyed};
+    ///
+    /// struct Burning;
+    /// impl Keyed<AnyEffect> for Burning {
+    ///     const KEY: &'static str = "burning";
+    /// }
+    ///
+    /// let burning: Key<AnyEffect> = Key::of::<Burning>();
+    /// assert_eq!(burning.as_str(), "burning");
+    /// ```
+    #[must_use]
+    pub const fn of<N: Keyed<T>>() -> Self {
+        Self::from_static(N::KEY)
     }
 
     /// The key named `name`, as a constant.

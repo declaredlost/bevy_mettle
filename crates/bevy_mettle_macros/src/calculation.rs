@@ -14,6 +14,7 @@ pub(crate) fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         "a calculation",
         &quote::quote!(#krate::code::Calculation),
         &krate,
+        &quote::quote!(#krate::code::AnyCalculation),
     )
 }
 
