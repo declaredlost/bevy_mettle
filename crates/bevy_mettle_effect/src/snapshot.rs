@@ -8,7 +8,6 @@ use bevy_mettle_core::registry::AttributeId;
 use bevy_mettle_core::tag::OwnedTags;
 
 use crate::data::{Capture, Read};
-use crate::engine::hit_tags;
 use crate::{EffectRegistry, EffectSpec, Snapshot};
 
 /// A system parameter: taking specs' snapshots as they're made.
@@ -106,8 +105,9 @@ fn take(
         }
         // Read as a hit would be: in its effect's tags and its own, from its
         // source; its target isn't known yet.
-        let tags = hit_tags(def, capture);
-        let mut hit = AttributeContext::new().tags(&tags).source(source);
+        let mut hit = AttributeContext::new()
+            .tags(&capture.read_in)
+            .source(source);
         if let Some(owned) = owned {
             hit = hit.source_tags(owned);
         }

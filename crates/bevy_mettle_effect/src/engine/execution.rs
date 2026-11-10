@@ -6,7 +6,7 @@ use bevy_mettle_attribute::modifier::{Modifier, Operation};
 use bevy_mettle_attribute::read::{AttributeContext, AttributeWorld};
 use bevy_mettle_attribute::registry::AttributeRegistry;
 use bevy_mettle_core::registry::AttributeId;
-use bevy_mettle_core::tag::{OwnedTags, TagCounts, Tags};
+use bevy_mettle_core::tag::{OwnedTags, TagCounts};
 
 use super::{Check, count, source_tags};
 use crate::active::{ActiveEffect, EffectOf};
@@ -78,9 +78,8 @@ pub(super) fn read(context: &ExecutionContext, capture: &CaptureDef) -> Option<f
         Capture::Source => source?,
         Capture::Target => context.target,
     };
-    let tags = hit_tags(context.def, capture);
     let world = context.world;
-    let mut hit = AttributeContext::new().tags(&tags);
+    let mut hit = AttributeContext::new().tags(&capture.read_in);
     if let Some(owned) = world.get::<OwnedTags>(context.target) {
         hit = hit.target_tags(owned);
     }
@@ -97,16 +96,6 @@ pub(super) fn read(context: &ExecutionContext, capture: &CaptureDef) -> Option<f
         Read::Base => base(),
         Read::Bonus => Some(current()? - base()?),
     }
-}
-
-/// What `capture` is read in: its effect's tags and its own, as a hit's
-/// attributes are, so modifiers counting for such hits count.
-pub(crate) fn hit_tags(def: &EffectDef, capture: &CaptureDef) -> Tags {
-    let mut tags = capture.tags.clone();
-    for tag in def.tags.written() {
-        tags.insert(tag);
-    }
-    tags
 }
 
 /// What executing an effect works out: the changes it makes to bases, and

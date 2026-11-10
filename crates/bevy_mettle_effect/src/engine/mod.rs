@@ -14,7 +14,7 @@ use bevy_mettle_core::condition::Context;
 use bevy_mettle_core::tag::{OwnedTags, TagCounts, TagKey, Tags};
 
 pub(crate) use self::apply::apply;
-pub(crate) use self::execution::{captured, hit_tags, preview};
+pub(crate) use self::execution::{captured, preview};
 pub(crate) use self::live::settle_live;
 pub(crate) use self::remove::{
     remove, remove_activation, remove_quietly, remove_tagged, removed_unasked,

@@ -141,6 +141,9 @@ pub struct CaptureDef {
     pub value: Read,
     /// Captured as early as it can be and kept, or read live.
     pub snapshot: bool,
-    /// What it's read in.
+    /// What it's read in beyond its effect's tags: its own.
     pub tags: Tags,
+    /// What it's read in, all of it: its effect's tags and its own, as a
+    /// hit's attributes are, so modifiers counting for such hits count.
+    pub read_in: Tags,
 }

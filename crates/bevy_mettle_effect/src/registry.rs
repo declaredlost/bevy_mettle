@@ -255,7 +255,15 @@ impl Compile<'_> {
             duration,
             period,
             modifiers: modifiers?,
-            captures: std::mem::take(&mut self.captures),
+            captures: std::mem::take(&mut self.captures)
+                .into_iter()
+                .map(|mut capture| {
+                    for tag in def.tags.written() {
+                        capture.read_in.insert(tag);
+                    }
+                    capture
+                })
+                .collect(),
             executions: executions.into_iter().collect::<Option<_>>()?,
             grants: def.grants.clone(),
             cues: def.cues.clone(),
@@ -552,6 +560,8 @@ impl Compile<'_> {
             value: read.value,
             snapshot: read.snapshot,
             tags: read.tags.clone(),
+            // Its effect's tags are added as the effect is compiled.
+            read_in: read.tags.clone(),
         };
         if let Some(slot) = self.captures.iter().position(|known| *known == capture) {
             return Some(slot);
