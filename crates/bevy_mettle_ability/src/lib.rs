@@ -11,7 +11,6 @@ pub mod events;
 pub mod net;
 mod plugin;
 pub mod prelude;
-mod reader;
 mod registry;
 
 /// Core, as the derives reach it wherever this crate's used.
@@ -20,8 +19,7 @@ pub mod __core {
     pub use bevy_mettle_core::*;
 }
 
-pub use self::ability::{Ability, AbilityApp, AbilitySpec, IntoAbilityId};
+pub use self::ability::{Ability, AbilityApp, AbilitySpec};
 pub use self::commands::{AbilityCommands, AbilityWorld};
 pub use self::plugin::{AbilityPlugin, AbilitySystems};
-pub use self::reader::AbilityReader;
-pub use self::registry::{AbilityChecks, AbilityRegistry};
+pub use self::registry::{AbilityRegistry, AbilityScope};

@@ -2,13 +2,16 @@
 //! not.
 
 use bevy::prelude::*;
+use bevy_mettle_core::Activation;
 use bevy_mettle_core::net::NetRole;
+use bevy_mettle_core::registry::AbilityId;
 use bevy_mettle_core::tag::{OwnedTags, Tags};
-use bevy_mettle_effect::cue::{Cue, CueWorld};
+use bevy_mettle_effect::cue::CueWorld;
 
 use super::interrupts;
 use crate::active::{Abilities, ActiveAbility, GrantedAbility};
-use crate::behaviour::BehaviourRegistry;
+use crate::behaviour::{BehaviourId, BehaviourRegistry};
+use crate::data::NetExecution;
 use crate::events::AbilityEnded;
 
 /// How an ability's ending goes.
@@ -49,6 +52,20 @@ pub(crate) fn cancel(world: &mut World, ability: Entity) {
     }
 }
 
+/// An active ability as it ends: who it ran for, and what it held, to give
+/// back. What it activated with, not what its definition says now: it may
+/// have been replaced since.
+pub(crate) struct Ended {
+    pub(crate) actor: Entity,
+    pub(crate) ability: Entity,
+    pub(crate) id: AbilityId,
+    pub(crate) net: NetExecution,
+    pub(crate) activation: Activation,
+    pub(crate) owner_tags: Tags,
+    pub(crate) cues: Tags,
+    pub(crate) running: Option<BehaviourId>,
+}
+
 /// Ends `ability`, as `ending` says.
 fn end_as(world: &mut World, ability: Entity, cancelled: bool, ending: Ending) {
     let (Some(granted), Some(active)) = (
@@ -57,36 +74,62 @@ fn end_as(world: &mut World, ability: Entity, cancelled: bool, ending: Ending) {
     ) else {
         return;
     };
-    let actor = active.actor;
-    let activation = active.activation;
+    let (actor, activation) = (active.actor, active.activation);
     let (id, net) = (granted.def.id, granted.def.net);
-    // What it activated with, not what its definition says now: it may have
-    // been replaced since.
-    let (granted_tags, cues, running) = world
-        .get_mut::<GrantedAbility>(ability)
-        .map(|mut granted| {
-            (
-                std::mem::take(&mut granted.granted),
-                std::mem::take(&mut granted.cues),
-                granted.running.take(),
-            )
-        })
-        .unwrap_or_default();
+    let Some(mut granted) = world.get_mut::<GrantedAbility>(ability) else {
+        return;
+    };
+    let ended = Ended {
+        actor,
+        ability,
+        id,
+        net,
+        activation,
+        owner_tags: std::mem::take(&mut granted.owner_tags),
+        cues: std::mem::take(&mut granted.cues),
+        running: granted.running.take(),
+    };
+    finish(world, ended, cancelled, ending);
+}
+
+/// A granted ability taken away while active (despawned, or its
+/// [`GrantedAbility`] taken off): cancelled, as [`end`] does, if its actor's
+/// still there.
+pub(crate) fn ended_unasked(world: &mut World, ended: Ended) {
+    if world.get_entity(ended.actor).is_ok() {
+        finish(world, ended, true, Ending::Told);
+    }
+}
+
+/// Gives back what `ended` held, takes its behaviour off it if it's still
+/// there, and tells of its ending, as `ending` says.
+fn finish(world: &mut World, ended: Ended, cancelled: bool, ending: Ending) {
+    let Ended {
+        actor,
+        ability,
+        id,
+        net,
+        activation,
+        owner_tags,
+        cues,
+        running,
+    } = ended;
     let behaviour = running.and_then(|running| {
         world
             .get_resource::<BehaviourRegistry>()
             .and_then(|behaviours| behaviours.get(running).copied())
     });
     if let Some(mut owned) = world.get_mut::<OwnedTags>(actor) {
-        owned.remove_all(&granted_tags);
+        owned.remove_all(&owner_tags);
     }
     for cue in cues.written() {
-        world.remove_cue(actor, &Cue::new(cue));
+        world.remove_cue(actor, cue);
     }
-    let mut entity = world.entity_mut(ability);
-    entity.remove::<ActiveAbility>();
-    if let Some(behaviour) = behaviour {
-        (behaviour.remove)(&mut entity);
+    if let Ok(mut entity) = world.get_entity_mut(ability) {
+        entity.remove::<ActiveAbility>();
+        if let Some(behaviour) = behaviour {
+            (behaviour.remove)(&mut entity);
+        }
     }
     world.trigger(AbilityEnded {
         entity: actor,
@@ -129,7 +172,7 @@ fn interrupt_noted(world: &mut World) {
     }
 }
 
-/// Cancels `actor`'s active abilities whose `cancel_if` holds: as its tags
+/// Cancels `actor`'s active abilities whose `end_if` holds: as its tags
 /// change, as one activates, and as definitions are replaced.
 ///
 /// A client leaves it to the server: what it predicts of its owner's tags may

@@ -27,13 +27,13 @@ fn content() -> MettleContent {
         effects: vec![
             EffectData::instant("fireball.cost")
                 .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-            EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
+            EffectData::lasting("fireball.cooldown", 2.0).owner_tag("cooldown.fireball"),
         ],
         abilities: vec![
             AbilityData::new("fireball", "cast_fireball")
                 .cost("fireball.cost")
                 .cooldown("fireball.cooldown")
-                .blocked_by("state.stunned"),
+                .require(!Condition::owner_has("state.stunned")),
         ],
         ..Default::default()
     }
@@ -91,9 +91,9 @@ and abilities code names, before any part runs. If it all holds, the
 #         tags: ["cooldown", "cooldown.fireball", "state", "state.stunned"].map(TagKey::named).to_vec(),
 #         effects: vec![
 #             EffectData::instant("fireball.cost").modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-#             EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
+#             EffectData::lasting("fireball.cooldown", 2.0).owner_tag("cooldown.fireball"),
 #         ],
-#         abilities: vec![AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>()).cost("fireball.cost").cooldown("fireball.cooldown").blocked_by("state.stunned")],
+#         abilities: vec![AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>()).cost("fireball.cost").cooldown("fireball.cooldown").require(!Condition::owner_has("state.stunned"))],
 #         ..Default::default()
 #     }
 # }
@@ -220,7 +220,7 @@ let content = MettleContent {
     tags: vec![TagKey::named("cooldown")],
     effects: vec![
         // A tag that isn't defined.
-        EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
+        EffectData::lasting("fireball.cooldown", 2.0).owner_tag("cooldown.fireball"),
         // A curve that isn't there.
         EffectData::instant("fireball.cost").modifier(EffectModifier::new::<Mana>(
             Operation::Flat,

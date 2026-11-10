@@ -30,14 +30,14 @@ fn fireball() -> AbilityData {
         .tag("ability.spell.fire")
         .cost("fireball.cost")
         .cooldown("fireball.cooldown")
-        .blocked_by("state.stunned")
+        .require(!Condition::owner_has("state.stunned"))
 }
 
 fn effects() -> [EffectData; 2] {
     [
         EffectData::instant("fireball.cost")
             .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-        EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
+        EffectData::lasting("fireball.cooldown", 2.0).owner_tag("cooldown.fireball"),
     ]
 }
 ```
@@ -57,8 +57,8 @@ cooldown lasts, or there isn't enough mana, it fails, and says why.
 - **Modifiers.** Flat, increased, more, overrides and the rest, from items,
   effects or the actor itself. They can count only in context, such as
   resistance against fire, and you can ask why a value is what it is.
-- **Effects.** Instant, timed, infinite or periodic. They stack, grant tags,
-  need conditions to apply or to count, make actors immune to other effects,
+- **Effects.** Instant, timed, infinite or periodic. They stack, tag their
+  owner, need conditions to apply or to count, block other effects,
   and chain into each other.
 - **Abilities.** Granted, activated, paid for, cooled down and ended. What one
   costs and what blocks it is data; what it does is a component and systems

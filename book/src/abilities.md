@@ -17,11 +17,13 @@ let fireball = AbilityData::new("fireball", "cast_fireball")
     .tag("ability.spell.fire")
     .cost("fireball.cost")
     .cooldown("fireball.cooldown")
-    .require(!Condition::owner_has("state.silenced"))
-    .blocked_by("state.stunned")
-    .cancels("ability.channel")
+    .require(Condition::all([
+        !Condition::owner_has("state.silenced"),
+        !Condition::owner_has("state.stunned"),
+    ]))
+    .ends("ability.channel")
     .blocks("ability.spell")
-    .grant("state.casting")
+    .owner_tag("state.casting")
     .trigger(Trigger::Event(TagKey::named("event.parried")));
 assert_eq!(fireball.commit, Commit::OnActivate);
 ```
@@ -71,28 +73,28 @@ grants, needn't be types.
 
 | Field | What it does |
 |---|---|
-| `tags` | What the ability is. Blocking, cancelling and activating by tag match on these. |
+| `tags` | What the ability is. Blocking, ending and activating by tag match on these. |
 | `behaviour` | The component in code that runs it, added with `add_behaviour`. |
 | `cost` | An instant effect it pays as it commits. It can't activate if paying would take an attribute below 0. |
-| `cooldown` | A lasting effect applied as it commits. It can't activate while its owner owns a tag that effect grants. |
+| `cooldown` | A lasting effect applied as it commits. It can't activate while its owner owns one of that effect's owner tags. |
 | `require` | A [condition](conditions.md) that has to hold for it to activate. |
-| `cancel_if` | A condition that interrupts it: while it's active, it's cancelled as soon as this holds. See [Granting and activating](activating.md#interrupted). |
-| `blocked_by` | It can't activate while its owner owns any of these tags. |
-| `cancels` | Active abilities tagged any of these are cancelled as it activates. |
+| `end_if` | A condition that interrupts it: while it's active, it's cancelled as soon as this holds. See [Granting and activating](activating.md#interrupted). |
+| `ends` | Active abilities tagged any of these are cancelled as it activates. |
 | `blocks` | Other abilities tagged any of these can't activate while it's active. |
-| `grants` | Tags its owner owns while it's active. |
+| `owner_tags` | Tags its owner holds while it's active. |
 | `cues` | Cues held on its owner while it's active, such as a cast's glow. See [Cues](cues.md). |
 | `triggers` | What activates it besides being asked. See [Grants and triggers](grants-triggers.md). |
 | `commit` | When its cost and cooldown are applied: `OnActivate` or `Manual`. |
 | `net` | How it runs over a network: `Predicted` (the default), `ServerOnly`, `ServerInitiated` or `LocalOnly`. See [Prediction](prediction.md#execution-policies). |
 
-A tag in `blocked_by`, `cancels` or `blocks` matches the tags under it too.
+A tag in `ends` or `blocks` matches the tags under it too.
 `.blocks("ability.spell")` keeps every spell from activating, fire or not.
 
 `require` is weighed in the ability's own tags and its owner's. `ReadTagged`
 asks the ability's tags. `OwnerHas`, `TargetHas` and `SourceHas` all ask the
 owner, since an ability is its own source and target. It has no facts, so a
-fact term never holds.
+fact term never holds. An ability kept from activating while its owner owns
+a tag requires its absence: `.require(!Condition::owner_has("state.stunned"))`.
 
 ## Behaviours
 
@@ -151,7 +153,7 @@ The fireball's cost and cooldown are effects:
 # use bevy_mettle::prelude::*;
 let cost = EffectData::instant("fireball.cost")
     .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0));
-let cooldown = EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball");
+let cooldown = EffectData::lasting("fireball.cooldown", 2.0).owner_tag("cooldown.fireball");
 # let _ = (cost, cooldown);
 ```
 
@@ -233,15 +235,15 @@ let tags: Vec<TagKey> = [
 let effects = vec![
     EffectData::instant("fireball.cost")
         .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-    EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
+    EffectData::lasting("fireball.cooldown", 2.0).owner_tag("cooldown.fireball"),
 ];
 
 let fireball = AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>())
     .tag("ability.spell.fire")
     .cost("fireball.cost")
     .cooldown("fireball.cooldown")
-    .blocked_by("state.stunned")
-    .grant("state.casting");
+    .require(!Condition::owner_has("state.stunned"))
+    .owner_tag("state.casting");
 
 let content = MettleContent {
     tags,

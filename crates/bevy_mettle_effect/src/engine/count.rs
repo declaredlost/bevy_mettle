@@ -1,5 +1,5 @@
-//! An effect starting and stopping counting: its tags granted, its modifiers on
-//! its target.
+//! An effect starting and stopping counting: its owner tags given, its
+//! modifiers on its target.
 
 use bevy::prelude::*;
 use bevy_mettle_attribute::modifier::{ModifierOf, Modifiers};
@@ -30,8 +30,8 @@ pub(super) fn holds_ongoing(world: &World, effect: Entity) -> bool {
     })
 }
 
-/// Makes `effect` count: its tags granted, its modifiers on its target (unless
-/// it's periodic: it executes instead).
+/// Makes `effect` count: its owner tags given, its modifiers on its target
+/// (unless it's periodic: it executes instead).
 pub(crate) fn activate(world: &mut World, registry: &EffectRegistry, effect: Entity) {
     let (Some(active), Some(of)) = (
         world.get::<ActiveEffect>(effect),
@@ -40,19 +40,19 @@ pub(crate) fn activate(world: &mut World, registry: &EffectRegistry, effect: Ent
         return;
     };
     let target = of.0;
-    let grants = active.def.grants.clone();
+    let owner_tags = active.def.owner_tags.clone();
     let cues = active.def.cues.clone();
     let periodic = active.def.period.is_some();
     let modifiers = (!periodic).then(|| modifiers(world, registry, effect));
     if let Some(mut owned) = world.get_mut::<OwnedTags>(target) {
-        owned.add_all(&grants);
+        owned.add_all(&owner_tags);
     }
     for cue in cues.written() {
         crate::cue::add(world, target, cue, false);
     }
     if let Some(mut active) = world.get_mut::<ActiveEffect>(effect) {
         active.inhibited = false;
-        active.granted = grants;
+        active.owner_tags = owner_tags;
         active.cues = cues;
     }
     if let Some(modifiers) = modifiers {
@@ -72,10 +72,10 @@ pub(crate) fn deactivate(world: &mut World, effect: Entity) {
         return;
     };
     active.inhibited = true;
-    let granted = std::mem::take(&mut active.granted);
+    let owner_tags = std::mem::take(&mut active.owner_tags);
     let cues = std::mem::take(&mut active.cues);
     if let Some(mut owned) = world.get_mut::<OwnedTags>(target) {
-        owned.remove_all(&granted);
+        owned.remove_all(&owner_tags);
     }
     for cue in cues.written() {
         crate::cue::remove(world, target, cue, false);

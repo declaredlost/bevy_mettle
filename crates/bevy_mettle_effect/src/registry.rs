@@ -14,12 +14,12 @@ use bevy_mettle_core::{Error, Errors};
 
 use crate::Effect;
 use crate::code::{
-    AnyRoute, CalculationFn, CalculationId, CalculationRegistry, Changes, Code, ExecutionFn,
-    ExecutionId, ExecutionRegistry, RouteId, RouteRegistry,
+    AnyExecution, AnyRoute, CalculationFn, CalculationId, CalculationRegistry, Changes, Code,
+    ExecutionRegistry, RouteId, RouteRegistry,
 };
 use crate::data::{
-    AttributeRead, Capture, CaptureDef, EffectData, EffectDef, EffectDuration, EffectModifier,
-    Magnitude, MagnitudeDef, ModifierDef, Period, Stacking,
+    AttributeRead, CaptureDef, EffectData, EffectDef, EffectDuration, EffectModifier, ExecutionDef,
+    Magnitude, MagnitudeDef, ModifierDef, Period, Side, Stacking,
 };
 
 /// The effects there are, checked against what they name, and compiled.
@@ -34,9 +34,9 @@ use crate::data::{
 ///
 /// An app's registry also holds the effect types code names
 /// ([`add_effect`](crate::code::EffectApp::add_effect)), which content has to
-/// define. So an app's content is checked by [`recheck`](Self::recheck)ing its
+/// define. So an app's content is checked by [`rebuild`](Self::rebuild)ing its
 /// registry, which keeps those types and the numbers effects had: what a load
-/// or a hot reload does. [`check`](Self::check) makes a registry from nothing,
+/// or a hot reload does. [`build`](Self::build) makes a registry from nothing,
 /// knowing no types: for tools and tests outside an app. Inserted into an app,
 /// it would forget what code names.
 ///
@@ -65,7 +65,7 @@ impl std::fmt::Debug for EffectRegistry {
 
 /// What effects are checked against: the tags, curves and code they can name.
 #[derive(Clone, Copy)]
-pub struct EffectChecks<'a> {
+pub struct EffectScope<'a> {
     /// The gameplay tags there are.
     pub tags: &'a TagRegistry,
     /// The curves magnitudes scale by.
@@ -83,7 +83,7 @@ pub struct EffectChecks<'a> {
 /// What compiling one effect reads: what it can name, and where errors go.
 struct Compile<'a> {
     registry: &'a Registry<AnyEffect, Arc<EffectDef>>,
-    checks: EffectChecks<'a>,
+    checks: EffectScope<'a>,
     errors: &'a mut Vec<Error>,
     /// The effect being compiled's captures, as its magnitudes name them.
     captures: Vec<CaptureDef>,
@@ -92,30 +92,31 @@ struct Compile<'a> {
 impl EffectRegistry {
     /// A registry of `definitions`, from nothing, checked against what they
     /// can name and compiled: knowing no effect types code names. For tools
-    /// and tests; an app's content is [`recheck`](Self::recheck)ed.
+    /// and tests; an app's content goes through [`rebuild`](Self::rebuild).
     ///
     /// # Errors
     ///
     /// Everything wrong with them, at once: effects defined twice; tags,
     /// curves, attributes, routes, effects, executions and calculations named
     /// that aren't; numbers that can't be; what an instant effect can't have;
-    /// and routes dealt other than flat, or by a lasting effect.
-    pub fn check(definitions: &[EffectData], against: EffectChecks<'_>) -> Result<Self, Errors> {
-        Self::default().recheck(definitions, against)
+    /// routes routed into other than flat, or by a lasting effect; and
+    /// executions routing into routes that aren't added.
+    pub fn build(definitions: &[EffectData], against: EffectScope<'_>) -> Result<Self, Errors> {
+        Self::default().rebuild(definitions, against)
     }
 
-    /// The registry of `definitions`, as [`check`](Self::check) makes it, each
+    /// The registry of `definitions`, as [`build`](Self::build) makes it, each
     /// effect here keeping its number: new ones numbered after the last, in
     /// order of name. What a reload does, so what holds an effect's number
     /// still names it. The effect types code names here are kept.
     ///
     /// # Errors
     ///
-    /// As `check`'s, and an effect code names that content doesn't define.
-    pub fn recheck(
+    /// As `build`'s, and an effect code names that content doesn't define.
+    pub fn rebuild(
         &self,
         definitions: &[EffectData],
-        against: EffectChecks<'_>,
+        against: EffectScope<'_>,
     ) -> Result<Self, Errors> {
         let mut errors = Vec::new();
         let mut names: HashSet<&str> = HashSet::default();
@@ -165,15 +166,15 @@ impl EffectRegistry {
 
     /// Notes that code names the effect `E`: content has to define it.
     pub fn name_type<E: Effect>(&mut self) {
-        self.registry.name_type(TypeId::of::<E>(), E::NAME);
+        self.registry.name_type(TypeId::of::<E>(), E::KEY);
     }
 
     pub(crate) fn curves(&self) -> &CurveRegistry {
         &self.curves
     }
 
-    pub(crate) fn execution(&self, id: ExecutionId) -> Option<&dyn ExecutionFn> {
-        self.executions.get(id).map(Code::run)
+    pub(crate) fn executions(&self) -> &ExecutionRegistry {
+        &self.executions
     }
 
     pub(crate) fn calculation(&self, id: CalculationId) -> Option<&dyn CalculationFn> {
@@ -193,14 +194,14 @@ impl Compile<'_> {
         self.captures.clear();
         for set in [
             &def.tags,
-            &def.grants,
+            &def.owner_tags,
             &def.cues,
-            &def.removes,
-            &def.immunity,
+            &def.ends,
+            &def.blocks,
         ] {
-            self.push(self.checks.tags.known_all(set.written(), Some(&within)));
+            self.push(self.checks.tags.resolve_all(set.written(), Some(&within)));
         }
-        for condition in [&def.require, &def.ongoing, &def.remove_if]
+        for condition in [&def.require, &def.ongoing, &def.end_if]
             .into_iter()
             .flatten()
         {
@@ -212,22 +213,12 @@ impl Compile<'_> {
             .iter()
             .map(|modifier| self.modifier(def, modifier, &within))
             .collect();
-        let executions: Vec<Option<(ExecutionId, Vec<usize>)>> = def
+        let executions: Vec<Option<ExecutionDef>> = def
             .executions
             .iter()
-            .map(|execution| {
-                let id = self.checks.executions.resolve(execution, Some(&within));
-                let id = self.held(id)?;
-                let captures = self
-                    .checks
-                    .executions
-                    .get(id)
-                    .map(|code| code.captures().to_vec())
-                    .unwrap_or_default();
-                let reads = self.reads(&captures, &within)?;
-                Some((id, reads))
-            })
+            .map(|execution| self.execution(execution, &within))
             .collect();
+        let routes = self.routes(&modifiers, &executions, &within);
         let on_apply = self.effects(&def.on_apply, &within);
         let on_remove = self.effects(&def.on_remove, &within);
         let on_expire = self.effects(&def.on_expire, &within);
@@ -265,18 +256,90 @@ impl Compile<'_> {
                 })
                 .collect(),
             executions: executions.into_iter().collect::<Option<_>>()?,
-            grants: def.grants.clone(),
+            routes: routes?,
+            owner_tags: def.owner_tags.clone(),
             cues: def.cues.clone(),
             require: def.require.clone(),
             ongoing: def.ongoing.clone(),
-            remove_if: def.remove_if.clone(),
-            removes: def.removes.clone(),
-            immunity: def.immunity.clone(),
+            end_if: def.end_if.clone(),
+            ends: def.ends.clone(),
+            blocks: def.blocks.clone(),
             stacking,
             on_apply,
             on_remove,
             on_expire,
         })
+    }
+
+    /// The execution named `name` as an effect runs it, or what's wrong
+    /// noted: what it captures, and the routes it declares, each one added.
+    fn execution(&mut self, name: &Key<AnyExecution>, within: &str) -> Option<ExecutionDef> {
+        let id = self.checks.executions.resolve(name, Some(within));
+        let id = self.held(id)?;
+        let code = self.checks.executions.get(id).cloned();
+        let captures = code.as_ref().map(Code::captures).unwrap_or_default();
+        let reads = self.reads(captures, within);
+        let declared = code.as_ref().map(Code::routes).unwrap_or_default();
+        let routes: Vec<Option<RouteId>> = declared
+            .iter()
+            .map(|route| {
+                let id = self.checks.routes.id(route.as_str());
+                if id.is_none() {
+                    self.invalid(
+                        format!(
+                            "execution `{name}` routes into `{route}`, which isn't an added route"
+                        ),
+                        within,
+                    );
+                }
+                id
+            })
+            .collect();
+        Some(ExecutionDef {
+            id,
+            reads: reads?,
+            routes: routes.into_iter().collect::<Option<_>>()?,
+        })
+    }
+
+    /// The routes an effect routes into, each with the slots of what its
+    /// router captures: those its `modifiers` name, and its `executions`
+    /// declare.
+    fn routes(
+        &mut self,
+        modifiers: &[Option<ModifierDef>],
+        executions: &[Option<ExecutionDef>],
+        within: &str,
+    ) -> Option<Vec<(RouteId, Vec<usize>)>> {
+        let mut into: Vec<RouteId> = modifiers
+            .iter()
+            .flatten()
+            .filter_map(|modifier| match modifier.changes {
+                Changes::Route(route) => Some(route),
+                Changes::Attribute(_) => None,
+            })
+            .chain(
+                executions
+                    .iter()
+                    .flatten()
+                    .flat_map(|execution| execution.routes.iter().copied()),
+            )
+            .collect();
+        into.sort_unstable();
+        into.dedup();
+        let routes: Vec<Option<(RouteId, Vec<usize>)>> = into
+            .into_iter()
+            .map(|route| {
+                let captures = self
+                    .checks
+                    .routes
+                    .get(route)
+                    .map(|code| code.captures().to_vec())
+                    .unwrap_or_default();
+                Some((route, self.reads(&captures, within)?))
+            })
+            .collect();
+        routes.into_iter().collect()
     }
 
     /// The numbers of the effects `names` names, those there are; what's
@@ -338,10 +401,10 @@ impl Compile<'_> {
         if !def.lasts() {
             let lasting = [
                 ("a period", def.period.is_some()),
-                ("granted tags", !def.grants.is_empty()),
-                ("immunity", !def.immunity.is_empty()),
+                ("owner tags", !def.owner_tags.is_empty()),
+                ("blocked effects", !def.blocks.is_empty()),
                 ("an ongoing requirement", def.ongoing.is_some()),
-                ("a removal requirement", def.remove_if.is_some()),
+                ("an end condition", def.end_if.is_some()),
                 ("stacking", def.stacking.is_some()),
                 ("effects on removal", !def.on_remove.is_empty()),
                 ("effects on expiry", !def.on_expire.is_empty()),
@@ -376,7 +439,7 @@ impl Compile<'_> {
                 if modifier.op != Operation::Flat {
                     self.invalid(
                         format!(
-                            "an {:?} modifier of route `{route}`: it's dealt flat amounts only",
+                            "an {:?} modifier of route `{route}`: it takes flat amounts only",
                             modifier.op
                         ),
                         within,
@@ -447,7 +510,7 @@ impl Compile<'_> {
                 .map(MagnitudeDef::Value),
             Magnitude::Level => Some(MagnitudeDef::Level),
             Magnitude::Param(param) => {
-                self.push(self.checks.tags.known(*param, Some(within)));
+                self.push(self.checks.tags.resolve(*param, Some(within)).map(drop));
                 Some(MagnitudeDef::Param(*param))
             }
             Magnitude::Attribute(read) => self.capture(read, within).map(MagnitudeDef::Attribute),
@@ -464,7 +527,7 @@ impl Compile<'_> {
                 Some(MagnitudeDef::Custom(id, reads))
             }
             Magnitude::Curve { curve, at } => {
-                let curve = self.checks.curves.known(curve, Some(within));
+                let curve = self.checks.curves.resolve(curve, Some(within));
                 let curve = self.held(curve);
                 let at = self.magnitude(at, within);
                 Some(MagnitudeDef::Curve {
@@ -552,7 +615,7 @@ impl Compile<'_> {
         self.push(
             self.checks
                 .tags
-                .known_all(read.tags.written(), Some(within)),
+                .resolve_all(read.tags.written(), Some(within)),
         );
         let capture = CaptureDef {
             attribute,
@@ -581,7 +644,7 @@ impl Compile<'_> {
             .iter()
             .filter(|capture| {
                 !capture.snapshot
-                    && capture.from == Capture::Target
+                    && capture.from == Side::Target
                     && modifiers
                         .iter()
                         .any(|modifier| modifier.changes == Changes::Attribute(capture.attribute))

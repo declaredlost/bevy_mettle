@@ -6,9 +6,9 @@ use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::{DeriveInput, Error, LitStr};
 
-/// A marker type known by name: `impl #trait for #ident { const NAME }`, its
-/// name on `#[#attr(name = "..")]`, else the type's in `snake_case`. `what` is
-/// what it is, for errors: "a route".
+/// A marker type known by name: `impl #trait for #ident`, keyed as `kind` by
+/// its name on `#[#attr(name = "..")]`, else the type's in `snake_case`.
+/// `what` is what it is, for errors: "a route".
 pub(crate) fn named(
     input: &DeriveInput,
     attr: &str,
@@ -44,15 +44,13 @@ pub(crate) fn named(
     let name = name.unwrap_or_else(|| LitStr::new(&snake(&ident.to_string()), Span::call_site()));
     let keyed = keyed(ident, krate, kind, &name);
     Ok(quote! {
-        impl #trait_path for #ident {
-            const NAME: &'static str = #name;
-        }
+        impl #trait_path for #ident {}
         #keyed
     })
 }
 
-/// `impl Keyed<#kind> for #ident`: its key, `name`, as `kind`. `krate` is the
-/// derive's crate, `kind` a kind in core's registry, or `krate`'s own at a
+/// `impl Keyed for #ident`: its kind, `kind`, and its key, `name`. `krate` is
+/// the derive's crate, `kind` a kind in core's registry, or `krate`'s own at a
 /// path.
 pub(crate) fn keyed(
     ident: &syn::Ident,
@@ -61,7 +59,8 @@ pub(crate) fn keyed(
     name: &LitStr,
 ) -> TokenStream {
     quote! {
-        impl #krate::__core::registry::Keyed<#kind> for #ident {
+        impl #krate::__core::registry::Keyed for #ident {
+            type Kind = #kind;
             const KEY: &'static str = #name;
         }
     }

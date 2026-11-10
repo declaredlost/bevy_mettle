@@ -46,37 +46,37 @@ assert_eq!(spec.context.source, Some(caster));
 assert_eq!(EffectSpec::from(Burning), EffectSpec::of::<Burning>());
 ```
 
-Setting a param again replaces it. There's no spec of a name: code that
-doesn't know an effect's type, such as a tool listing every effect, names it
-by its number, `EffectSpec::from_id(id)`, found with
-`registry.id("burning")`. Which effect a spec applies is resolved to its
-number as it's applied.
+Setting a param again replaces it. A spec names its effect by type, never by
+name or number: an effect code applies has a type. Which effect a spec
+applies is resolved to its number as it's applied.
 
 ## Context
 
 A spec's [`EffectContext`] is what the applying code knew beyond numbers.
-It's Unreal's `FGameplayEffectContext`:
+It's Unreal's `FGameplayEffectContext`. Its one field is `source`, who's
+responsible: the archer. Source tags, attribute captures and stacking by
+source read it, set with `.source(archer)`.
 
-| Field | What it is |
+Everything else is *context data*, one of each type, added with
+`.with(..)` and read with `get::<T>()`. Mettle's own are:
+
+| Type | What it is |
 |---|---|
-| `source` | Who's responsible: the archer. Source tags, attribute captures and stacking by source read it |
-| `causer` | What struck: the arrow, the trap |
-| `object` | What it came from: the bow, an item |
-| `ability` | The ability that applied it, an [`AbilityRef`]: its id, and its level as it was activated. Set by abilities for their costs and cooldowns |
-| `hit` | Where it hit, a [`Hit`]: the point, and the surface's normal |
-| `origin` | Where it came from: what knockback pushes away from |
+| [`Causer`] | What struck: the arrow, the trap. Abilities set their actor |
+| [`SourceObject`] | What it came from: the bow, an item |
+| [`AbilityRef`] | The ability that applied it: its id, and its level as it was activated. Set by abilities for what they apply |
+| [`Hit`] | Where it hit: the point, and the surface's normal |
+| [`Origin`] | Where it came from: what knockback pushes away from |
 
-The spec's builders set each: `.source(archer)`, `.causer(arrow)`,
-`.object(bow)`, `.hit(hit)`, `.origin(at)`. Which run of an ability applied
-it is the spec's `activation`.
+Which run of an ability applied it is the spec's `activation`.
 
 A game adds its own with a [`ContextData`] type, Unreal's context
 subclassed. It's for **structured** data, which none of the rest says:
 
 - A flag, a critical or a headshot, is a [tag](tags.md), which conditions,
-  immunity and cues see.
+  blocking and cues see.
 - A number is a [param](#specs).
-- What struck and what it came from are `causer` and `object`.
+- What struck and what it came from are [`Causer`] and [`SourceObject`].
 
 What's left is a game's own shape: the targets a chain of lightning already
 struck, say. Any type deriving `Reflect`, `Clone`, `PartialEq`,
@@ -111,16 +111,16 @@ assert!(registry.id_of::<Chain>().is_some());
 
 let spec = ChainLightning
     .source(mage)
-    .causer(bolt)
-    .hit(Hit { point: Vec3::new(2.0, 1.5, 0.0), normal: Vec3::NEG_X })
+    .with(Causer(bolt))
+    .with(Hit { point: Vec3::new(2.0, 1.5, 0.0), normal: Vec3::NEG_X })
     .with(Chain { struck: struck.clone() });
-assert_eq!(spec.context.causer, Some(bolt));
+assert_eq!(spec.context.get::<Causer>(), Some(&Causer(bolt)));
 assert!(spec.context.get::<Chain>() == Some(&Chain { struck }));
 ```
 
 One of each type goes on a context, read by type. Executions and
 calculations read it from their [view](effect-code.md#what-code-sees):
-`effect.context().causer`, `effect.context().hit`, `effect.get::<Chain>()`.
+`effect.get::<Causer>()`, `effect.get::<Hit>()`, `effect.get::<Chain>()`.
 An effect it chains carries it too, and the cues it plays are told it.
 
 It goes with an effect's replica to clients, and with a one-shot cue's,
@@ -166,7 +166,7 @@ Applying checks, in order:
    [`OwnedTags`], nothing happens but a warning.
 3. The effect's `require` holds, and no effect on the target makes it immune.
    If not, [`EffectBlocked`] says why, and nothing else happens.
-4. Active effects it `removes` come off.
+4. Active effects it `ends` end.
 
 Then:
 
@@ -214,7 +214,7 @@ This mage burns for 5 every half second, gets wet, and dries off:
 #         .tag("effect.affliction.burning")
 #         .period(0.5, true)
 #         .modifier(EffectModifier::new::<Life>(Operation::Flat, Magnitude::param("param.damage")))
-#         .grant("state.burning")
+#         .owner_tag("state.burning")
 #         .require(!Condition::owner_has("immune.fire"))
 #         .ongoing(!Condition::owner_has("state.wet"))
 # }
@@ -354,7 +354,7 @@ fn cast(
 ) {
     for (active, fireball) in &casting {
         let Some(target) = fireball.target else { continue };
-        let hit = snapshots.take(active.effect_spec(FireballHit));
+        let hit = snapshots.take(active.effect_spec::<FireballHit>());
         commands.spawn(Projectile { target, hit });
     }
 }
@@ -362,7 +362,7 @@ fn cast(
 fn land(projectiles: Query<(Entity, &Projectile)>, mut commands: Commands) {
     for (projectile, flying) in &projectiles {
         // Once it reaches its target.
-        let hit = flying.hit.clone().causer(projectile);
+        let hit = flying.hit.clone().with(Causer(projectile));
         commands.entity(flying.target).apply_effect(hit);
         commands.entity(projectile).despawn();
     }
@@ -387,7 +387,7 @@ despawn the target, and its effects go with it.
 
 While it counts, a lasting effect carries its modifiers as
 [`Modifiers`] [`ModifierOf`] the target, like an item would, and the target
-owns the tags it grants. While it's inhibited, it carries neither, and its
+owns its owner tags. While it's inhibited, it carries neither, and its
 time stands still. A periodic effect never carries modifiers: it executes
 instead.
 
@@ -397,7 +397,7 @@ instead.
 schedule, [`MettleSet::Effects`], each fixed step unless you run it
 elsewhere. Each tick, for each effect:
 
-1. If its `remove_if` holds, it comes off.
+1. If its `end_if` holds, it ends.
 2. If its `ongoing` requirement stopped holding, it's inhibited. If it holds
    again, the effect counts again.
 3. If it's counting, its period comes round as often as it's due, and its
@@ -410,7 +410,7 @@ so they're published the same tick.
 
 ## Removing effects
 
-Take effects off by their tags, or one by one:
+Take effects off by their tags, or one by one, by despawning it:
 
 ```rust
 # use bevy::prelude::*;
@@ -436,17 +436,17 @@ fn reset(
     let cooldown = registry.id_of::<FireballCooldown>();
     for (effect, active) in &effects {
         if Some(active.id()) == cooldown {
-            commands.entity(effect).remove_effect();
+            commands.entity(effect).despawn();
         }
     }
 }
 # #[derive(Component)] struct Drinking;
 ```
 
-`remove_effects` goes on the actor, `remove_effect` on the active effect.
-[`EffectWorld`] has the same on the world. Either way, the effect's tags
-and modifiers are taken back, [`EffectRemoved`] is triggered, and its
-`on_remove` effects are chained.
+`remove_effects` goes on the actor, and [`EffectWorld`] has it on the
+world; an active effect is taken off by despawning it, with commands or on
+the world. Either way, the effect's tags and modifiers are taken back,
+[`EffectRemoved`] is triggered, and its `on_remove` effects are chained.
 
 ## What's told
 
@@ -460,8 +460,8 @@ abilities to observe. Each names its effect by number, `id`, an
 |---|---|
 | [`EffectApplied`] | A lasting effect was spawned on the target: `effect` is its entity |
 | [`EffectStacked`] | An effect gained or lost a stack: `stacks` is how many now |
-| [`EffectBlocked`] | An effect didn't apply: `reason` is `Requirement`, `Immunity` or `StackLimit` |
-| [`EffectExecuted`] | An effect changed bases: an instant one applied, or a period came round. `changes` says what it changed the target's bases by, `source_changes` its source's, and `routed` what it dealt each [route](effect-code.md#routes) |
+| [`EffectBlocked`] | An effect didn't apply: `reason` is `Requirement`, `Effect` (another blocks it) or `StackLimit` |
+| [`EffectExecuted`] | An effect changed bases: an instant one applied, or a period came round. `changes` says what it changed the target's bases by, `source_changes` its source's, and `routed` what it routed into each [route](effect-code.md#routes) |
 | [`EffectRemoved`] | An active effect came off: `expired` says if it ran out of time |
 
 Observe them for every actor, or for one:
@@ -505,10 +505,11 @@ can show what a hit would do.
 
 ## Pitfalls
 
-- **Despawning it yourself is removing it.** Despawn an active effect, or
-  take its `ActiveEffect` off, and it's told as removed and its `on_remove`
-  chained, as with `remove_effect`, once commands are applied. Effects
-  despawned with their target tell nothing: there's no one left to tell.
+- **Removing it is despawning it.** Despawn an active effect, or take its
+  `ActiveEffect` off, and it's told as removed and its `on_remove` chained,
+  once commands are applied: at once on a `World`, which flushes as it
+  despawns. Effects despawned with their target tell nothing: there's no
+  one left to tell.
 - **Commands wait.** `apply_effect` on commands applies when commands are
   applied, later in the frame. Read the result on the next system, or use
   `EffectWorld` in an exclusive system.
@@ -539,6 +540,9 @@ can show what a hit would do.
 [`ModifierOf`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.ModifierOf.html
 [`EffectContext`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/context/struct.EffectContext.html
 [`AbilityRef`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/context/struct.AbilityRef.html
+[`Causer`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/context/struct.Causer.html
+[`SourceObject`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/context/struct.SourceObject.html
+[`Origin`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/context/struct.Origin.html
 [`Hit`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/context/struct.Hit.html
 [`ContextData`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/context/trait.ContextData.html
 [`EffectWorld::snapshot`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/trait.EffectWorld.html#tymethod.snapshot

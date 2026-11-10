@@ -3,9 +3,6 @@
 
 use bevy::prelude::*;
 use bevy_harness::TestApp;
-use bevy_mettle::ability::behaviour::AnyBehaviour;
-use bevy_mettle::core::registry::AnyAttribute;
-use bevy_mettle::effect::code::{AnyCalculation, AnyExecution, AnyRoute};
 use bevy_mettle::prelude::*;
 
 use crate::common::{Life, Mana, attributes, close, mettle};
@@ -17,11 +14,15 @@ struct Cast;
 #[derive(Ability)]
 struct Fireball;
 
-/// The burn, as code names it: an effect, and the execution it runs.
-#[derive(Effect, Execution)]
+/// The burn, as code names it.
+#[derive(Effect)]
 struct Burn;
 
-impl ExecutionFn for Burn {
+/// The execution the burn runs.
+#[derive(Execution)]
+struct BurnDamage;
+
+impl ExecutionFn for BurnDamage {
     fn execute(&self, _: &ExecutionContext) -> Vec<BaseChange> {
         vec![BaseChange::of::<Life>(Operation::Flat, -5.0)]
     }
@@ -37,8 +38,8 @@ fn content() -> MettleContent {
         effects: vec![
             EffectData::instant("fireball.cost")
                 .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-            EffectData::lasting("fireball.cooldown", 1.0).grant("cooldown.fireball"),
-            EffectData::instant(Key::of::<Burn>()).execution(Key::of::<Burn>()),
+            EffectData::lasting("fireball.cooldown", 1.0).owner_tag("cooldown.fireball"),
+            EffectData::instant(Key::of::<Burn>()).execution(Key::of::<BurnDamage>()),
         ],
         abilities: vec![
             AbilityData::new(Key::of::<Fireball>(), Key::of::<Cast>())
@@ -54,7 +55,7 @@ fn code(app: &mut App) -> &mut App {
     app.add_behaviour::<Cast>()
         .add_ability::<Fireball>()
         .add_effect::<Burn>()
-        .add_execution(Burn)
+        .add_execution(BurnDamage)
 }
 
 /// An app with the attributes, the behaviour and the code `content` names.
@@ -105,7 +106,7 @@ fn wrong_content_is_rejected_and_the_content_before_stays() {
     let mut wrong = content();
     wrong
         .effects
-        .push(EffectData::lasting("frozen", 1.0).grant("state.frozen"));
+        .push(EffectData::lasting("frozen", 1.0).owner_tag("state.frozen"));
     wrong.abilities.push(AbilityData::new("blink", "teleport"));
     app.insert_resource(wrong);
     app.tick();
@@ -205,12 +206,6 @@ fn content_inserted_as_the_app_is_built_is_there_for_startup() {
     app.query::<(), With<Cast>>().assert_len(1);
 }
 
-/// The rite, as code names it: an ability, and the effect it costs, named
-/// apart.
-#[derive(Ability, Effect)]
-#[effect(name = "rite.cost")]
-struct Rite;
-
 /// A calculation, as code names it.
 #[derive(Calculation)]
 struct BurnTime;
@@ -221,82 +216,15 @@ struct BurnTime;
 struct IncomingFire;
 
 #[test]
-fn one_type_is_keyed_as_each_kind_it_derives() {
-    let ability: Key<AnyAbility> = Key::of::<Rite>();
-    let effect: Key<AnyEffect> = Key::of::<Rite>();
-    assert_eq!(ability.as_str(), "rite");
-    assert_eq!(effect.as_str(), "rite.cost");
-
-    let content = MettleContent {
-        effects: vec![
-            EffectData::instant(Key::of::<Rite>())
-                .modifier(EffectModifier::new::<Mana>(Operation::Flat, -5.0)),
-        ],
-        abilities: vec![
-            AbilityData::new(Key::of::<Rite>(), Key::of::<Cast>()).cost(Key::of::<Rite>()),
-        ],
-        ..default()
-    };
-    let app = TestApp::builder()
-        .plugins(mettle())
-        .with(attributes)
-        .with(|app| {
-            app.add_behaviour::<Cast>()
-                .add_ability::<Rite>()
-                .add_effect::<Rite>()
-                .insert_resource(content.clone());
-        })
-        .watch_triggered::<ContentLoaded>()
-        .build();
-    content.check(app.world()).unwrap();
-    app.assert_triggered::<ContentLoaded>(|_| true);
-
-    let cost = app.resource::<EffectRegistry>().id_of::<Rite>();
-    assert!(cost.is_some(), "the effect is loaded by its own name");
-    let abilities = app.resource::<AbilityRegistry>();
-    let rite = abilities
-        .id_of::<Rite>()
-        .and_then(|rite| abilities.get(rite));
-    assert_eq!(
-        rite.map(|rite| rite.cost),
-        Some(cost),
-        "it costs the effect"
-    );
-}
-
-#[test]
 fn each_derive_is_keyed_by_its_name() {
-    assert_eq!(
-        Key::<AnyEffect>::of::<Burn>().as_str(),
-        <Burn as Effect>::NAME
-    );
-    assert_eq!(
-        Key::<AnyAbility>::of::<Fireball>().as_str(),
-        <Fireball as Ability>::NAME
-    );
-    assert_eq!(Key::<AnyBehaviour>::of::<Cast>().as_str(), Cast::NAME);
-    assert_eq!(Key::<AnyAttribute>::of::<Life>().as_str(), Life::NAME);
-    assert_eq!(
-        Key::<AnyExecution>::of::<Burn>().as_str(),
-        <Burn as Execution>::NAME
-    );
-    assert_eq!(
-        Key::<AnyCalculation>::of::<BurnTime>().as_str(),
-        BurnTime::NAME
-    );
-    assert_eq!(
-        Key::<AnyRoute>::of::<IncomingFire>().as_str(),
-        IncomingFire::NAME
-    );
+    // Its type's name in `snake_case`.
+    assert_eq!(Key::of::<Burn>().as_str(), "burn");
+    assert_eq!(BurnDamage::KEY, "burn_damage");
+    assert_eq!(Key::of::<Fireball>().as_str(), "fireball");
+    assert_eq!(Cast::KEY, "cast");
+    assert_eq!(Life::KEY, "life");
+    assert_eq!(BurnTime::KEY, "burn_time");
 
     // An explicit name is the key.
-    assert_eq!(Key::<AnyEffect>::of::<Rite>().as_str(), "rite.cost");
-    assert_eq!(
-        Key::<AnyRoute>::of::<IncomingFire>().as_str(),
-        "incoming.fire"
-    );
-    assert_eq!(
-        Key::<AnyCalculation>::of::<BurnTime>().as_str(),
-        "burn_time"
-    );
+    assert_eq!(Key::of::<IncomingFire>().as_str(), "incoming.fire");
 }

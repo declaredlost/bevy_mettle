@@ -35,9 +35,9 @@ let burning = EffectData::lasting(Key::of::<Burning>(), 4.0);
 # assert_eq!(burning.name, named);
 ```
 
-One type can be keyed as more than one kind. A `Fireball` deriving both
-`Ability` and `Effect` gives `AbilityData::new` the ability's key and
-`EffectData::instant` the effect's, each by its own name.
+A type is of one kind, its key's kind inferred from it: `Key::of::<Burning>()`
+is a `Key<AnyEffect>`, and `Burning::KEY` its name. An ability and the effect
+it costs are two types; deriving both on one doesn't compile.
 
 Code is added to the app: attributes with `add_attribute`, behaviours with
 `add_behaviour`, effect code with `add_execution`, `add_calculation` and
@@ -62,10 +62,10 @@ by.
 
 - **Code is numbered as it's added.** `add_attribute::<Life>()` gives `Life`
   the next [`AttributeId`]; behaviours, routes, executions and calculations
-  get theirs the same way. Ask for one with `world.attribute_id::<Life>()`,
-  as Bevy has `world.component_id::<T>()`. Typed reads and changes, such
-  as `value::<Life>()`, `Current<Life>` and `BaseChange::of::<Life>`, find
-  it for you.
+  get theirs the same way. Code names each by type: reads and changes,
+  such as `value::<Life>()`, `Current<Life>` and `BaseChange::of::<Life>`,
+  find its number for you. `world.attribute_id::<Life>()` asks for it, as
+  Bevy has `world.component_id::<T>()`, to match what an event names.
 - **Content is numbered as it's checked.** Tags, curves, effects and
   abilities get a [`TagId`], a [`CurveId`], an [`EffectId`] and an
   [`AbilityId`], in order of name. A reload keeps the numbers things had,
@@ -114,8 +114,8 @@ assert_eq!(attributes.name(life), Some("life"));
 | Your systems | Bases, `OwnedTags`, effects applied, abilities activated | `Current<A>`, abilities' components, what's told |
 
 For the mage, casting the fireball applies `fireball.cost` and
-`fireball.cooldown`. The cost lowers `Base<Mana>`, the cooldown grants
-`cooldown.fireball`, and attributes work out `Current<Mana>` from the new
+`fireball.cooldown`. The cost lowers `Base<Mana>`, the cooldown tags its
+owner `cooldown.fireball`, and attributes work out `Current<Mana>` from the new
 base.
 
 ## One step

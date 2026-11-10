@@ -26,9 +26,9 @@ use crate::data::{AbilityData, AbilityDef, Grant, NetExecution, Trigger};
 ///
 /// An app's registry also holds the ability types code names
 /// ([`add_ability`](crate::AbilityApp::add_ability)), which content has to
-/// define. So an app's content is checked by [`recheck`](Self::recheck)ing its
+/// define. So an app's content is checked by [`rebuild`](Self::rebuild)ing its
 /// registry, which keeps those types and the numbers abilities had: what a
-/// load or a hot reload does. [`check`](Self::check) makes a registry from
+/// load or a hot reload does. [`build`](Self::build) makes a registry from
 /// nothing, knowing no types: for tools and tests outside an app. Inserted
 /// into an app, it would forget what code names.
 ///
@@ -57,7 +57,7 @@ impl std::fmt::Debug for AbilityRegistry {
 ///
 /// What they can name.
 #[derive(Clone, Copy)]
-pub struct AbilityChecks<'a> {
+pub struct AbilityScope<'a> {
     /// The gameplay tags there are.
     pub tags: &'a TagRegistry,
     /// The effects there are: costs, cooldowns, and what grants.
@@ -69,8 +69,8 @@ pub struct AbilityChecks<'a> {
 impl AbilityRegistry {
     /// A registry of `definitions`, and of what effects `grants`, from nothing,
     /// checked against what they can name: knowing no ability types code
-    /// names. For tools and tests; an app's content is
-    /// [`recheck`](Self::recheck)ed.
+    /// names. For tools and tests; an app's content goes
+    /// through [`rebuild`](Self::rebuild).
     ///
     /// # Errors
     ///
@@ -78,29 +78,29 @@ impl AbilityRegistry {
     /// behaviours named that aren't; a cost that isn't instant, a cooldown that
     /// doesn't last or grants nothing; and grants of effects that aren't, or
     /// don't last, or of abilities that aren't.
-    pub fn check(
+    pub fn build(
         definitions: &[AbilityData],
         grants: &[Grant],
-        against: AbilityChecks<'_>,
+        against: AbilityScope<'_>,
     ) -> Result<Self, Errors> {
-        Self::default().recheck(definitions, grants, against)
+        Self::default().rebuild(definitions, grants, against)
     }
 
-    /// The registry of `definitions` and `grants`, as [`check`](Self::check)
+    /// The registry of `definitions` and `grants`, as [`build`](Self::build)
     /// makes it, each ability here keeping its number: new ones numbered after
     /// the last, in order of name. What a reload does. The ability types code
     /// names here are kept.
     ///
     /// # Errors
     ///
-    /// As `check`'s, and an ability code names that content doesn't define.
-    pub fn recheck(
+    /// As `build`'s, and an ability code names that content doesn't define.
+    pub fn rebuild(
         &self,
         definitions: &[AbilityData],
         grants: &[Grant],
-        against: AbilityChecks<'_>,
+        against: AbilityScope<'_>,
     ) -> Result<Self, Errors> {
-        let AbilityChecks {
+        let AbilityScope {
             tags,
             effects,
             behaviours,
@@ -167,7 +167,7 @@ impl AbilityRegistry {
 
     /// Notes that code names the ability `A`: content has to define it.
     pub fn name_type<A: Ability>(&mut self) {
-        self.registry.name_type(TypeId::of::<A>(), A::NAME);
+        self.registry.name_type(TypeId::of::<A>(), A::KEY);
     }
 
     /// The abilities `effect` grants while it lasts.
@@ -222,20 +222,19 @@ fn compile(
     };
     for set in [
         &def.tags,
-        &def.blocked_by,
-        &def.cancels,
+        &def.ends,
         &def.blocks,
-        &def.grants,
+        &def.owner_tags,
         &def.cues,
     ] {
-        push(tags.known_all(set.written(), within));
+        push(tags.resolve_all(set.written(), within));
     }
-    for condition in [&def.require, &def.cancel_if].into_iter().flatten() {
+    for condition in [&def.require, &def.end_if].into_iter().flatten() {
         push(condition.check(tags, within));
     }
     for trigger in &def.triggers {
         let (Trigger::Event(tag) | Trigger::TagAdded(tag) | Trigger::TagPresent(tag)) = trigger;
-        push(tags.known(*tag, within));
+        push(tags.resolve(*tag, within).map(drop));
     }
     let behaviour = behaviours.id(def.behaviour.as_str());
     match behaviour {
@@ -269,11 +268,10 @@ fn compile(
         cost,
         cooldown,
         require: def.require.clone(),
-        cancel_if: def.cancel_if.clone(),
-        blocked_by: def.blocked_by.clone(),
-        cancels: def.cancels.clone(),
+        end_if: def.end_if.clone(),
+        ends: def.ends.clone(),
         blocks: def.blocks.clone(),
-        grants: def.grants.clone(),
+        owner_tags: def.owner_tags.clone(),
         cues: def.cues.clone(),
         triggers: def.triggers.clone(),
         commit: def.commit,
@@ -317,7 +315,7 @@ fn paid(
             return None;
         };
         if effects.get(id).is_some_and(|effect| {
-            matches!(effect.duration, EffectDuration::Instant) || effect.grants.is_empty()
+            matches!(effect.duration, EffectDuration::Instant) || effect.owner_tags.is_empty()
         }) {
             push(Err(Error::invalid(
                 format!("a cooldown of `{cooldown}`: it has to last, and grant a tag"),

@@ -3,8 +3,6 @@
 //! A server-initiated ability started on the server, for the owning client to
 //! run its behaviour too.
 
-use std::any::TypeId;
-
 use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::prelude::*;
 use bevy_mettle_core::Activation;
@@ -22,26 +20,10 @@ use crate::engine;
 /// For the client to run its behaviour too, under the server's activation:
 /// not checked or paid again. Sent for
 /// [`ServerInitiated`](NetExecution::ServerInitiated) abilities, however they
-/// started: a client's ask, a trigger, the server's own code.
+/// started: a client's ask, a trigger, the server's own code. With the input it
+/// started with: [`NoInput`] for a behaviour that takes none.
 #[derive(Message, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AbilityStarted {
-    /// The actor.
-    pub actor: Entity,
-    /// The ability.
-    pub ability: AbilityId,
-    /// The activation it started under on the server.
-    pub activation: Activation,
-}
-
-impl MapEntities for AbilityStarted {
-    fn map_entities<M: EntityMapper>(&mut self, mapper: &mut M) {
-        self.actor = mapper.get_mapped(self.actor);
-    }
-}
-
-/// An [`AbilityStarted`] with the input the ability started with.
-#[derive(Message, Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AbilityStartedWith<I> {
+pub struct AbilityStarted<I = NoInput> {
     /// The actor.
     pub actor: Entity,
     /// The ability.
@@ -52,7 +34,7 @@ pub struct AbilityStartedWith<I> {
     pub input: I,
 }
 
-impl<I: MapEntities> MapEntities for AbilityStartedWith<I> {
+impl<I: MapEntities> MapEntities for AbilityStarted<I> {
     fn map_entities<M: EntityMapper>(&mut self, mapper: &mut M) {
         self.actor = mapper.get_mapped(self.actor);
         self.input.map_entities(mapper);
@@ -76,11 +58,8 @@ pub(crate) fn started<I: Component + Clone>(
 ) {
     let ability = def.id;
     match input {
-        Some(input)
-            if TypeId::of::<I>() != TypeId::of::<NoInput>()
-                && world.contains_resource::<Messages<AbilityStartedWith<I>>>() =>
-        {
-            world.write_message(AbilityStartedWith {
+        Some(input) if world.contains_resource::<Messages<AbilityStarted<I>>>() => {
+            world.write_message(AbilityStarted {
                 actor,
                 ability,
                 activation,
@@ -92,31 +71,26 @@ pub(crate) fn started<I: Component + Clone>(
                 actor,
                 ability,
                 activation,
+                input: NoInput,
             });
         }
     }
 }
 
-/// On a client: runs what the server started, as it says.
-pub(crate) fn hear_started(mut started: MessageReader<AbilityStarted>, mut commands: Commands) {
-    for started in started.read().copied() {
-        commands.queue(move |world: &mut World| {
-            if let Some(ability) = granted(world, started.actor, started.ability) {
-                engine::mirror::<NoInput>(world, ability, started.activation, None);
-            }
-        });
-    }
-}
-
-/// On a client: runs what the server started with input, as it says.
-pub(crate) fn hear_started_with<I: Component + Clone>(
-    mut started: MessageReader<AbilityStartedWith<I>>,
+/// On a client: runs what the server started with input `I`, as it says.
+pub(crate) fn hear_started<I: Component + Clone>(
+    mut started: MessageReader<AbilityStarted<I>>,
     mut commands: Commands,
 ) {
     for started in started.read().cloned() {
         commands.queue(move |world: &mut World| {
             if let Some(ability) = granted(world, started.actor, started.ability) {
-                engine::mirror(world, ability, started.activation, Some(started.input));
+                engine::mirror(
+                    world,
+                    ability,
+                    started.activation,
+                    super::given(started.input),
+                );
             }
         });
     }

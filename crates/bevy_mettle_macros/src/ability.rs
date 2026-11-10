@@ -39,6 +39,9 @@ mod tests {
             struct Fireball;
         };
         let expanded = expand(&input).unwrap().to_string();
-        assert!(expanded.contains("NAME"), "{expanded}");
+        assert!(
+            expanded.contains("const KEY : & 'static str = \"fireball\""),
+            "{expanded}"
+        );
     }
 }

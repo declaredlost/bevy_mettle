@@ -1,5 +1,7 @@
 //! What an attribute is: a marker type, its rules on it.
 
+use bevy_mettle_core::registry::{AnyAttribute, Keyed};
+
 use crate::registry::{Limit, OnLimit, Rounding};
 
 /// An attribute: a number an actor has, as a marker type its rules are on.
@@ -23,41 +25,46 @@ use crate::registry::{Limit, OnLimit, Rounding};
 ///
 /// An attribute that differs by kind (a resistance per damage type) is one
 /// attribute, its modifiers counting for reads tagged so:
-/// `Modifier::flat(resistance, 0.2).read_tagged("damage.elemental")`.
+/// `ModifierSpec::flat::<Resistance>(0.2).read_tagged("damage.elemental")`.
 ///
-/// Or implement it, for rules the derive can't say: its rules are constants.
+/// Or implement it, for rules the derive can't say: its rules are constants,
+/// and its name is its [`Keyed`] key, as an `AnyAttribute`.
 ///
 /// ```
 /// use bevy_mettle_attribute::Attribute;
 /// use bevy_mettle_attribute::registry::Limit;
+/// use bevy_mettle_core::registry::{AnyAttribute, Key, Keyed};
 ///
 /// struct MaxLife;
+/// impl Keyed for MaxLife {
+///     type Kind = AnyAttribute;
+///
+///     const KEY: &'static str = "max_life";
+/// }
 /// impl Attribute for MaxLife {
 ///     const BASE: f32 = 50.0;
-///     const NAME: &'static str = "max_life";
 /// }
 ///
 /// struct Life;
+/// impl Keyed for Life {
+///     type Kind = AnyAttribute;
+///
+///     const KEY: &'static str = "life";
+/// }
 /// impl Attribute for Life {
 ///     const BASE: f32 = 50.0;
 ///     const MAX: Option<Limit> = Some(Limit::attribute::<MaxLife>());
 ///     const MIN: Option<Limit> = Some(Limit::Value(0.0));
-///     const NAME: &'static str = "life";
 /// }
 ///
-/// assert_eq!(Life::NAME, "life");
+/// assert_eq!(Key::of::<Life>().as_str(), "life");
 /// ```
 #[diagnostic::on_unimplemented(
     message = "`{Self}` isn't an attribute",
     label = "not an attribute",
     note = "a limit is a number written out, or a type with `#[derive(Attribute)]`"
 )]
-pub trait Attribute: Send + Sync + 'static {
-    /// The name data names it by, and what's shown for it: `"life"`. Its
-    /// number is the app's:
-    /// [`AttributeRegistry`](crate::registry::AttributeRegistry)`::id_of`.
-    const NAME: &'static str;
-
+pub trait Attribute: Keyed<Kind = AnyAttribute> + Send + Sync + 'static {
     /// What its base starts at.
     const BASE: f32 = 0.0;
 

@@ -63,6 +63,9 @@ bevy = { workspace = true, features = ["bevy_state"] }
 # Benchmarks
 criterion = { workspace = true, features = [] }
 
+# What the derives reject, as it fails to compile
+trybuild = { workspace = true, features = [] }
+
 [[bench]]
 name = "mettle"
 harness = false

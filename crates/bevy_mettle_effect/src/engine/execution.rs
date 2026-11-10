@@ -3,16 +3,16 @@
 
 use bevy::prelude::*;
 use bevy_mettle_attribute::modifier::{Modifier, Operation};
-use bevy_mettle_attribute::read::{AttributeContext, AttributeWorld};
+use bevy_mettle_attribute::read::{AttributeContext, NumberedAttributes};
 use bevy_mettle_attribute::registry::AttributeRegistry;
 use bevy_mettle_core::registry::AttributeId;
 use bevy_mettle_core::tag::{OwnedTags, TagCounts};
 
 use super::{Check, count, source_tags};
 use crate::active::{ActiveEffect, EffectOf};
-use crate::code::{BaseChange, Changes, ExecutionContext, RouteId, Whose};
+use crate::code::{BaseChange, Changes, ExecutionContext, RouteId};
 use crate::cue::Cue;
-use crate::data::{Capture, CaptureDef, EffectDef, MagnitudeDef, Read};
+use crate::data::{CaptureDef, EffectDef, ExecutionDef, MagnitudeDef, Read, Side};
 use crate::events::{Delta, EffectExecuted, Routed};
 use crate::{EffectRegistry, EffectSpec, net};
 
@@ -75,8 +75,8 @@ pub(crate) fn captured(context: &ExecutionContext, slot: usize) -> f32 {
 pub(super) fn read(context: &ExecutionContext, capture: &CaptureDef) -> Option<f32> {
     let source = context.spec.context.source;
     let whose = match capture.from {
-        Capture::Source => source?,
-        Capture::Target => context.target,
+        Side::Source => source?,
+        Side::Target => context.target,
     };
     let world = context.world;
     let mut hit = AttributeContext::new().tags(&capture.read_in);
@@ -89,8 +89,8 @@ pub(super) fn read(context: &ExecutionContext, capture: &CaptureDef) -> Option<f
             hit = hit.source_tags(owned);
         }
     }
-    let current = || context.value_at(whose, capture.attribute, &hit);
-    let base = || context.world.base_at(whose, capture.attribute);
+    let current = || world.value_at(whose, capture.attribute, &hit);
+    let base = || world.base_at(whose, capture.attribute);
     match capture.value {
         Read::Current => current(),
         Read::Base => base(),
@@ -99,7 +99,7 @@ pub(super) fn read(context: &ExecutionContext, capture: &CaptureDef) -> Option<f
 }
 
 /// What executing an effect works out: the changes it makes to bases, and
-/// what each route was dealt before its router.
+/// what it routed into each route before its router.
 pub(super) struct Worked {
     pub(super) changes: Vec<BaseChange>,
     pub(super) routed: Vec<Routed>,
@@ -107,7 +107,7 @@ pub(super) struct Worked {
 
 /// What executing `def` on `target` would change, without changing it: its
 /// modifiers and executions, worked out, its attribute magnitudes as
-/// `captured` if they were, and what it dealt routes routed.
+/// `captured` if they were, and what it routed into routes routed.
 pub(super) fn changes(
     world: &World,
     registry: &EffectRegistry,
@@ -152,30 +152,56 @@ pub(super) fn changes(
             value *= count(stacks) * weight;
         }
         if let Some(per) = &modifier.per {
-            let of = context
+            let of = world
                 .value_at(target, per.attribute, &AttributeContext::new())
                 .unwrap_or_default();
             value *= per.times(of);
         }
         changes.push(BaseChange::changing(modifier.changes, modifier.op, value));
     }
-    for (execution, reads) in &def.executions {
-        if let Some(execution) = registry.execution(*execution) {
-            let running = ExecutionContext { reads, ..context };
-            changes.extend(
-                execution
-                    .execute(&running)
-                    .into_iter()
-                    .filter_map(|change| change.numbered(world)),
-            );
-        }
+    for execution in &def.executions {
+        let Some(code) = registry.executions().get(execution.id) else {
+            continue;
+        };
+        let running = ExecutionContext {
+            reads: &execution.reads,
+            ..context
+        };
+        changes.extend(
+            code.run()
+                .execute(&running)
+                .into_iter()
+                .filter_map(|change| change.numbered(world))
+                .filter(|change| declared(registry, execution, change)),
+        );
     }
     route(&context, registry, changes)
 }
 
-/// Routes what `changes` deal routes: each one's amount summed, then handed to
-/// its router, its changes after the effect's own. Single-pass: what a router
-/// deals a route is dropped.
+/// Whether `change` is one `execution` can make: to an attribute, or into a
+/// route it declares. Into any other, its captures weren't taken: it's
+/// dropped, warned of once.
+fn declared(registry: &EffectRegistry, execution: &ExecutionDef, change: &BaseChange) -> bool {
+    let Some(Changes::Route(route)) = change.changes() else {
+        return true;
+    };
+    if execution.routes.contains(&route) {
+        return true;
+    }
+    let named = registry.executions().name(execution.id).unwrap_or("?");
+    let routed = registry.routes().name(route).unwrap_or("?");
+    if crate::context::first_warning(format!("undeclared route {named} {routed}")) {
+        warn!(
+            "execution `{named}` routes into `{routed}`, which it doesn't declare \
+             (`routes({routed})` on its derive): dropped"
+        );
+    }
+    false
+}
+
+/// Routes what `changes` route into routes: each one's amount summed, then
+/// handed to its router, its changes after the effect's own. Single-pass:
+/// what a router routes into a route is dropped.
 fn route(
     context: &ExecutionContext,
     registry: &EffectRegistry,
@@ -190,9 +216,9 @@ fn route(
             kept.push(change);
             continue;
         };
-        if change.op != Operation::Flat || change.on != Whose::Target {
+        if change.op != Operation::Flat || change.on != Side::Target {
             warn!(
-                "effect `{}` deals route `{}` other than flat to its target: dropped",
+                "effect `{}` routes into `{}` other than flat to its target: dropped",
                 context.def.name,
                 name(route)
             );
@@ -210,11 +236,18 @@ fn route(
         let Some(run) = registered.get(dealt.route) else {
             continue;
         };
-        let changes = run.route(context, dealt.amount).into_iter();
+        let reads = context
+            .def
+            .routes
+            .iter()
+            .find(|(route, _)| *route == dealt.route)
+            .map_or(&[][..], |(_, reads)| reads.as_slice());
+        let routing = ExecutionContext { reads, ..*context };
+        let changes = run.run().route(&routing, dealt.amount).into_iter();
         for change in changes.filter_map(|change| change.numbered(context.world)) {
             if let Some(Changes::Route(other)) = change.changes() {
                 warn!(
-                    "the router of `{}` deals route `{}`: dropped, as routing is single-pass",
+                    "the router of `{}` routes into `{}`: dropped, as routing is single-pass",
                     name(dealt.route),
                     name(other)
                 );
@@ -288,8 +321,8 @@ pub(super) fn execute(
             continue;
         };
         let (entity, deltas) = match change.on {
-            Whose::Target => (target, &mut dealt),
-            Whose::Source => {
+            Side::Target => (target, &mut dealt),
+            Side::Source => {
                 let Some(source) = spec.context.source else {
                     warn!(
                         "effect `{}` changes its source's `{}`, but has no source: dropped",
@@ -316,9 +349,7 @@ pub(super) fn execute(
         routed: worked.routed,
     });
     for tag in def.cues.written() {
-        let mut cue = Cue::new(tag)
-            .magnitude(dealt.first().map_or(0.0, |first| first.delta))
-            .level(spec.level);
+        let mut cue = Cue::new(tag).level(spec.level);
         cue.context.clone_from(&spec.context);
         cue.changes.clone_from(&dealt);
         crate::cue::execute(world, target, &cue, spec.activation, Some(def.id));
@@ -356,7 +387,8 @@ pub(super) fn modifiers(world: &World, registry: &EffectRegistry, effect: Entity
         .modifiers
         .iter()
         .filter_map(|modifier| {
-            // A route is only dealt as an effect executes: it counts for none.
+            // A route is only routed into as an effect executes: it counts for
+            // none.
             let Changes::Attribute(attribute) = modifier.changes else {
                 return None;
             };

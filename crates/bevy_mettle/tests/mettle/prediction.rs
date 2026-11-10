@@ -11,7 +11,7 @@ use bevy_harness::TestApp;
 use bevy_mettle::effect::context::ContextReplica;
 use bevy_mettle::prelude::*;
 
-use crate::common::{Mana, Strength, actor, attributes, close, get, id, own};
+use crate::common::{Mana, Strength, actor, attributes, close, get, own};
 
 #[derive(Ability)]
 struct Fireball;
@@ -45,7 +45,7 @@ fn kindle(add: On<Add<Kindling>>, active: Query<&ActiveAbility>, mut commands: C
     if let Ok(active) = active.get(add.entity) {
         commands
             .entity(active.actor)
-            .apply_effect(active.effect_spec(Burn));
+            .apply_effect(active.effect_spec::<Burn>());
     }
 }
 
@@ -59,7 +59,7 @@ fn flare(add: On<Add<Flaring>>, active: Query<&ActiveAbility>, mut commands: Com
     };
     let event =
         GameplayEvent::new(active.actor, TagKey::named("event.spark")).under(active.activation);
-    commands.queue(move |world: &mut World| AbilityWorld::send_event(world, event));
+    commands.trigger(event);
 }
 
 #[derive(Component, Default, Behaviour)]
@@ -81,15 +81,18 @@ struct Blessed;
 #[derive(Component, Default, Behaviour)]
 struct Cast;
 
-/// A price paid in mana, and paid back in strength to whoever paid it.
+/// A price paid in mana, and paid back in strength to whoever paid it: a
+/// thirtieth of the mana it had, as captured.
 #[derive(Route)]
+#[route(target(Mana))]
 struct Price;
 
 impl RouteFn for Price {
-    fn route(&self, _: &ExecutionContext, price: f32) -> Vec<BaseChange> {
+    fn route(&self, cx: &ExecutionContext, price: f32) -> Vec<BaseChange> {
+        let had = cx.captured::<Mana>(Side::Target).unwrap_or_default();
         vec![
             BaseChange::of::<Mana>(Operation::Flat, -price),
-            BaseChange::of::<Strength>(Operation::Flat, 1.0).on_source(),
+            BaseChange::of::<Strength>(Operation::Flat, had / 30.0).on_source(),
         ]
     }
 }
@@ -130,8 +133,8 @@ fn abilities() -> [AbilityData; 8] {
     let fireball = AbilityData::new(Key::of::<Fireball>(), Key::of::<Cast>())
         .cost("fireball.cost")
         .cooldown(Key::of::<FireballCooldown>())
-        .blocked_by("state.stunned")
-        .cancel_if(Condition::owner_has("state.stunned"));
+        .require(!Condition::owner_has("state.stunned"))
+        .end_if(Condition::owner_has("state.stunned"));
     let charge = AbilityData::new(Key::of::<Charge>(), Key::of::<Cast>())
         .cost("fireball.cost")
         .commit(Commit::Manual);
@@ -139,9 +142,9 @@ fn abilities() -> [AbilityData; 8] {
     let shot = AbilityData::new(Key::of::<Shot>(), Key::of::<Shoot>()).cost("fireball.cost");
     let bolt = AbilityData::new(Key::of::<Bolt>(), Key::of::<Cast>())
         .cost("bolt.cost")
-        .blocked_by("state.stunned");
-    let kindle =
-        AbilityData::new(Key::of::<Kindle>(), Key::of::<Kindling>()).blocked_by("state.stunned");
+        .require(!Condition::owner_has("state.stunned"));
+    let kindle = AbilityData::new(Key::of::<Kindle>(), Key::of::<Kindling>())
+        .require(!Condition::owner_has("state.stunned"));
     let flare = AbilityData::new(Key::of::<Flare>(), Key::of::<Flaring>()).cost("fireball.cost");
     let spark = AbilityData::new(Key::of::<Spark>(), Key::of::<Sparking>())
         .trigger(Trigger::Event(TagKey::named("event.spark")));
@@ -187,12 +190,13 @@ fn world(role: NetRole) -> TestApp {
     let world = app.world_mut();
     let effects = world
         .resource::<EffectRegistry>()
-        .recheck(
+        .rebuild(
             &[
                 EffectData::instant("fireball.cost")
                     .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
                 EffectData::instant("bolt.cost").modifier(EffectModifier::route::<Price>(20.0)),
-                EffectData::lasting(Key::of::<FireballCooldown>(), 1.0).grant("cooldown.fireball"),
+                EffectData::lasting(Key::of::<FireballCooldown>(), 1.0)
+                    .owner_tag("cooldown.fireball"),
                 EffectData::instant("focus.cost")
                     .modifier(EffectModifier::new::<Mana>(Operation::Additive, -0.5)),
                 EffectData::lasting(Key::of::<Burn>(), 5.0)
@@ -213,7 +217,7 @@ fn world(role: NetRole) -> TestApp {
                         .condition(Condition::source_has("state.stunned")),
                 ),
             ],
-            EffectChecks {
+            EffectScope {
                 tags: world.resource(),
                 curves: &CurveRegistry::default(),
                 attributes: world.resource(),
@@ -225,10 +229,10 @@ fn world(role: NetRole) -> TestApp {
         .unwrap();
     let abilities = world
         .resource::<AbilityRegistry>()
-        .recheck(
+        .rebuild(
             &abilities(),
             &[],
-            AbilityChecks {
+            AbilityScope {
                 tags: world.resource(),
                 effects: &effects,
                 behaviours: world.resource(),
@@ -257,7 +261,7 @@ impl Game {
     }
 
     /// The mage granted `ability`, with `modifiers` of its own.
-    fn with(ability: impl Into<AbilitySpec>, modifiers: &[Modifier]) -> Self {
+    fn with(ability: impl Into<AbilitySpec>, modifiers: &[ModifierSpec]) -> Self {
         let mut server = world(NetRole::Server);
         let mut client = world(NetRole::Client);
         let there = actor(&mut server, modifiers.to_vec());
@@ -320,14 +324,14 @@ impl Game {
                 ..request
             });
         }
-        let aimed: Vec<AbilityRequestWith<Aim>> = self
+        let aimed: Vec<AbilityRequest<Aim>> = self
             .client
             .world_mut()
-            .resource_mut::<Messages<AbilityRequestWith<Aim>>>()
+            .resource_mut::<Messages<AbilityRequest<Aim>>>()
             .drain()
             .collect();
         for request in aimed {
-            self.server.write(AbilityRequestWith {
+            self.server.write(AbilityRequest {
                 actor: self.there,
                 ..request
             });
@@ -525,7 +529,7 @@ fn what_a_cost_is_routed_into_is_predicted_and_undone_if_rejected() {
     assert!(close(get::<Mana>(&game.client, game.here), 10.0));
     assert!(
         close(get::<Strength>(&game.client, game.here), 11.0),
-        "paid back"
+        "paid back, as the captured 30 mana says"
     );
 
     // The server stuns the mage first: it refuses, and both are undone.
@@ -632,10 +636,14 @@ fn what_a_behaviour_applies_through_its_activation_is_its_and_undone_with_it() {
         .spec()
         .clone();
     assert_eq!(spec.context.source, Some(game.here), "from its caster");
-    assert_eq!(spec.context.causer, Some(game.here), "struck by it");
     assert_eq!(
-        spec.context.ability,
-        Some(AbilityRef {
+        spec.context.get::<Causer>(),
+        Some(&Causer(game.here)),
+        "struck by it"
+    );
+    assert_eq!(
+        spec.context.get::<AbilityRef>(),
+        Some(&AbilityRef {
             id: kindle,
             level: 2.0
         }),
@@ -643,21 +651,6 @@ fn what_a_behaviour_applies_through_its_activation_is_its_and_undone_with_it() {
     );
     assert_eq!(spec.activation, Some(active.activation), "under it");
     assert!(close(spec.level, 2.0), "at its level");
-    let burn_id = game
-        .client
-        .world()
-        .resource::<EffectRegistry>()
-        .id_of::<Burn>()
-        .unwrap();
-    assert_eq!(
-        active
-            .effect_spec(burn_id)
-            .effect_id(game.client.world().resource()),
-        active
-            .effect_spec(Burn)
-            .effect_id(game.client.world().resource()),
-        "named by number as by type"
-    );
     game.ask();
     game.answer();
     assert_eq!(effects_here::<Burn>(&game), [], "undone with it");
@@ -821,7 +814,7 @@ fn a_shown_effect_counts_its_source_as_it_was() {
 
 #[test]
 fn a_predicted_cost_comes_to_what_the_server_works_out() {
-    let mut game = Game::with(Focus, &[Modifier::additive(id::<Mana>(), 0.5)]);
+    let mut game = Game::with(Focus, &[ModifierSpec::additive::<Mana>(0.5)]);
     game.client
         .world_mut()
         .activate_ability(game.here, Focus)
@@ -895,6 +888,7 @@ fn a_request_under_the_servers_bit_is_rejected() {
         actor: game.there,
         ability: fireball,
         activation: Activation::server(5),
+        input: NoInput,
     });
     game.server.tick();
     let replies: Vec<AbilityReply> = game

@@ -1,8 +1,10 @@
 //! Registries: entries of each kind by number, and numbers by name and type.
 //!
-//! What an app has of each kind, by number, and its numbers by name and by
-//! type; and content's kinds, with their keys, the names content writes, and
-//! their ids, what content is numbered by, shared over a network.
+//! What an app has of each of mettle's kinds, by number, and its numbers by
+//! name and by type; and those kinds, with their keys, the names content
+//! writes, and their ids, what content is numbered by, shared over a network.
+//! Reached through each part's registry: `EffectRegistry`, `AbilityRegistry`,
+//! `AttributeRegistry` and the others.
 
 use std::any::TypeId;
 use std::fmt;
@@ -17,16 +19,23 @@ pub use self::id::{AbilityId, AttributeId, CurveId, EffectId, Id, TagId};
 pub use self::key::Key;
 pub use self::kind::{AnyAbility, AnyAttribute, AnyCurve, AnyEffect, AnyTag, Keyed, Kind};
 use self::numbering::Numbering;
+#[doc(hidden)]
+pub use self::reference::Ref;
+use crate::Error;
 
 mod id;
 mod key;
 mod kind;
 mod numbering;
+mod reference;
 
 /// Entries of kind `K` by [`Id<K>`](Id), and their numbers by name and type.
 ///
-/// What every registry keeps, as Bevy's `Components` keeps each component's
-/// info by `ComponentId`.
+/// What each of mettle's registries keeps (`EffectRegistry`,
+/// `AbilityRegistry`, `AttributeRegistry` and the others, read through
+/// them), as Bevy's `Components` keeps each component's info by
+/// `ComponentId`. It's mettle's machinery, not a registry for a game's own
+/// content.
 ///
 /// Filled one of two ways:
 ///
@@ -97,9 +106,20 @@ impl<K: Kind, T: Clone> Registry<K, T> {
         self.numbering.number(name).map(Id::new)
     }
 
+    /// The number of what content names `key`, named within `within` if it's
+    /// named in something.
+    ///
+    /// # Errors
+    ///
+    /// If nothing's called `key`.
+    pub fn resolve(&self, key: &Key<K>, within: Option<&str>) -> Result<Id<K>, Error> {
+        self.id(key.as_str())
+            .ok_or_else(|| Error::unknown::<K>(key.as_str(), within))
+    }
+
     /// The number of what the type `N` names or adds, if it's in.
     #[must_use]
-    pub fn id_of<N: 'static>(&self) -> Option<Id<K>> {
+    pub fn id_of<N: Keyed<Kind = K> + 'static>(&self) -> Option<Id<K>> {
         self.id_of_type(TypeId::of::<N>())
     }
 
@@ -107,6 +127,17 @@ impl<K: Kind, T: Clone> Registry<K, T> {
     #[must_use]
     pub fn id_of_type(&self, type_id: TypeId) -> Option<Id<K>> {
         self.by_type.get(&type_id).copied()
+    }
+
+    /// The number of what `named` names, if it's here: its type's, or its
+    /// own if there's an entry numbered so. Mettle's machinery.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn find(&self, named: Ref<K>) -> Option<Id<K>> {
+        match named {
+            Ref::Type { type_id, .. } => self.id_of_type(type_id),
+            Ref::Id(id) => self.get(id).map(|_| id),
+        }
     }
 
     /// The name of what's numbered `id`, if anything is.
@@ -314,7 +345,18 @@ mod tests {
     type ThingId = Id<AnyThing>;
 
     struct Sword;
+    impl Keyed for Sword {
+        type Kind = AnyThing;
+
+        const KEY: &'static str = "sword";
+    }
+
     struct Shield;
+    impl Keyed for Shield {
+        type Kind = AnyThing;
+
+        const KEY: &'static str = "shield";
+    }
 
     #[test]
     fn code_adds_in_order_and_replaces_by_type() {

@@ -85,11 +85,10 @@ fn removes(world: &World, effect: Entity) -> bool {
     ) else {
         return false;
     };
-    let (Some(remove_if), Some(owner)) = (&active.def.remove_if, world.get::<OwnedTags>(of.0))
-    else {
+    let (Some(end_if), Some(owner)) = (&active.def.end_if, world.get::<OwnedTags>(of.0)) else {
         return false;
     };
-    remove_if.holds(&Check {
+    end_if.holds(&Check {
         tags: &active.def.tags,
         owner: owner.counts(),
         source: &active.source_tags,

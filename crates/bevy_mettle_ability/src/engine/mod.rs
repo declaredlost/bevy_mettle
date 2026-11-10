@@ -16,9 +16,10 @@ pub(crate) use self::activate::{activate, activate_id, activate_id_with, mirror,
 pub(crate) use self::check::{can_activate, can_afford, cooldown_remaining};
 pub(crate) use self::commit::{Commitment, commit};
 pub(crate) use self::end::{
-    Interrupting, cancel, cancel_tagged, end, end_quietly, interrupt, note_interrupt,
+    Ended, Interrupting, cancel, cancel_tagged, end, end_quietly, ended_unasked, interrupt,
+    note_interrupt,
 };
-pub(crate) use self::react::{effect_applied, send, tag_added, tag_removed, ungranted};
+pub(crate) use self::react::{effect_applied, event_sent, tag_added, tag_removed, ungranted};
 use crate::AbilityRegistry;
 use crate::active::{Abilities, AbilityOf, ActiveAbility, GrantedAbility, GrantedBy};
 
@@ -47,9 +48,9 @@ impl<'a> Check<'a> {
 fn interrupts(granted: &GrantedAbility, owner: &OwnedTags) -> bool {
     granted
         .def
-        .cancel_if
+        .end_if
         .as_ref()
-        .is_some_and(|cancel_if| cancel_if.holds(&Check::of(granted, owner)))
+        .is_some_and(|end_if| end_if.holds(&Check::of(granted, owner)))
 }
 
 impl Context for Check<'_> {
@@ -82,14 +83,14 @@ pub(crate) fn abilities_of(world: &World, actor: Entity) -> Vec<Entity> {
         .unwrap_or_default()
 }
 
-/// Grants `id` to `actor` at `level`, from `source` if an effect grants it: the
-/// granted ability's entity, if there's such an ability.
+/// Grants `id` to `actor` at `level`, by the effect `by` if one grants it:
+/// the granted ability's entity, if there's such an ability.
 pub(crate) fn grant(
     world: &mut World,
     actor: Entity,
     id: AbilityId,
     level: f32,
-    source: Option<Entity>,
+    by: Option<Entity>,
 ) -> Option<Entity> {
     let Some(def) = world
         .get_resource::<AbilityRegistry>()
@@ -98,16 +99,16 @@ pub(crate) fn grant(
         warn!("there's no ability {id:?}: content reloaded without it");
         return None;
     };
-    let mut granted = world.spawn((GrantedAbility::new(def, level, source), AbilityOf(actor)));
-    if let Some(source) = source {
-        granted.insert(GrantedBy(source));
+    let mut granted = world.spawn((GrantedAbility::new(def, level), AbilityOf(actor)));
+    if let Some(effect) = by {
+        granted.insert(GrantedBy(effect));
     }
     Some(granted.id())
 }
 
-/// Takes `ability` away from its actor, cancelling it if it's active.
+/// Takes `ability` away from its actor: despawned, cancelled if it's
+/// active, as [`GrantedAbility`]'s hook does.
 pub(crate) fn revoke(world: &mut World, ability: Entity) {
-    end(world, ability, true);
     if world.get_entity(ability).is_ok() {
         world.despawn(ability);
     }

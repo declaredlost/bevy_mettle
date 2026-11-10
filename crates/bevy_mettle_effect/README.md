@@ -14,7 +14,7 @@
 [docs-url]: https://docs.rs/bevy_mettle_effect
 
 Effects for Bevy, as in Unreal's Gameplay Ability System: what changes
-attributes and grants tags, at once, for a while, for good, or every so
+attributes and tags its owner, at once, for a while, for good, or every so
 often.
 
 ## Overview
@@ -43,14 +43,14 @@ often.
 - While it counts, a lasting effect's modifiers count for its target and
   the target owns what it grants; while inhibited, neither, and its time
   stands still.
-- Routes are amounts no actor holds, such as incoming damage: dealt by
-  effects, then routed by one router per route into the attributes actors
-  have, through shields into life, the same on a server and a predicting
-  client.
+- Routes are amounts no actor holds, such as incoming damage: effects
+  route into them, by a modifier or an execution declaring them, then one
+  router per route routes them into the attributes actors have, through
+  shields into life, the same on a server and a predicting client.
 - [`EffectApplied`], [`EffectStacked`], [`EffectBlocked`],
   [`EffectExecuted`] and [`EffectRemoved`] are triggered on the target, for
   abilities and the game. [`EffectExecuted`] says what changed, on the
-  target and its source, and what each route was dealt.
+  target and its source, and what it routed into each route.
 - Cues are what's shown of effects and abilities: lasting ones as entities
   on the actor while they hold, one-shots as they execute, run by the
   handler for their most specific tag, and replicated to every client that
@@ -108,8 +108,8 @@ fn load(
     let burning = EffectData::lasting("burning", 4.0)
         .period(0.5, true)
         .modifier(EffectModifier::new::<Life>(Operation::Flat, -5.0))
-        .grant("state.burning");
-    let checks = EffectChecks {
+        .owner_tag("state.burning");
+    let checks = EffectScope {
         tags: &TagRegistry::build(tags).unwrap(),
         curves: &CurveRegistry::default(),
         attributes: &attributes,
@@ -118,7 +118,7 @@ fn load(
         routes: &routes,
     };
     // Checked from the app's registry, which knows `Burning` is code's.
-    commands.insert_resource(effects.recheck(&[burning], checks).unwrap());
+    commands.insert_resource(effects.rebuild(&[burning], checks).unwrap());
 }
 
 #[derive(Component)]

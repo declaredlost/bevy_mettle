@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::MettleChannel;
 
-/// How content is numbered: each registry's
+/// How a world numbers its content: each of its registries'
 /// [`fingerprint`](bevy_mettle_core::registry::Registry::fingerprint).
 ///
 /// The same on a client and its server when they number content the same, so

@@ -1,7 +1,7 @@
 //! What a game adds to an effect's context: its own types, reflected and
 //! numbered by type path.
 
-use std::any::Any;
+use std::any::{Any, TypeId};
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 
@@ -36,16 +36,19 @@ use serde::de::DeserializeOwned;
 /// App::new().register_type::<Chain>();
 /// let spec = ChainLightning
 ///     .source(mage)
-///     .causer(bolt)
+///     .with(Causer(bolt))
 ///     .with(Chain { struck: vec![mage] });
 /// // In an execution: `cx.get::<Chain>()`.
 /// assert!(spec.context.get::<Chain>().is_some());
 /// ```
 ///
 /// Unreal's context subclassed, for **structured** data: a flag (a critical,
-/// a headshot) is a tag the application carries, which conditions, immunity
-/// and cues see; a number is a [`param`](crate::EffectSpec::param); what
-/// struck and what it came from are the context's `causer` and `object`.
+/// a headshot) is a tag the application carries, which conditions, blocking
+/// and cues see; a number is a [`param`](crate::EffectSpec::param). Mettle's
+/// own are context data too: [`Causer`](super::Causer),
+/// [`SourceObject`](super::SourceObject), [`AbilityRef`](super::AbilityRef),
+/// [`Hit`](super::Hit) and [`Origin`](super::Origin), registered by the
+/// effect plugin.
 ///
 /// Replicated with what carries the context (an effect's replica, a cue's
 /// burst): serialized, its entities mapped as it arrives. Numbered by its type
@@ -223,8 +226,8 @@ fn decode<C: ContextData>(bytes: &[u8], entities: &[Entity]) -> Option<Data> {
 /// Every type the app's type registry has as [`ReflectContextData`], once
 /// it's built, numbered in order of type path: a server and its clients
 /// registering the same types number them the same, in whatever order they
-/// register them. Read as a [`Registry`]: `id(name)`, `id_of::<C>()`,
-/// `name(id)`.
+/// register them. Read as a [`Registry`]: `id(name)`, `name(id)`; and by
+/// type, [`id_of::<C>()`](Self::id_of).
 #[derive(Resource, Deref, Clone, Default, Debug)]
 pub struct ContextDataRegistry(Registry<AnyContextData, ReflectContextData>);
 
@@ -240,6 +243,12 @@ impl ContextDataRegistry {
             }
         }
         Self(registry.sorted())
+    }
+
+    /// The number of the context data type `C`, if it's registered as such.
+    #[must_use]
+    pub fn id_of<C: ContextData>(&self) -> Option<ContextDataId> {
+        self.0.id_of_type(TypeId::of::<C>())
     }
 
     /// Decodes what's numbered `id` from `bytes` and `entities`, if it's

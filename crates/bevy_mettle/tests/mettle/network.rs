@@ -6,7 +6,7 @@ use bevy::prelude::*;
 use bevy_harness::TestApp;
 use bevy_mettle::prelude::*;
 
-use crate::common::{Damage, attributes, id};
+use crate::common::{Damage, attributes, id, modifier};
 
 #[test]
 fn a_modifier_is_written_by_number() {
@@ -15,7 +15,7 @@ fn a_modifier_is_written_by_number() {
     let damage = id::<Damage>();
     let index = u32::try_from(damage.index()).unwrap();
     assert_tokens(
-        &Modifier::flat(damage, 3.0).local(),
+        &modifier(ModifierSpec::flat::<Damage>(3.0).local()),
         &[
             Token::Struct {
                 name: "Modifier",
@@ -70,10 +70,10 @@ fn world(role: NetRole) -> TestApp {
 fn a_sources_modifiers_go_by_number_and_come_back_the_same() {
     let damage = id::<Damage>();
     let kept = vec![
-        Modifier::flat(damage, 3.0),
-        Modifier::additive(damage, 0.5).owner_has("state.stunned"),
+        modifier(ModifierSpec::flat::<Damage>(3.0)),
+        modifier(ModifierSpec::additive::<Damage>(0.5).owner_has("state.stunned")),
     ];
-    let unknown = Modifier::flat(damage, 9.0).owner_has("state.unknown");
+    let unknown = modifier(ModifierSpec::flat::<Damage>(9.0).owner_has("state.unknown"));
     let mut server = world(NetRole::Server);
     let wearer = server.spawn(Base::<Damage>::default());
     let ring = server.spawn((
@@ -127,12 +127,11 @@ fn a_sources_modifiers_go_by_number_and_come_back_the_same() {
 
 #[test]
 fn a_replica_put_on_a_source_that_has_its_modifiers_fills_at_once() {
-    let damage = id::<Damage>();
     let mut server = world(NetRole::Server);
     let wearer = server.spawn(Base::<Damage>::default());
     let ring = server.spawn((
         ModifierOf(wearer),
-        Modifiers(vec![Modifier::flat(damage, 3.0)]),
+        Modifiers(vec![modifier(ModifierSpec::flat::<Damage>(3.0))]),
     ));
     server.tick();
     server.entity_mut(ring).insert(ModifiersReplica::default());
@@ -152,7 +151,7 @@ fn a_source_taken_off_its_actor_is_sent_of_no_one() {
     let wearer = server.spawn(Base::<Damage>::default());
     let ring = server.spawn((
         ModifierOf(wearer),
-        Modifiers(vec![Modifier::flat(id::<Damage>(), 3.0)]),
+        Modifiers(vec![modifier(ModifierSpec::flat::<Damage>(3.0))]),
         ModifiersReplica::default(),
     ));
     server.tick();

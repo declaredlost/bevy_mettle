@@ -11,7 +11,6 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 use bevy_mettle::core::condition::Context;
-use bevy_mettle::core::registry::AttributeId;
 use bevy_mettle::effect::cue::CueBursts;
 use bevy_mettle::prelude::*;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
@@ -35,13 +34,12 @@ struct Life;
 #[attribute(min = 0.0)]
 struct Shield;
 #[derive(Route)]
+#[route(target(Shield, live))]
 struct IncomingDamage;
 
 impl RouteFn for IncomingDamage {
     fn route(&self, effect: &ExecutionContext, damage: f32) -> Vec<BaseChange> {
-        let shield = effect
-            .value::<Shield>(effect.target, &AttributeContext::new())
-            .unwrap_or_default();
+        let shield = effect.captured::<Shield>(Side::Target).unwrap_or_default();
         let absorbed = damage.min(shield);
         vec![
             BaseChange::of::<Shield>(Operation::Flat, -absorbed),
@@ -77,8 +75,8 @@ struct Scorch;
 
 impl ExecutionFn for Scorch {
     fn execute(&self, effect: &ExecutionContext) -> Vec<BaseChange> {
-        let power = effect.captured::<A0>(Capture::Source).unwrap_or_default();
-        let resist = effect.captured::<A1>(Capture::Target).unwrap_or_default();
+        let power = effect.captured::<A0>(Side::Source).unwrap_or_default();
+        let resist = effect.captured::<A1>(Side::Target).unwrap_or_default();
         vec![BaseChange::of::<Life>(
             Operation::Flat,
             (resist - power).min(0.0),
@@ -134,26 +132,31 @@ fn unconditioned(attributes: &AttributeRegistry, seed: f32) -> Modifiers {
 fn own_modifiers(
     attributes: &AttributeRegistry,
     seed: f32,
-    scope: impl Fn(Modifier) -> Modifier,
+    scope: impl Fn(ModifierSpec) -> ModifierSpec,
 ) -> Modifiers {
     let mut all = vec![
-        Modifier::flat(id::<A0>(attributes), seed),
-        Modifier::flat(id::<A1>(attributes), 1.0),
-        Modifier::flat(id::<A2>(attributes), 2.0),
-        Modifier::flat(id::<A3>(attributes), 3.0),
-        Modifier::flat(id::<A4>(attributes), 4.0),
-        Modifier::flat(id::<A5>(attributes), 5.0),
-        Modifier::flat(id::<A6>(attributes), 6.0),
-        Modifier::flat(id::<A7>(attributes), 7.0),
-        Modifier::flat(id::<A8>(attributes), 8.0),
-        Modifier::flat(id::<A9>(attributes), 9.0),
-        Modifier::flat(id::<A10>(attributes), 10.0),
-        Modifier::flat(id::<A11>(attributes), 11.0),
+        ModifierSpec::flat::<A0>(seed),
+        ModifierSpec::flat::<A1>(1.0),
+        ModifierSpec::flat::<A2>(2.0),
+        ModifierSpec::flat::<A3>(3.0),
+        ModifierSpec::flat::<A4>(4.0),
+        ModifierSpec::flat::<A5>(5.0),
+        ModifierSpec::flat::<A6>(6.0),
+        ModifierSpec::flat::<A7>(7.0),
+        ModifierSpec::flat::<A8>(8.0),
+        ModifierSpec::flat::<A9>(9.0),
+        ModifierSpec::flat::<A10>(10.0),
+        ModifierSpec::flat::<A11>(11.0),
     ];
     for _ in 0..4 {
-        all.push(scope(Modifier::flat(id::<A3>(attributes), 0.5)));
+        all.push(scope(ModifierSpec::flat::<A3>(0.5)));
     }
-    all.into_iter().collect()
+    all.iter()
+        .map(|spec| {
+            spec.resolve(attributes)
+                .expect("an attribute the benches add")
+        })
+        .collect()
 }
 
 fn tags() -> TagRegistry {
@@ -180,13 +183,6 @@ fn tags() -> TagRegistry {
     .map(TagKey::named)
     .collect();
     TagRegistry::build(defs).unwrap()
-}
-
-/// `A`'s number in the app `attributes` are.
-fn id<A: Attribute>(attributes: &AttributeRegistry) -> AttributeId {
-    attributes
-        .id_of::<A>()
-        .expect("an attribute the benches add")
 }
 
 /// An app keeping attributes every update, with `ACTORS` actors.
@@ -234,23 +230,22 @@ fn bench_attributes(c: &mut Criterion) {
     // Reads in context: evaluated, not cached.
     let fire = AttributeContext::new().tag(FIRE);
     let plain = AttributeContext::new();
-    let a3 = app.world().attribute_id::<A3>().unwrap();
-    group.bench_function("value_at_in_context_x1000", |b| {
+    group.bench_function("value_in_context_x1000", |b| {
         b.iter(|| {
             let world = app.world();
             let mut sum = 0.0;
             for &actor in &actors {
-                sum += world.value_at(actor, a3, &fire).unwrap();
+                sum += world.value::<A3>(actor, &fire).unwrap();
             }
             black_box(sum)
         });
     });
-    group.bench_function("value_at_cached_x1000", |b| {
+    group.bench_function("value_cached_x1000", |b| {
         b.iter(|| {
             let world = app.world();
             let mut sum = 0.0;
             for &actor in &actors {
-                sum += world.value_at(actor, a3, &plain).unwrap();
+                sum += world.value::<A3>(actor, &plain).unwrap();
             }
             black_box(sum)
         });
@@ -273,12 +268,12 @@ fn bench_attributes(c: &mut Criterion) {
     // Reads in a context nothing depends on: no modifier is conditioned, so
     // the context can't change what they fold to.
     let (app, actors) = attribute_app_with(unconditioned);
-    group.bench_function("value_at_in_context_unconditioned_x1000", |b| {
+    group.bench_function("value_in_context_unconditioned_x1000", |b| {
         b.iter(|| {
             let world = app.world();
             let mut sum = 0.0;
             for &actor in &actors {
-                sum += world.value_at(actor, a3, &fire).unwrap();
+                sum += world.value::<A3>(actor, &fire).unwrap();
             }
             black_box(sum)
         });
@@ -381,7 +376,7 @@ fn effects() -> Vec<EffectData> {
         EffectData::lasting(Key::of::<Burning>(), 1_000_000.0)
             .tag("effect.affliction.burning")
             .period(0.016, false)
-            .grant("state.burning")
+            .owner_tag("state.burning")
             .modifier(EffectModifier::new::<Life>(Operation::Flat, 0.0)),
         EffectData::lasting(Key::of::<Scorching>(), 1_000_000.0)
             .period(0.016, false)
@@ -434,7 +429,7 @@ fn effects() -> Vec<EffectData> {
         // out by the next.
         EffectData::instant(Key::of::<BoltCost>())
             .modifier(EffectModifier::new::<Life>(Operation::Flat, -1.0)),
-        EffectData::lasting(Key::of::<BoltCooldown>(), 0.01).grant("cooldown.fireball"),
+        EffectData::lasting(Key::of::<BoltCooldown>(), 0.01).owner_tag("cooldown.fireball"),
     ]
 }
 
@@ -509,9 +504,9 @@ fn effect_app_with(actors: u16, extra: impl FnOnce(&mut App)) -> (App, Vec<Entit
     let world = app.world();
     let registry = world
         .resource::<EffectRegistry>()
-        .recheck(
+        .rebuild(
             &effects,
-            EffectChecks {
+            EffectScope {
                 tags: &tags(),
                 curves: &CurveRegistry::default(),
                 attributes: world.resource(),
@@ -724,12 +719,12 @@ fn ability_app(role: NetRole) -> (App, Vec<Entity>) {
         let world = app.world_mut();
         let abilities = world
             .resource::<AbilityRegistry>()
-            .recheck(
+            .rebuild(
                 &[AbilityData::new(Key::of::<Bolt>(), Key::of::<Cast>())
                     .cost(Key::of::<BoltCost>())
                     .cooldown(Key::of::<BoltCooldown>())],
                 &[],
-                AbilityChecks {
+                AbilityScope {
                     tags: world.resource(),
                     effects: world.resource(),
                     behaviours: world.resource(),

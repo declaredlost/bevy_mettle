@@ -13,7 +13,7 @@ use super::execution::read;
 use crate::EffectRegistry;
 use crate::active::{ActiveEffect, EffectOf};
 use crate::code::ExecutionContext;
-use crate::data::Capture;
+use crate::data::Side;
 
 /// On a lasting effect with live captures: whose each reads, what it read
 /// last, and the actors it follows.
@@ -95,8 +95,8 @@ pub(crate) fn watch(world: &mut World, effect: Entity) {
                 .filter(|(_, capture)| !capture.snapshot)
                 .filter_map(|(slot, capture)| {
                     let whose = match capture.from {
-                        Capture::Source => active.spec.context.source?,
-                        Capture::Target => of.0,
+                        Side::Source => active.spec.context.source?,
+                        Side::Target => of.0,
                     };
                     Some((slot, whose))
                 })

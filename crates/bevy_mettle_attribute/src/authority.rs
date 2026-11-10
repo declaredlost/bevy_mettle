@@ -69,7 +69,7 @@ impl<A: Attribute> PartialEq for Served<A> {
 
 impl<A: Attribute> fmt::Debug for Served<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Served<{}>({})", A::NAME, self.value)
+        write!(f, "Served<{}>({})", A::KEY, self.value)
     }
 }
 
@@ -77,12 +77,12 @@ impl<A: Attribute> fmt::Debug for Served<A> {
 impl<A: Attribute> TypePath for Served<A> {
     fn type_path() -> &'static str {
         static CELL: GenericTypePathCell = GenericTypePathCell::new();
-        CELL.get_or_insert::<Self, _>(|| format!("bevy_mettle_attribute::Served<{}>", A::NAME))
+        CELL.get_or_insert::<Self, _>(|| format!("bevy_mettle_attribute::Served<{}>", A::KEY))
     }
 
     fn short_type_path() -> &'static str {
         static CELL: GenericTypePathCell = GenericTypePathCell::new();
-        CELL.get_or_insert::<Self, _>(|| format!("Served<{}>", A::NAME))
+        CELL.get_or_insert::<Self, _>(|| format!("Served<{}>", A::KEY))
     }
 
     fn type_ident() -> Option<&'static str> {

@@ -11,12 +11,12 @@ use bevy_mettle_core::registry::{AnyAttribute, AnyEffect, Key};
 use bevy_mettle_core::tag::{TagKey, Tags};
 use serde::{Deserialize, Serialize};
 
-pub use self::def::{CaptureDef, EffectDef, MagnitudeDef, ModifierDef};
-pub use self::magnitude::{AttributeRead, Capture, Magnitude, Read};
+pub use self::def::{CaptureDef, EffectDef, ExecutionDef, MagnitudeDef, ModifierDef};
+pub use self::magnitude::{AttributeRead, Magnitude, Read, Side};
 pub use self::stacking::{Expire, Reapply, StackBy, Stacking};
 use crate::code::{AnyExecution, AnyRoute, Route};
 
-/// An effect, as data: what it changes, for how long, and what it grants.
+/// An effect, as data: what it changes, for how long, and what it tags.
 ///
 /// Unreal's `GameplayEffect`: also what it needs, and how it stacks. Named by
 /// a `Key<AnyEffect>`, its `id`. Code applies it by an
@@ -37,7 +37,7 @@ use crate::code::{AnyExecution, AnyRoute, Route};
 ///         Operation::Flat,
 ///         Magnitude::param("param.damage"),
 ///     ))
-///     .grant("state.burning")
+///     .owner_tag("state.burning")
 ///     .require(!Condition::owner_has("immune.fire"))
 ///     .ongoing(!Condition::owner_has("state.wet"));
 /// ```
@@ -46,7 +46,7 @@ use crate::code::{AnyExecution, AnyRoute, Route};
 pub struct EffectData {
     /// Its name.
     pub name: Key<AnyEffect>,
-    /// What it is: what removal, immunity and requirements match on.
+    /// What it is: what ending, blocking and requirements match on.
     #[serde(default, skip_serializing_if = "Tags::is_empty")]
     pub tags: Tags,
     /// How long it lasts.
@@ -62,9 +62,9 @@ pub struct EffectData {
     /// Formulas in code, run as it executes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub executions: Vec<Key<AnyExecution>>,
-    /// Tags its target owns while it lasts.
+    /// Tags its target, the owner, holds while it lasts.
     #[serde(default, skip_serializing_if = "Tags::is_empty")]
-    pub grants: Tags,
+    pub owner_tags: Tags,
     /// Cues it plays: held on its target while it counts, and played once each
     /// time it executes.
     #[serde(default, skip_serializing_if = "Tags::is_empty")]
@@ -76,15 +76,15 @@ pub struct EffectData {
     /// modifiers and tags taken back, its time paused) while it doesn't.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ongoing: Option<Condition>,
-    /// What takes it off as soon as it holds.
+    /// What ends it as soon as it holds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub remove_if: Option<Condition>,
-    /// Active effects with any of these tags, taken off as it applies.
+    pub end_if: Option<Condition>,
+    /// Active effects with any of these tags, ended as it applies.
     #[serde(default, skip_serializing_if = "Tags::is_empty")]
-    pub removes: Tags,
+    pub ends: Tags,
     /// Effects with any of these tags can't apply while it lasts.
     #[serde(default, skip_serializing_if = "Tags::is_empty")]
-    pub immunity: Tags,
+    pub blocks: Tags,
     /// How applying it again stacks: a new active effect each time, unless it
     /// says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -124,7 +124,8 @@ pub struct Period<M = Magnitude> {
 
 /// A modifier as data writes it: what it changes, by name, how, and how much.
 ///
-/// It changes an attribute, or deals a [route](crate::code::Route) its amount:
+/// It changes an attribute, or routes its amount into a
+/// [route](crate::code::Route):
 ///
 /// ```
 /// # use bevy_mettle_attribute::prelude::*;
@@ -138,7 +139,7 @@ pub struct Period<M = Magnitude> {
 /// EffectModifier::route::<IncomingDamage>(40.0);
 /// ```
 ///
-/// One of `attribute` and `route`, never both; a route is dealt flat amounts,
+/// One of `attribute` and `route`, never both; a route takes flat amounts,
 /// and `op` says so unless it says otherwise.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -146,7 +147,7 @@ pub struct EffectModifier {
     /// The attribute it changes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attribute: Option<Key<AnyAttribute>>,
-    /// The route it deals its amount, for its router.
+    /// The route it routes its amount into, for its router.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub route: Option<Key<AnyRoute>>,
     /// How: flat, unless it says.
@@ -183,15 +184,15 @@ impl EffectModifier {
     /// `op` of `value` to `A`.
     #[must_use]
     pub fn new<A: Attribute>(op: Operation, value: impl Into<Magnitude>) -> Self {
-        Self::named(Key::from_static(A::NAME), op, value)
+        Self::named(Key::of::<A>(), op, value)
     }
 
-    /// `value` dealt the route `R`, for its router: flat, as routes are dealt.
+    /// `value` routed into the route `R`, for its router: flat, as routes take.
     #[must_use]
     pub fn route<R: Route>(value: impl Into<Magnitude>) -> Self {
         Self {
             attribute: None,
-            route: Some(Key::from_static(R::NAME)),
+            route: Some(Key::of::<R>()),
             op: Operation::Flat,
             value: value.into(),
             condition: None,
@@ -226,7 +227,7 @@ impl EffectModifier {
     #[must_use]
     pub fn per<A: Attribute>(mut self, every: f32) -> Self {
         self.per = Some(EffectPer {
-            attribute: Key::from_static(A::NAME),
+            attribute: Key::of::<A>(),
             every,
         });
         self
@@ -245,13 +246,13 @@ impl EffectData {
             period: None,
             modifiers: Vec::new(),
             executions: Vec::new(),
-            grants: Tags::new(),
+            owner_tags: Tags::new(),
             cues: Tags::new(),
             require: None,
             ongoing: None,
-            remove_if: None,
-            removes: Tags::new(),
-            immunity: Tags::new(),
+            end_if: None,
+            ends: Tags::new(),
+            blocks: Tags::new(),
             stacking: None,
             on_apply: Vec::new(),
             on_remove: Vec::new(),
@@ -316,10 +317,10 @@ impl EffectData {
         self
     }
 
-    /// Granting its target `tag` while it lasts.
+    /// Its target, the owner, holding `tag` while it lasts.
     #[must_use]
-    pub fn grant(mut self, tag: impl Into<TagKey>) -> Self {
-        self.grants.insert(tag.into());
+    pub fn owner_tag(mut self, tag: impl Into<TagKey>) -> Self {
+        self.owner_tags.insert(tag.into());
         self
     }
 
@@ -337,24 +338,24 @@ impl EffectData {
         self
     }
 
-    /// Taken off as soon as `remove_if` holds.
+    /// Ended as soon as `end_if` holds.
     #[must_use]
-    pub fn remove_if(mut self, remove_if: Condition) -> Self {
-        self.remove_if = Some(remove_if);
+    pub fn end_if(mut self, end_if: Condition) -> Self {
+        self.end_if = Some(end_if);
         self
     }
 
-    /// Taking active effects with `tag` off as it applies.
+    /// Ending active effects with `tag` as it applies.
     #[must_use]
-    pub fn removes(mut self, tag: impl Into<TagKey>) -> Self {
-        self.removes.insert(tag.into());
+    pub fn ends(mut self, tag: impl Into<TagKey>) -> Self {
+        self.ends.insert(tag.into());
         self
     }
 
     /// Keeping effects with `tag` from applying while it lasts.
     #[must_use]
-    pub fn immunity(mut self, tag: impl Into<TagKey>) -> Self {
-        self.immunity.insert(tag.into());
+    pub fn blocks(mut self, tag: impl Into<TagKey>) -> Self {
+        self.blocks.insert(tag.into());
         self
     }
 

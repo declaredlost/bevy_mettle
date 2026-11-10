@@ -8,7 +8,7 @@ use bevy_mettle::core::registry::EffectId;
 use bevy_mettle::prelude::*;
 
 use crate::common::{
-    AttackSpeed, Damage, FIRE, Life, Resistance, Strength, actor, attributes, close, get, id, own,
+    AttackSpeed, Damage, FIRE, Life, Resistance, Strength, actor, attributes, close, get, own,
 };
 
 /// The effects the tests apply, as code names them.
@@ -52,20 +52,20 @@ struct Custom;
 #[derive(Effect)]
 struct Strike;
 
-/// The strike's damage: worked out from both sides.
+/// The strike's damage: worked out from both sides, as it captures them.
 #[derive(Execution)]
-#[execution(name = "strike")]
+#[execution(
+    name = "strike",
+    source(Damage),
+    target(Resistance, tagged("damage.elemental.fire"))
+)]
 struct StrikeDamage;
 
 impl ExecutionFn for StrikeDamage {
     fn execute(&self, context: &ExecutionContext) -> Vec<BaseChange> {
-        let query = AttributeContext::new();
-        let damage = context
-            .source()
-            .and_then(|source| context.value::<Damage>(source, &query))
-            .unwrap_or_default();
+        let damage = context.captured::<Damage>(Side::Source).unwrap_or_default();
         let resist = context
-            .value::<Resistance>(context.target, &AttributeContext::new().tag(FIRE))
+            .captured::<Resistance>(Side::Target)
             .unwrap_or_default();
         vec![BaseChange::of::<Life>(
             Operation::Flat,
@@ -128,6 +128,8 @@ impl CalculationFn for Nan {
 /// The tags the effects name.
 const TAGS: &[&str] = &[
     "damage",
+    "damage.elemental",
+    "damage.elemental.fire",
     "effect",
     "effect.affliction",
     "effect.affliction.burning",
@@ -164,8 +166,8 @@ fn attribute_registry() -> AttributeRegistry {
 }
 
 /// What effects are checked against: what `world` has.
-fn checks(world: &World) -> EffectChecks<'_> {
-    EffectChecks {
+fn scope(world: &World) -> EffectScope<'_> {
+    EffectScope {
         tags: world.resource(),
         curves: world.resource(),
         attributes: world.resource(),
@@ -175,11 +177,11 @@ fn checks(world: &World) -> EffectChecks<'_> {
     }
 }
 
-/// `world`'s effect registry, rechecked with `effects`: what a reload does.
+/// `world`'s effect registry, rebuilt with `effects`: what a reload does.
 fn registry(world: &World, effects: &[EffectData]) -> EffectRegistry {
     world
         .resource::<EffectRegistry>()
-        .recheck(effects, checks(world))
+        .rebuild(effects, scope(world))
         .unwrap()
 }
 
@@ -258,7 +260,7 @@ fn told(app: &mut TestApp) -> Vec<String> {
 #[test]
 fn an_effect_despawned_by_the_game_is_told_and_chained_as_removed() {
     let burning = EffectData::infinite(Key::of::<Burning>())
-        .grant("state.burning")
+        .owner_tag("state.burning")
         .modifier(flat::<Damage>(5.0))
         .on_remove("singed");
     let singed = EffectData::instant("singed").modifier(flat::<Life>(-10.0));
@@ -281,7 +283,7 @@ fn an_effect_despawned_by_the_game_is_told_and_chained_as_removed() {
 
 #[test]
 fn an_effect_removed_by_mettle_is_told_once() {
-    let burning = EffectData::infinite(Key::of::<Burning>()).grant("state.burning");
+    let burning = EffectData::infinite(Key::of::<Burning>()).owner_tag("state.burning");
     let mut app = app(&[burning], |app| {
         app.add_effect::<Burning>();
     });
@@ -290,7 +292,7 @@ fn an_effect_removed_by_mettle_is_told_once() {
     apply(&mut app, npc, Burning);
     told(&mut app);
     let effect = effects_on(&app, npc)[0];
-    app.world_mut().remove_effect(effect);
+    app.world_mut().despawn(effect);
     app.tick();
     assert_eq!(told(&mut app), ["removed burning false"]);
 }
@@ -333,10 +335,10 @@ fn an_instant_effect_changes_the_base_within_its_limits() {
 }
 
 #[test]
-fn a_lasting_effect_counts_and_grants_while_it_lasts() {
+fn a_lasting_effect_counts_and_tags_its_owner_while_it_lasts() {
     let haste = EffectData::lasting(Key::of::<Haste>(), 1.0)
         .modifier(EffectModifier::new::<AttackSpeed>(Operation::Additive, 0.5))
-        .grant("effect.buff");
+        .owner_tag("effect.buff");
     let mut app = app(&[haste], |app| {
         app.add_effect::<Haste>();
     });
@@ -371,11 +373,11 @@ fn a_periodic_effect_executes_each_period_and_on_apply() {
 }
 
 #[test]
-fn a_requirement_or_an_immunity_blocks_an_effect() {
+fn a_requirement_or_a_blocking_effect_blocks_an_effect() {
     let burning = EffectData::lasting(Key::of::<Burning>(), 4.0)
         .tag("effect.affliction.burning")
         .require(!Condition::owner_has("state.wet"));
-    let warded = EffectData::infinite(Key::of::<Warded>()).immunity("effect.affliction");
+    let warded = EffectData::infinite(Key::of::<Warded>()).blocks("effect.affliction");
     let mut app = app(&[burning, warded], |app| {
         app.add_effect::<Burning>().add_effect::<Warded>();
     });
@@ -388,13 +390,13 @@ fn a_requirement_or_an_immunity_blocks_an_effect() {
     apply(&mut app, npc, Warded);
     assert_eq!(told(&mut app), ["applied warded"]);
     apply(&mut app, npc, Burning);
-    assert_eq!(told(&mut app), ["blocked burning Immunity"]);
+    assert_eq!(told(&mut app), ["blocked burning Effect"]);
 }
 
 #[test]
-fn an_effect_removes_those_tagged_as_it_says() {
+fn an_effect_ends_those_tagged_as_it_says() {
     let poison = EffectData::lasting(Key::of::<Poison>(), 10.0).tag("effect.affliction.poison");
-    let cure = EffectData::instant(Key::of::<Cure>()).removes("effect.affliction");
+    let cure = EffectData::instant(Key::of::<Cure>()).ends("effect.affliction");
     let mut app = app(&[poison, cure], |app| {
         app.add_effect::<Poison>().add_effect::<Cure>();
     });
@@ -449,7 +451,7 @@ fn stacks_count_their_modifiers_up_to_a_limit_then_overflow() {
 fn an_effect_is_inhibited_while_its_ongoing_requirement_fails() {
     let rage = EffectData::infinite(Key::of::<Rage>())
         .modifier(flat::<Damage>(5.0))
-        .grant("state.enraged")
+        .owner_tag("state.enraged")
         .ongoing(!Condition::owner_has("state.wet"));
     let mut app = app(&[rage], |app| {
         app.add_effect::<Rage>();
@@ -470,7 +472,7 @@ fn an_effect_is_inhibited_while_its_ongoing_requirement_fails() {
 #[test]
 fn an_effect_comes_off_once_its_removal_requirement_holds() {
     let burning =
-        EffectData::infinite(Key::of::<Burning>()).remove_if(Condition::owner_has("state.wet"));
+        EffectData::infinite(Key::of::<Burning>()).end_if(Condition::owner_has("state.wet"));
     let mut app = app(&[burning], |app| {
         app.add_effect::<Burning>();
     });
@@ -527,9 +529,9 @@ fn an_execution_works_damage_out_from_both_sides() {
     });
     let npc = actor(
         &mut app,
-        [Modifier::flat(id::<Resistance>(), 0.5).read_tagged(FIRE)],
+        [ModifierSpec::flat::<Resistance>(0.5).read_tagged(FIRE)],
     );
-    let caster = actor(&mut app, [Modifier::flat(id::<Damage>(), 10.0)]);
+    let caster = actor(&mut app, [ModifierSpec::flat::<Damage>(10.0)]);
     apply(&mut app, npc, Strike.source(caster));
     // 20 damage, half resisted.
     assert!(close(get::<Life>(&app, npc), 40.0));
@@ -638,7 +640,7 @@ fn a_new_registry_gives_active_effects_their_new_definitions() {
     app.ticks(2);
     assert!(close(get::<AttackSpeed>(&app, npc), 4.0));
     // Content without haste: checked afresh, as code no longer names it.
-    let emptied = EffectRegistry::check(&[], checks(app.world())).unwrap();
+    let emptied = EffectRegistry::build(&[], scope(app.world())).unwrap();
     app.insert_resource(emptied);
     app.ticks(2);
     assert!(effects_on(&app, npc).is_empty(), "its effect is gone");
@@ -681,7 +683,7 @@ fn an_effect_with_everything_checks() {
             Operation::Flat,
             Magnitude::param("param.damage"),
         ))
-        .grant("state.burning")
+        .owner_tag("state.burning")
         .require(!Condition::owner_has("immune.fire"))
         .ongoing(!Condition::owner_has("state.wet"))
         .stacking(Stacking {
@@ -707,16 +709,16 @@ fn a_registry_reports_everything_wrong_at_once() {
     let bad = EffectData::instant("bad")
         .modifier(focus)
         .tag("effect.unknown")
-        .grant("state.burning")
+        .owner_tag("state.burning")
         .execution("nowhere")
         .on_apply("missing")
         .modifier(EffectModifier::new::<Damage>(
             Operation::Flat,
             Magnitude::scaled(1.0, "nope"),
         ));
-    let errors = EffectRegistry::check(
+    let errors = EffectRegistry::build(
         &[bad],
-        EffectChecks {
+        EffectScope {
             tags: &tags(),
             curves: &curves(),
             attributes: &attribute_registry(),
@@ -733,7 +735,7 @@ fn a_registry_reports_everything_wrong_at_once() {
         "there's no execution called `nowhere` (in `bad`)",
         "there's no effect called `missing` (in `bad`)",
         "there's no attribute called `focus` (in `bad`)",
-        "an instant effect with granted tags: it doesn't last (in `bad`)",
+        "an instant effect with owner tags: it doesn't last (in `bad`)",
     ] {
         assert!(errors.contains(expected), "{expected} not in: {errors}");
     }
@@ -743,9 +745,9 @@ fn a_registry_reports_everything_wrong_at_once() {
 fn executions_need_an_instant_effect_or_a_period() {
     let executions = ExecutionRegistry::default().with(Burn);
     let build = |effect: EffectData| {
-        EffectRegistry::check(
+        EffectRegistry::build(
             &[effect],
-            EffectChecks {
+            EffectScope {
                 tags: &tags(),
                 curves: &curves(),
                 attributes: &attribute_registry(),
@@ -913,7 +915,7 @@ fn code_naming_an_effect_content_lacks_fails_the_check() {
     attributes(&mut app);
     app.add_effect::<Burning>();
     let world = app.world();
-    let checks = EffectChecks {
+    let checks = EffectScope {
         tags: &tags(),
         curves: &curves(),
         attributes: world.resource(),
@@ -923,7 +925,7 @@ fn code_naming_an_effect_content_lacks_fails_the_check() {
     };
     let named = world.resource::<EffectRegistry>();
     let errors = named
-        .recheck(&[EffectData::instant(Key::of::<Hit>())], checks)
+        .rebuild(&[EffectData::instant(Key::of::<Hit>())], checks)
         .unwrap_err();
     let missing = Error::NotInContent {
         kind: "effect",
@@ -937,8 +939,8 @@ fn code_naming_an_effect_content_lacks_fails_the_check() {
         "{errors}"
     );
     // Checked afresh, nothing named: it's content's to leave out.
-    EffectRegistry::check(&[EffectData::instant(Key::of::<Hit>())], checks).unwrap();
+    EffectRegistry::build(&[EffectData::instant(Key::of::<Hit>())], checks).unwrap();
     named
-        .recheck(&[EffectData::instant(Key::of::<Burning>())], checks)
+        .rebuild(&[EffectData::instant(Key::of::<Burning>())], checks)
         .unwrap();
 }

@@ -61,8 +61,8 @@ struct FireDamage; // "fire_damage"
 impl ExecutionFn for FireDamage {
     fn execute(&self, effect: &ExecutionContext) -> Vec<BaseChange> {
         let damage = effect.param(DamageParam).unwrap_or_default();
-        let power = effect.captured::<SpellPower>(Capture::Source).unwrap_or_default();
-        let resisted = effect.captured::<Resistance>(Capture::Target).unwrap_or_default();
+        let power = effect.captured::<SpellPower>(Side::Source).unwrap_or_default();
+        let resisted = effect.captured::<Resistance>(Side::Target).unwrap_or_default();
         let dealt = damage * (1.0 + power / 100.0) * (1.0 - resisted) * effect.stacks as f32;
         vec![BaseChange::of::<Life>(Operation::Flat, -dealt)]
     }
@@ -75,7 +75,7 @@ struct BurnTime { per: f32 } // "burn_time"
 
 impl CalculationFn for BurnTime {
     fn calculate(&self, effect: &ExecutionContext) -> f32 {
-        let power = effect.captured::<SpellPower>(Capture::Source).unwrap_or_default();
+        let power = effect.captured::<SpellPower>(Side::Source).unwrap_or_default();
         2.0 + power / self.per
     }
 }
@@ -134,12 +134,12 @@ A caster with 25 spell power hits a mage with 50% fire resistance for 20:
 #         .add_effect::<Burning>();
 # }
 # fn power(effect: &ExecutionContext) -> f32 {
-#     effect.captured::<SpellPower>(Capture::Source).unwrap_or_default()
+#     effect.captured::<SpellPower>(Side::Source).unwrap_or_default()
 # }
 # impl ExecutionFn for FireDamage {
 #     fn execute(&self, effect: &ExecutionContext) -> Vec<BaseChange> {
 #         let damage = effect.param(DamageParam).unwrap_or_default();
-#         let resisted = effect.captured::<Resistance>(Capture::Target).unwrap_or_default();
+#         let resisted = effect.captured::<Resistance>(Side::Target).unwrap_or_default();
 #         let dealt = damage * (1.0 + power(effect) / 100.0) * (1.0 - resisted) * effect.stacks as f32;
 #         vec![BaseChange::of::<Life>(Operation::Flat, -dealt)]
 #     }
@@ -215,7 +215,7 @@ only, and what's being applied.
 
 | | What it is |
 |---|---|
-| `world` | The world, to read anything else |
+| `world` | The world, read only: the raw escape hatch, for what a capture can't read |
 | `target` | Who the effect is applied to |
 | `def` | The effect's checked definition: its number, name and tags |
 | `effect()` | The effect's number, an `EffectId` |
@@ -226,18 +226,15 @@ only, and what's being applied.
 | `get::<C>()` | What the game put on the context of type `C`, a [`ContextData`] |
 | `captured::<A>(from)` | What it declared it [captures](#captures) of the source's or the target's `A` |
 | `owned(entity)` | What an entity owns: its [`OwnedTags`] |
-| `attribute_id::<A>()`, `route_id::<R>()` | An attribute's or a route's number |
-| `value::<A>(entity, read)` | An entity's attribute, read in context |
-| `breakdown::<A>(entity, read)` | An entity's attribute's modifiers, summed but not applied |
+| `breakdown::<A>(entity, read)` | An entity's attribute's modifiers, summed but not applied: read now, never snapshotted or predicted |
 
-`value_at` and `breakdown_at` do the same for an attribute named by number.
 [Reading in context](reading.md) explains reads in context.
 
 ## Captures
 
-What an execution or a calculation reads of the source's and the target's
-attributes, it declares on its derive, as Unreal's execution declares its
-capture definitions:
+What an execution, a calculation or a router reads of the source's and the
+target's attributes, it declares on its derive, as Unreal's execution
+declares its capture definitions:
 
 ```rust
 # use bevy_mettle::prelude::*;
@@ -257,7 +254,7 @@ Each is an attribute's type, then the options of an
 values, `live` to read it live, and `tagged(..)` for the tags it's read in.
 An effect running the code captures them with its own magnitudes'
 captures, as a snapshot or live. The code reads them with
-`effect.captured::<A>(Capture::Source)`, as Unreal's
+`effect.captured::<A>(Side::Source)`, as Unreal's
 `AttemptCalculateCapturedAttributeMagnitude` does: `None` for one it didn't
 declare.
 
@@ -265,7 +262,9 @@ Declared, a capture is the effect's like any other. A snapshot of the
 source's goes in the spec's [snapshot](applying-effects.md#snapshots), so a
 fireball landing late hits with its caster's spell power as it was cast. It
 goes with the effect's replica to clients. Its tags are checked with the
-content. `value` reads the world as it is, captured by nothing.
+content. Captures are how effect code reads attributes. `breakdown` reads
+the world as it is, captured by nothing; so does `world`, for what no
+capture can name, such as a third actor's.
 
 A periodic burn that reads its target's resistance live deals more the
 moment the resistance goes:
@@ -285,7 +284,7 @@ struct Sear;
 
 impl ExecutionFn for Sear {
     fn execute(&self, effect: &ExecutionContext) -> Vec<BaseChange> {
-        let resisted = effect.captured::<Resistance>(Capture::Target).unwrap_or_default();
+        let resisted = effect.captured::<Resistance>(Side::Target).unwrap_or_default();
         vec![BaseChange::of::<Life>(Operation::Flat, -10.0 * (1.0 - resisted))]
     }
 }
@@ -337,13 +336,13 @@ executing modifier would: `Flat` adds, `Additive` scales, `Override` sets.
 The base is then rounded and kept within its limits.
 
 A change is to the target's base, unless `.on_source()` says it's to the
-source's: life stolen back. An execution can also deal a [route](#routes),
-with `BaseChange::dealt::<IncomingDamage>(damage)`, for its router to route.
+source's: life stolen back. An execution can also route into a
+[route](#routes) it declares, `#[execution(routes(IncomingDamage))]`, with
+`BaseChange::route::<IncomingDamage>(damage)`, for its router to route.
 
 A change named by type is numbered as it's applied. One to an attribute or a
-route the app hasn't added is warned of once, and dropped. Code holding a
-number instead names it so: `BaseChange::new(attribute, op, value)`, or
-`BaseChange::route(route, value)`.
+route the app hasn't added is warned of once, and dropped; so is one into a
+route the execution doesn't declare.
 
 Executions don't scale with stacks by themselves, since they work out their
 own numbers. Multiply by `stacks` where the effect should count once per
@@ -384,8 +383,8 @@ impl ExecutionFn for Strike {
 
 Every hit takes the shield's share first, then life's. Written into each
 execution, that's the same code many times over. A route puts it in one
-place: hits deal `incoming_damage`, and its router decides what that does to
-the attributes actors have.
+place: hits route into `incoming_damage`, and its router decides what that
+does to the attributes actors have.
 
 ```rust
 # use bevy::prelude::*;
@@ -396,8 +395,10 @@ the attributes actors have.
 #[attribute(min = 0.0)]
 struct Shield;
 
-/// Damage dealt, before the shield takes its share.
+/// Damage dealt, before the shield takes its share: the target's shield
+/// read as each hit's routed.
 #[derive(Route)]
+#[route(target(Shield, live))]
 struct IncomingDamage;
 
 #[derive(Effect)]
@@ -407,9 +408,7 @@ struct Hit;
 /// fifth of what life lost.
 impl RouteFn for IncomingDamage {
     fn route(&self, effect: &ExecutionContext, damage: f32) -> Vec<BaseChange> {
-        let held = effect
-            .value::<Shield>(effect.target, &AttributeContext::new())
-            .unwrap_or_default();
+        let held = effect.captured::<Shield>(Side::Target).unwrap_or_default();
         let absorbed = damage.min(held);
         let taken = damage - absorbed;
         vec![
@@ -452,21 +451,49 @@ assert_eq!(base(&app, attacker), 52.0, "a fifth stolen back");
 ```
 
 A route's router is [`RouteFn::route`] on its type, and a value of it is
-registered with [`add_route`], numbered in the [`RouteRegistry`]. In data, a modifier deals a route by naming it,
-`"incoming_damage"`, a `Key<AnyRoute>`, in place of an attribute. A router
-gets all that an
-execution dealt its route, summed: the effect's modifiers and executions
-both. Its changes come after the effect's own, and are rounded and kept
-within limits like any other.
+registered with [`add_route`], numbered in the [`RouteRegistry`]. In data, a
+modifier routes into a route by naming it, `"incoming_damage"`, a
+`Key<AnyRoute>`, in place of an attribute. An execution routes into the
+routes it declares on its derive, by type:
+
+```rust
+# use bevy_mettle::prelude::*;
+# #[derive(Attribute)] struct SpellPower;
+# #[derive(Attribute)] struct Resistance;
+# #[derive(Route)] struct IncomingDamage;
+#[derive(Execution)]
+#[execution(source(SpellPower), target(Resistance), routes(IncomingDamage))]
+struct FireDamage;
+
+impl ExecutionFn for FireDamage {
+    fn execute(&self, effect: &ExecutionContext) -> Vec<BaseChange> {
+        let power = effect.captured::<SpellPower>(Side::Source).unwrap_or_default();
+        let resisted = effect.captured::<Resistance>(Side::Target).unwrap_or_default();
+        vec![BaseChange::route::<IncomingDamage>(30.0 * (1.0 + power / 100.0) * (1.0 - resisted))]
+    }
+}
+# assert_eq!(FireDamage::routes(), vec![Key::of::<IncomingDamage>()]);
+```
+
+A router gets all that an effect routed into its route, summed: its
+modifiers and executions both. What it reads it [captures](#captures), on
+`#[route(..)]` as an execution does: an effect captures them for each route
+it routes into, those its modifiers name and its executions declare. A route
+whose captures can't be, one of an attribute the app hasn't added, say,
+rejects only the effects routing into it. An execution routing into a route
+it doesn't declare has nothing captured for its router: the change is
+dropped, warned of once. Declaring a route the app hasn't added rejects the
+effects running it. Its changes come after the effect's own, and are rounded
+and kept within limits like any other.
 
 - **It's the same everywhere.** Routing happens as the effect works out its
   changes, so a [preview](applying-effects.md#previewing) sees it, and an
   ability's cost paid through a route, "blood magic" paying mana costs in
   life, is checked as routed. A client predicting an ability routes its cost
   as the server will, and undoes it if the server refuses.
-- **Routing is single-pass.** What a router deals a route is dropped, with a
-  warning. One router can do the whole pipeline.
-- **It's dealt, not held.** A route is dealt flat amounts, by effects that
+- **Routing is single-pass.** What a router routes into a route is dropped,
+  with a warning. One router can do the whole pipeline.
+- **It's routed, not held.** A route takes flat amounts, from effects that
   execute: instant, or periodic. It has no base, limits or rounding, nothing
   holds it, and nothing reads it. What it's routed into is replicated as
   ever.
@@ -475,8 +502,8 @@ within limits like any other.
 
 [`EffectExecuted`] says what came of it: `changes` to the target's bases
 after routing and limits, `source_changes` to its source's, and `routed`,
-what each route was dealt. A combat log reads "40 dealt, 30 absorbed" from
-them.
+what it routed into each route. A combat log reads "40 dealt, 30 absorbed"
+from them.
 
 ## Calculations
 
@@ -494,11 +521,14 @@ When a calculation runs depends on what it stands for:
 What a calculation declares it [captures](#captures) is captured with the
 effect's other captures: a snapshot is kept, and a live read followed, so a
 lasting modifier's calculation is worked out again as what it reads live
-changes. What it reads otherwise, with `value`, is read as it's worked
-out.
+changes. What it reads otherwise, with `breakdown` or `world`, is read as
+it's worked out.
 
 ## Pitfalls
 
+- **An execution declares its routes.** What it routes into a route it
+  doesn't declare, `routes(..)` on its derive, is dropped: its router's
+  captures weren't taken.
 - **A router can't apply effects.** Like executions, it reads the world and
   returns changes. To apply something as a hit lands, observe
   [`EffectExecuted`].

@@ -5,31 +5,21 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::data::first_warning;
-use super::{AbilityRef, ContextDataId, ContextDataRegistry, EffectContext, Hit};
+use super::{ContextDataId, ContextDataRegistry, EffectContext};
 
-/// An [`EffectContext`] as it's replicated: what the game added, serialized.
+/// An [`EffectContext`] as it's replicated: its source, its data serialized.
 ///
 /// What an effect's replica and a cue's burst carry. Its entities are mapped
-/// as it arrives, those in what the game added too.
+/// as it arrives, those in its data too.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ContextReplica {
     /// Who's responsible.
     pub source: Option<Entity>,
-    /// What struck.
-    pub causer: Option<Entity>,
-    /// What it came from.
-    pub object: Option<Entity>,
-    /// The ability that applied it.
-    pub ability: Option<AbilityRef>,
-    /// Where it hit.
-    pub hit: Option<Hit>,
-    /// Where it came from.
-    pub origin: Option<Vec3>,
-    /// What the game added, those it added to the app.
+    /// Its context data, of the types registered as such.
     pub data: Vec<DataReplica>,
 }
 
-/// What a game added to a context, as it's replicated, serialized.
+/// Context data, as it's replicated: its type's number, and it serialized.
 ///
 /// Its type's number, its bytes, and its entities beside them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -43,8 +33,8 @@ pub struct DataReplica {
 }
 
 impl ContextReplica {
-    /// `context` as it's replicated: what the game added, those `registry`
-    /// has, serialized.
+    /// `context` as it's replicated: its data, of the types `registry` has,
+    /// serialized.
     #[must_use]
     pub fn of(context: &EffectContext, registry: &ContextDataRegistry) -> Self {
         let data = context
@@ -81,26 +71,16 @@ impl ContextReplica {
             .collect();
         Self {
             source: context.source,
-            causer: context.causer,
-            object: context.object,
-            ability: context.ability,
-            hit: context.hit,
-            origin: context.origin,
             data,
         }
     }
 
-    /// The context it replicates: what the game added, those `registry` has,
+    /// The context it replicates: its data, of the types `registry` has,
     /// deserialized.
     #[must_use]
     pub fn context(&self, registry: &ContextDataRegistry) -> EffectContext {
         let mut context = EffectContext {
             source: self.source,
-            causer: self.causer,
-            object: self.object,
-            ability: self.ability,
-            hit: self.hit,
-            origin: self.origin,
             data: Vec::new(),
         };
         for data in &self.data {
@@ -119,11 +99,8 @@ impl ContextReplica {
 
 impl MapEntities for ContextReplica {
     fn map_entities<M: EntityMapper>(&mut self, mapper: &mut M) {
-        for entity in [&mut self.source, &mut self.causer, &mut self.object]
-            .into_iter()
-            .flatten()
-        {
-            *entity = mapper.get_mapped(*entity);
+        if let Some(source) = &mut self.source {
+            *source = mapper.get_mapped(*source);
         }
         for data in &mut self.data {
             for entity in &mut data.entities {
@@ -142,7 +119,10 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     use super::{ContextReplica, DataReplica};
-    use crate::context::{AbilityRef, ContextDataRegistry, EffectContext, Hit, ReflectContextData};
+    use crate::context::{
+        AbilityRef, Causer, ContextDataRegistry, EffectContext, Hit, Origin, ReflectContextData,
+        SourceObject,
+    };
 
     /// A shot: whether it was a headshot, and the entities it names.
     #[derive(Reflect, Clone, Debug, PartialEq, Serialize, Deserialize, MapEntities)]
@@ -186,12 +166,22 @@ mod tests {
         ContextDataRegistry::of(&registry)
     }
 
-    /// A registry with the shot and the wind.
+    /// A registry with mettle's own, the shot and the wind.
     fn registry() -> ContextDataRegistry {
         registered(|types| {
+            builtin(types);
             types.register::<Shot>();
             types.register::<Wind>();
         })
+    }
+
+    /// Registers mettle's own context data.
+    fn builtin(types: &mut TypeRegistry) {
+        types.register::<Causer>();
+        types.register::<SourceObject>();
+        types.register::<AbilityRef>();
+        types.register::<Hit>();
+        types.register::<Origin>();
     }
 
     fn shot() -> Shot {
@@ -208,17 +198,17 @@ mod tests {
     fn context() -> EffectContext {
         EffectContext::default()
             .source(entity(1))
-            .causer(entity(2))
-            .object(entity(3))
-            .ability(AbilityRef {
+            .with(Causer(entity(2)))
+            .with(SourceObject(entity(3)))
+            .with(AbilityRef {
                 id: AbilityId::new(4),
                 level: 2.0,
             })
-            .hit(Hit {
+            .with(Hit {
                 point: Vec3::new(1.0, 2.0, 3.0),
                 normal: Vec3::Y,
             })
-            .origin(Vec3::new(-4.0, 0.0, 9.0))
+            .with(Origin(Vec3::new(-4.0, 0.0, 9.0)))
             .with(shot())
             .with(Wind { speed: 3.5 })
     }
@@ -228,7 +218,7 @@ mod tests {
         let registry = registry();
         let context = context();
         let replica = ContextReplica::of(&context, &registry);
-        assert_eq!(replica.data.len(), 2, "both types, serialized");
+        assert_eq!(replica.data.len(), 7, "every type, serialized");
         assert_eq!(replica.context(&registry), context);
         let empty = EffectContext::default();
         assert_eq!(
@@ -259,8 +249,11 @@ mod tests {
         replica.map_entities(&mut moved);
         let mapped = replica.context(&registry);
         assert_eq!(mapped.source, Some(entity(11)));
-        assert_eq!(mapped.causer, Some(entity(12)));
-        assert_eq!(mapped.object, Some(entity(13)));
+        assert_eq!(mapped.get::<Causer>(), Some(&Causer(entity(12))));
+        assert_eq!(
+            mapped.get::<SourceObject>(),
+            Some(&SourceObject(entity(13)))
+        );
         assert_eq!(
             mapped.get::<Shot>(),
             Some(&Shot {
@@ -271,19 +264,24 @@ mod tests {
             })
         );
         assert_eq!(mapped.get::<Wind>(), Some(&Wind { speed: 3.5 }));
-        assert_eq!(mapped.ability, context().ability, "not an entity");
-        assert_eq!(mapped.hit, context().hit);
-        assert_eq!(mapped.origin, context().origin);
+        assert_eq!(
+            mapped.get::<AbilityRef>(),
+            context().get::<AbilityRef>(),
+            "not an entity"
+        );
+        assert_eq!(mapped.get::<Hit>(), context().get::<Hit>());
+        assert_eq!(mapped.get::<Origin>(), context().get::<Origin>());
     }
 
     #[test]
     fn a_type_not_added_is_dropped() {
         // The wind isn't added: not sent.
         let shots = registered(|types| {
+            builtin(types);
             types.register::<Shot>();
         });
         let replica = ContextReplica::of(&context(), &shots);
-        assert_eq!(replica.data.len(), 1);
+        assert_eq!(replica.data.len(), 6);
         let decoded = replica.context(&shots);
         assert_eq!(decoded.get::<Shot>(), Some(&shot()));
         assert_eq!(decoded.get::<Wind>(), None);
@@ -302,7 +300,13 @@ mod tests {
         let shot_id = registry.id_of::<Shot>().unwrap();
         let wind_id = registry.id_of::<Wind>().unwrap();
         let mut replica = ContextReplica::of(&context(), &registry);
-        let whole = replica.data[0].bytes.clone();
+        let whole = replica
+            .data
+            .iter()
+            .find(|data| data.id == shot_id)
+            .unwrap()
+            .bytes
+            .clone();
         let mut trailing = whole.clone();
         trailing.push(0);
         for bytes in [

@@ -18,20 +18,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which game systems order themselves against. Every part's plugin adds it
   if it isn't there yet (`MettleCorePlugin::ensure`).
 - Keys and ids, as Bevy's `ComponentId`: content names what it defines by
-  a key, a `Key<K>` (`"fireball.cost"`), of a `Kind` (`#[derive(Kind)]`, an
+  a key, a `Key<K>` (`"fireball.cost"`), of one of mettle's kinds (`Kind`, an
   empty enum such as `AnyEffect`); checked, it's known by its number, an
   `Id<K>`. Keys are written as strings; ids aren't written. Code with a
-  type for something names it as `Key::of::<T>()`, by `Keyed<K>`, which the
-  derives implement for the kinds they're keyed as, so a typo doesn't
-  compile; one type can be keyed as more than one kind. `TagId`,
+  type for something names it as `Key::of::<T>()`, its kind inferred, by
+  `Keyed` (its `Kind` and `KEY`), which the derives implement, so a typo
+  doesn't compile. A type is of one kind: deriving two on one is rejected.
+  Every trait code names content by (`Attribute`, `Effect`, `Ability`,
+  `Behaviour`, `Execution`, `Calculation`, `Route`) requires it, its name
+  written once, as `T::KEY`; `Registry::id_of::<T>()` takes only a type of
+  its kind. `TagId`,
   `CurveId`, `AttributeId`, `EffectId` and `AbilityId`, with their `Any*`
   kinds, are in `registry`, so one part names another's without depending
   on it. Everything that runs, and everything sent, holds numbers; names
   stay for data, debug output and what's shown.
 - `Registry<K, T>`, every registry's one shape, as Bevy's `Components`:
   entries by number, numbers by name and by type (`get`, `id`, `id_of`,
-  `name`, `iter`), entries added by a type known only at runtime
-  (`add_type`), and a `fingerprint` of its names and numbers. Content
+  `name`, `iter`), a key resolved to its number or an error saying where
+  it was named (`resolve`, as `TagRegistry::resolve` for tags), entries added by a type known only at runtime
+  (`add_type`), and a `fingerprint` of its names and numbers. Code names
+  entries by type everywhere; a number comes back in events and replicas,
+  read through the registry. Content
   reloaded keeps the numbers what's there had. Two types adding one name
   panic, naming both.
 - Gameplay tags, typed and interned. `#[derive(Tag)]`, `#[tag(parent =
@@ -85,10 +92,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Multiplicative` (more), `Divide`, `Unscaled` or `Override`; counting
   while a condition holds, per so much of another attribute (`Per`), or
   only for its own source (`local`). Code writes them by type, as
-  `ModifierSpec`s, put on with `modifiers(..)` (`ModifierCommands`); with a
-  number in hand, `Modifier::flat(power, 5.0)`.
-- Reads in context: `AttributeReader` and `AttributeWorld` (`value`,
-  `value_at`, `base_at`, `breakdown`) under an `AttributeContext` of a
+  `ModifierSpec`s, put on with `modifiers(..)` (`ModifierCommands`) or
+  made by hand with `resolve`; a `Modifier` is the resolved form, read
+  back by number.
+- Reads in context, by type: `AttributeReader` (`value`, `breakdown`) and
+  `AttributeWorld` (`value`, `breakdown`, `base`, and `apply_to_base` and
+  `base_after`, changing a base as an instant effect does) under an
+  `AttributeContext` of a
   hit's tags, its target's and source's, and facts: a fire hit's
   resistance, counting modifiers for `damage.elemental`. A `Breakdown`
   says where a value came from. The `attribute_above` and
@@ -107,11 +117,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Effects as content, `EffectData`: `instant`, `lasting` or `infinite`
   (`EffectDuration`), a `period`, `modifiers` (`EffectModifier`),
-  `executions` in code, the tags it `grants`, its `cues`, what it needs to
-  apply (`require`) and to count (`ongoing`: inhibited while it doesn't,
-  its time standing still), `remove_if`, what it `removes`, its
-  `immunity`, its `stacking`, and the effects it chains `on_apply`,
-  `on_remove` and `on_expire`.
+  `executions` in code, the tags its owner holds while it lasts
+  (`owner_tags`, `owner_tag(..)`), its `cues`, what it needs to apply
+  (`require`) and to count (`ongoing`: inhibited while it doesn't, its time
+  standing still), what ends it (`end_if`), the effects it `ends` as it
+  applies and `blocks` while it lasts (Unreal's immunity), its `stacking`,
+  and the effects it chains `on_apply`, `on_remove` and `on_expire`.
 - Stacking (`Stacking`): one stack for everyone or per source (`StackBy`),
   a `limit`, what applying again does to the time left (`Reapply`) and the
   period (`reset_period`), what running out does (`Expire`), and the
@@ -122,9 +133,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `burning`, added with `add_effect::<Burning>()` (`EffectApp`). Content
   without an effect code adds fails its check (`Error::NotInContent`).
 - `EffectRegistry`: content checked against the tags, curves, attributes,
-  executions, calculations and routes (`EffectChecks`), every error at
+  executions, calculations and routes (`EffectScope`), every error at
   once, and compiled into `EffectDef`s, names resolved to numbers.
-  `EffectRegistry::check` makes one for tools and tests; `recheck` keeps
+  `EffectRegistry::build` makes one for tools and tests; `rebuild` keeps
   the numbers. Executions on a lasting effect with no period are
   rejected. Active effects take new definitions as they're replaced.
 - Magnitudes as small expressions (`Magnitude`): terms `Value`, `Level`,
@@ -139,7 +150,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of numbers, its constants folded. Content is rejected for a sum or
   product of nothing or a clamp whose least is above its most.
 - `AttributeRead`: which attribute an `Attribute` magnitude reads, whose
-  (`Capture`: `Source`, `Target`), which of its values (`Read`: `Current`,
+  (`Side`: `Source`, the default, or `Target`), which of its values (`Read`: `Current`,
   `Base`, or `Bonus`, its current value less its base), in what tags
   (Unreal's tag filters), and whether it's a snapshot. Started by
   `Magnitude::source::<A>()` or `target::<A>()`, then `.base()`,
@@ -162,75 +173,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with its source's snapshot captures taken now, in its `Snapshot`, for a
   projectile to carry its caster's attributes as it was cast.
 - Effect specs, `EffectSpec`: an `Effect` type is its own spec
-  (`apply_effect(Burning.level(3.0))`), or `EffectSpec::of` and `from_id`
-  (`IntoEffectId`). Its `level`, its params (`param`, Unreal's
-  SetByCaller), its context, and the activation it's predicted under.
+  (`apply_effect(Burning.level(3.0))`), or `EffectSpec::of::<E>()`. Its
+  `level`, its params (`param`, Unreal's SetByCaller), its context, and the
+  activation it's predicted under.
 - An effect spec's context, Unreal's `FGameplayEffectContext`:
-  `EffectContext`, of its `source`, `causer` (what struck), `object` (what
-  it came from), `ability` (an `AbilityRef`: which ability, at what level),
-  `hit` (a `Hit`: point and normal) and `origin`, each with a builder on
-  the spec. A game adds its own with a `ContextData` type, by reflection
-  (`#[reflect(ContextData)]`, `register_type`, `.with(..)`, `get::<C>()`;
+  `EffectContext`, of its `source`, and context data, one of each type,
+  `.with(..)` and `get::<C>()`. Mettle's own: `Causer` (what struck),
+  `SourceObject` (what it came from), `AbilityRef` (which ability, at what
+  level), `Hit` (point and normal) and `Origin`, registered by
+  `EffectPlugin`. A game adds its own with a `ContextData` type, by
+  reflection (`#[reflect(ContextData)]`, `register_type`;
   `ReflectContextData`, `ContextDataRegistry`). Executions and
   calculations read it; chained effects carry it; `EffectExecuted` and
   `CueExecuted` are told it. It's replicated with an effect's replica and
   a one-shot cue's burst (`ContextReplica`), entities mapped, those in a
   game's types too.
-- Applying and removing: `apply_effect`, `remove_effects` (by tags) and
-  `remove_effect`, on `EffectCommands` and `EffectWorld`, and
-  `remove_activation` on `EffectCommands`; `preview_effect`, what an
-  instant effect would change without changing it. A lasting effect is an entity (`ActiveEffect`)
-  `EffectOf` its target (`ActiveEffects`), with its `stacks`,
-  `remaining` time and whether it `is_inhibited`. One despawned by the
-  game is told and chains its `on_remove`, as `remove_effect` does.
+- Applying and removing: `apply_effect` and `remove_effects` (by tags),
+  on `EffectCommands` and `EffectWorld`, and `remove_activation` on
+  `EffectCommands`; `preview_effect`, what an instant effect would change
+  without changing it. A lasting effect is an entity (`ActiveEffect`)
+  `EffectOf` its target (`ActiveEffects`), with its `stacks`, `remaining`
+  time and whether it `is_inhibited`. Removing one is despawning it: its
+  tags and cues taken back, `EffectRemoved` told, its `on_remove`
+  chained.
 - Events on the target: `EffectApplied`, `EffectStacked`, `EffectBlocked`
-  (`Blocked`: `Requirement`, `Immunity`, `StackLimit`), `EffectExecuted`
+  (`Blocked`: `Requirement`, `Effect`, `StackLimit`), `EffectExecuted`
   and `EffectRemoved` (`expired`). `EffectExecuted` says what came of it:
   its `context`, the `changes` to the target's bases after routing and
-  limits (`Delta`), `source_changes` to its source's, and what each route
-  was dealt (`routed`, `Routed`).
+  limits (`Delta`), `source_changes` to its source's, and what it routed
+  into each route (`routed`, `Routed`).
 - Effect code: `#[derive(Execution)]` and `#[derive(Calculation)]`, their
   `ExecutionFn::execute` and `CalculationFn::calculate` taking `&self`, a
   value registered with `add_execution(FireDamage)` and
   `add_calculation(..)` into `ExecutionRegistry` and
-  `CalculationRegistry`. An execution returns `BaseChange`s, named by
+  `CalculationRegistry`, each a `CodeRegistry` (as `RouteRegistry` is). An execution returns `BaseChange`s, named by
   type, `BaseChange::of::<Life>(op, value)` and
-  `BaseChange::dealt::<IncomingDamage>(value)`, and numbered as they're
-  applied: one to a type that isn't added is warned of once and dropped.
-  `BaseChange::new`, `BaseChange::route` and `BaseChange::changing` name
-  by number, read back with `changes()`. `BaseChange::on_source()` changes
-  the source's base, life stolen back (`Whose`).
-- Declared captures: `#[execution(source(A, ..), target(B, ..))]` and
-  `#[calculation(..)]`, with the `AttributeRead` options (`base`, `bonus`,
-  `live`, `tagged(..)`), as `Execution::captures` and
-  `Calculation::captures`. They're the effect's captures like its
-  magnitudes': snapshotted, replicated and checked.
-- `ExecutionContext`, what executions and calculations see: the effect,
-  its `level`, `param`s, `context`, `source`, the actors' `owned` tags,
-  values and breakdowns in context, `attribute_id` and `route_id`, and
-  `captured::<A>(Capture)`, what it declared it captures, as Unreal's
-  `AttemptCalculateCapturedAttributeMagnitude`.
-- Routes: `#[derive(Route)]`, an amount effects deal that no actor holds
-  (incoming damage), added with its router (`RouteFn::route`),
+  `BaseChange::route::<IncomingDamage>(value)`, and numbered as they're
+  applied: one to a type that isn't added is warned of once and dropped,
+  and what it changes is read back by number with `changes()`. An
+  execution routes into the routes it declares,
+  `#[execution(routes(IncomingDamage, ..))]` (`Execution::routes`), each
+  checked as added with the content; one routing into a route it doesn't
+  declare has the change dropped, warned of once per execution and route.
+  `BaseChange::on_source()` changes
+  the source's base, life stolen back (`on: Side`, `Target` unless it
+  says).
+- Declared captures: `#[execution(source(A, ..), target(B, ..))]`,
+  `#[calculation(..)]` and `#[route(..)]`, with the `AttributeRead`
+  options (`base`, `bonus`, `live`, `tagged(..)`), as
+  `Execution::captures`, `Calculation::captures` and `Route::captures`.
+  They're the effect's captures like its magnitudes': snapshotted,
+  replicated, predicted and checked. An effect captures what each route it
+  routes into captures: those its modifiers name and its executions
+  declare. A route whose captures can't be rejects only the effects
+  routing into it.
+- `ExecutionContext`, what executions, calculations and routers see: the
+  effect, its `level`, `param`s, `context`, `source`, the actors' `owned`
+  tags, and `captured::<A>(Side)`, what the code declared it captures, as
+  Unreal's `AttemptCalculateCapturedAttributeMagnitude`. `breakdown::<A>`
+  and the `world` field read past captures, unsnapshotted and
+  unpredicted.
+- Routes: `#[derive(Route)]`, an amount effects route into that no actor
+  holds (incoming damage), added with its router (`RouteFn::route`),
   `add_route(IncomingDamage)`, into `RouteRegistry`. The router turns all
-  an execution dealt it into changes to attributes actors have: through
+  an effect routed into it into changes to attributes actors have: through
   shields into life. Single-pass, the same on a server and a predicting
-  client, and seen by previews and ability costs. Dealt flat, by effects
-  that execute: in data `(route: "incoming_damage", value: ..)`, in code
-  `EffectModifier::route` or `BaseChange::dealt`; never read, held or
-  replicated.
+  client, and seen by previews and ability costs. Routed into flat, by
+  effects that execute: in data `(route: "incoming_damage", value: ..)`, in
+  code `EffectModifier::route` or, from a declaring execution,
+  `BaseChange::route`; never read, held or replicated.
 - Effects tick in `MettleSet::Effects`, added by `EffectPlugin`: time runs
   down alongside the game, and only what's due is done with the whole
   world. Attributes fold what they changed in the same step.
 - Cues (`cue`): what's shown of effects and abilities. Lasting cues held
   while an effect counts or an ability is active (`cues` in their data),
-  or by `add_cue`, each an entity (`ActiveCue`, `CueOf`, `ActiveCues`);
-  one-shots as an effect executes, with what it dealt to the first
-  attribute it changed and every change, or by `execute_cue` (`Cue`,
-  `CueCommands`, `CueWorld`). `CueAdded` (`joined` for an actor come into
-  view), `CueRemoved` and `CueExecuted` (`location`, `normal`, from its
-  hit); `add_cue_handler` (`CueApp`), run for the most specific tag; local
-  cues (`Cue::local`). Replicated as `ServedCues` and `CueBursts` (the
+  or by `add_cue(tag)` and `add_unreplicated_cue(tag)`, let go of by
+  `remove_cue(tag)`: each an entity (`ActiveCue`: its `tag`, `joined` for
+  an actor come into view, `unreplicated`; `CueOf`, `ActiveCues`), observed
+  as it's added and removed. One-shots trigger `CueExecuted` as an effect
+  executes, with every change it made (`magnitude()`, the first's), or by
+  `execute_cue` (`Cue`, `CueCommands`, `CueWorld`); unreplicated with
+  `Cue::unreplicated`. Replicated as `ServedCues` and `CueBursts` (the
   last half second, played by a client coming into view), a predicted
   one-shot played once however often it was predicted. Played in
   `PostUpdate`, in `CueSystems`.
@@ -242,20 +265,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### `bevy_mettle_ability`
 
 - Abilities as content, `AbilityData`: the behaviour that runs it, its
-  `cost` and `cooldown` (effects), what it needs (`require`) and what
-  blocks it (`blocked_by`), what it `cancels` and `blocks` while active,
-  the tags it `grant`s, its `cue`s, its `trigger`s (`Trigger`: `Event`,
-  `TagAdded`, `TagPresent`), when it commits (`Commit`: `OnActivate`,
-  `Manual`), what interrupts it (`cancel_if`) and how it runs over a
-  network (`net`).
+  `cost` and `cooldown` (effects), what it needs (`require`: kept from
+  activating while its owner owns a tag by `!Condition::owner_has(..)`),
+  what it `ends` (cancels) as it starts and `blocks` while active,
+  its `owner_tags` (`owner_tag(..)`), its `cue`s, its `trigger`s
+  (`Trigger`: `Event`, `TagAdded`, `TagPresent`), when it commits
+  (`Commit`: `OnActivate`, `Manual`), what interrupts it (`end_if`) and how
+  it runs over a network (`net`).
 - `#[derive(Ability)] struct Fireball;`, added with
   `add_ability::<Fireball>()` (`AbilityApp`). Granting takes an
   `AbilitySpec`, Unreal's ability spec: `grant_ability(Fireball)`,
-  `grant_ability(Fireball.level(2.0))`, `AbilitySpec::from_id`.
-  `activate_ability` takes an `Ability` type or an `AbilityId`
-  (`IntoAbilityId`).
+  `grant_ability(Fireball.level(2.0))`. `activate_ability` takes an
+  `Ability` type; `activate` a granted ability's entity.
 - `AbilityRegistry`: content checked against the tags, effects and
-  behaviours (`AbilityChecks`), every error at once, compiled into
+  behaviours (`AbilityScope`), every error at once, compiled into
   `AbilityDef`s. A `Grant` says which abilities an effect grants while it
   lasts, gear's skills (`granted_by`, `GrantedBy`). An ability whose
   behaviour takes input can't have triggers.
@@ -265,10 +288,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run, and taken off as it ends.
 - Granting and activating: `grant_ability`, `activate_ability`,
   `activate_tagged` and `activate`, on `AbilityCommands` and
-  `AbilityWorld`, and `revoke_ability` on `AbilityCommands`. A granted
-  ability is an entity (`GrantedAbility`) of its actor (`AbilityOf`,
-  `Abilities`), and of the effect that granted it, if one did
-  (`GrantedBy`, `GrantedAbilities`); an active one has `ActiveAbility`. Activating checks it's granted, not cooling
+  `AbilityWorld`. A granted ability is an entity (`GrantedAbility`) of its
+  actor (`AbilityOf`, `Abilities`), and of the effect that granted it, if
+  one did (`GrantedBy`, `GrantedAbilities`); an active one has
+  `ActiveAbility`. Revoking one is despawning it: active, it's cancelled
+  and told as it ends. Activating checks it's granted, not cooling
   down, affordable, not blocked and its requirement holds, and returns an
   `Activated`: running here, or asked of the server. `AbilityActivated`,
   `AbilityFailed` (a `Failure`) and `AbilityEnded` are triggered on the
@@ -279,16 +303,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `is_cooldown_started()` and `is_committed()`. Costs and cooldowns carry
   their ability in their context.
 - Ending: `end_ability` and `cancel_ability`; `cancel_abilities(tags)` and
-  `cancel_all_abilities()` on an actor. `cancel_if` cancels an ability as
+  `cancel_all_abilities()` on an actor. `end_if` cancels an ability as
   soon as it holds while active, and keeps it from activating
   (`Failure::Interrupted`). Over a network, the server interrupts.
 - Asking without doing: `can_activate`, `can_afford` and
-  `cooldown_remaining`, on `AbilityWorld` and the `AbilityReader` system
-  param.
-- `ActiveAbility::effect_spec`, Unreal's `MakeOutgoingGameplayEffectSpec`:
-  a spec of an effect (an `IntoEffectId`) as a behaviour applies it, from
-  its actor, struck by it, at its level, under its activation (so a
-  rejected prediction takes it back), its context told the ability.
+  `cooldown_remaining`, on `AbilityWorld`, from a system taking `&World`
+  as from one with the world in hand.
+- `ActiveAbility::effect_spec::<E>()`, Unreal's
+  `MakeOutgoingGameplayEffectSpec`: a spec of an effect as a behaviour
+  applies it, from its actor, struck by it (`Causer`), at its level, under
+  its activation (so a rejected prediction takes it back), its context told
+  the ability (`AbilityRef`).
 - Ability input: what a player chose (an aim, a target), a component of
   yours a behaviour takes (`#[behaviour(input = Aim)]`, `B::Input`,
   `NoInput` if none), given with `activate_ability_with::<B>` or, while
@@ -296,8 +321,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   system registered with `check_input` (`InputCheck`) before it's taken;
   predicted on a client and sent to the server, which checks it again
   (`Failure::Input`).
-- Triggers: a `GameplayEvent` sent to an actor (`send_event`) activates
-  what it triggers, as do tags it comes to own. One sent under a running
+- Triggers: a `GameplayEvent` triggered on an actor (`commands.trigger`,
+  `world.trigger`) activates what it triggers, as do tags it comes to
+  own. One sent under a running
   ability's activation (`GameplayEvent::under`) triggers a predicted
   ability under an activation derived from it, the same on a client and
   its server, undone with its parent while that awaits its answer.
@@ -307,10 +333,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ServerInitiated` is run by the server, which tells the controlling
   client to run its behaviour too; `LocalOnly` runs where it's activated,
   is never sent, and can't have a cost or cooldown.
-- The `net` messages and replica a transport carries: `AbilityRequest`,
-  `AbilityRequestWith`, `AbilityReply`, `AbilityInput`, `AbilityStarted`,
-  `AbilityStartedWith`, `AbilityEnd`, `AbilityCancelRequest` and
-  `AbilityReplica`. Endings go both ways: a server tells a client of the
+- The `net` messages and replica a transport carries: `AbilityRequest`
+  and `AbilityStarted` (each carrying the ability's input, `NoInput` by
+  default), `AbilityReply`, `AbilityInput`, `AbilityEnd`,
+  `AbilityCancelRequest` and `AbilityReplica`. Endings go both ways: a server tells a client of the
   end of an ability run under its activation, and a client asks the
   server to cancel its own; a cancel that overtakes its request is held
   for it. Kept in `AbilitySystems`, in `PreUpdate`, added by
@@ -350,9 +376,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### `bevy_mettle_macros`
 
-- The derives, each re-exported by its part: `Kind` and `Tag` by
+- The derives, each re-exported by its part: `Tag` by
   `bevy_mettle_core`; `Attribute` by `bevy_mettle_attribute`; `Effect`,
-  `Route`, `Execution` and `Calculation` (with what they capture) by
+  `Route`, `Execution` and `Calculation` (the last three with what they
+  capture, an execution with the routes it routes into) by
   `bevy_mettle_effect`; `Ability` and `Behaviour` by
   `bevy_mettle_ability`.
 

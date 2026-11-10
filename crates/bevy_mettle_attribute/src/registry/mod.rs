@@ -7,8 +7,7 @@ mod rules;
 pub(crate) mod state;
 
 use bevy::prelude::*;
-use bevy_mettle_core::Error;
-use bevy_mettle_core::registry::{AnyAttribute, AttributeId, Key, Registry};
+use bevy_mettle_core::registry::{AnyAttribute, AttributeId, Registry};
 
 pub use self::events::AttributeChanged;
 pub use self::rules::{Bound, Limit, OnLimit, Rounding};
@@ -44,7 +43,7 @@ impl AttributeInfo {
     fn of<A: Attribute>(id: AttributeId) -> Self {
         Self {
             id,
-            name: A::NAME,
+            name: A::KEY,
             base: A::BASE,
             min: None,
             max: None,
@@ -81,21 +80,6 @@ impl AttributeInfo {
 pub struct AttributeRegistry(Registry<AnyAttribute, AttributeInfo>);
 
 impl AttributeRegistry {
-    /// The number of the attribute data names `name`, named within `within` if
-    /// it's named in something.
-    ///
-    /// # Errors
-    ///
-    /// If there's no such attribute.
-    pub fn resolve(
-        &self,
-        name: &Key<AnyAttribute>,
-        within: Option<&str>,
-    ) -> Result<AttributeId, Error> {
-        self.id(name.as_str())
-            .ok_or_else(|| Error::unknown::<AnyAttribute>(name.as_str(), within))
-    }
-
     /// Adds `A`: its number, and whether it's new.
     ///
     /// # Panics
@@ -106,7 +90,7 @@ impl AttributeRegistry {
             return (id, false);
         }
         let next = AttributeId::new(u32::try_from(self.len()).expect("fewer than 2^32 attributes"));
-        let id = self.0.add::<A>(A::NAME, AttributeInfo::of::<A>(next));
+        let id = self.0.add::<A>(A::KEY, AttributeInfo::of::<A>(next));
         self.bind();
         (id, true)
     }

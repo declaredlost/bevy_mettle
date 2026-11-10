@@ -7,9 +7,12 @@ use bevy_mettle_core::tag::TagKey;
 
 /// A gameplay event sent to an actor: a tag, and who and how much.
 ///
-/// What abilities with an `Event` trigger activate on, with it; and an entity
-/// event of its own, for the game to observe. Unreal's
-/// `SendGameplayEventToActor`.
+/// Sent by triggering it, `commands.trigger(GameplayEvent::new(actor, tag))`:
+/// the abilities with an `Event` trigger for it activate with it, and the
+/// game observes it as any entity event. Unreal's `SendGameplayEventToActor`.
+///
+/// They activate as the world's commands are next applied: at once from
+/// `Commands`; triggered on a `World`, as it's next flushed (`world.flush()`).
 #[derive(EntityEvent, Debug, Clone, PartialEq)]
 pub struct GameplayEvent {
     /// The actor it's sent to.
@@ -131,11 +134,11 @@ pub enum Failure {
     Cooldown,
     /// Its cost would take an attribute below 0.
     Cost,
-    /// Its owner owns what it's blocked by, or an active ability blocks it.
+    /// Another of its owner's active abilities blocks it.
     Blocked,
     /// Its requirement doesn't hold.
     Requirement,
-    /// What interrupts it holds: its `cancel_if`.
+    /// What interrupts it holds: its `end_if`.
     Interrupted,
     /// Its input wasn't given, or isn't what its behaviour takes, or doesn't
     /// pass its check: at activation, or given while it was active.

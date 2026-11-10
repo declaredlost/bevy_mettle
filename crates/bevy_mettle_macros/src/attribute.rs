@@ -77,7 +77,6 @@ pub(crate) fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     );
     Ok(quote! {
         impl #krate::Attribute for #ident {
-            const NAME: &'static str = #name;
             #base
             #min
             #max

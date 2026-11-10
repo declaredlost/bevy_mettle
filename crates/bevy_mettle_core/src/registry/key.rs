@@ -42,22 +42,24 @@ impl<T: Kind> Key<T> {
 
     /// The key of `N`, a type, as its derive names it: `Key::of::<Burning>()`.
     ///
-    /// Where a builder takes a key, it's typed by its type, and nothing's
-    /// constructed:
+    /// Of `N`'s kind: where a builder takes a key, it's typed by its type,
+    /// and nothing's constructed.
     ///
     /// ```
     /// use bevy_mettle_core::registry::{AnyEffect, Key, Keyed};
     ///
     /// struct Burning;
-    /// impl Keyed<AnyEffect> for Burning {
+    /// impl Keyed for Burning {
+    ///     type Kind = AnyEffect;
+    ///
     ///     const KEY: &'static str = "burning";
     /// }
     ///
-    /// let burning: Key<AnyEffect> = Key::of::<Burning>();
+    /// let burning = Key::of::<Burning>();
     /// assert_eq!(burning.as_str(), "burning");
     /// ```
     #[must_use]
-    pub const fn of<N: Keyed<T>>() -> Self {
+    pub const fn of<N: Keyed<Kind = T>>() -> Self {
         Self::from_static(N::KEY)
     }
 

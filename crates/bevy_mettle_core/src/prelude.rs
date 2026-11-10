@@ -14,7 +14,7 @@ pub use crate::curve::{CurveData, CurveRegistry, Interpolation};
 #[doc(no_inline)]
 pub use crate::net::NetRole;
 #[doc(no_inline)]
-pub use crate::registry::{CurveId, Key, TagId};
+pub use crate::registry::{CurveId, Key, Keyed, TagId};
 #[doc(no_inline)]
 pub use crate::tag::{
     OwnedTags, Root, Tag, TagAdded, TagApp, TagCounts, TagKey, TagRegistry, TagRemoved, Tags, owns,

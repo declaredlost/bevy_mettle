@@ -165,7 +165,7 @@ and [`AbilityFailed`] says [`Failure::Input`].
 
 A client predicts with its own input. As it activates with
 `activate_ability_with`, it runs the cast at once, and asks the server with
-the input, as an [`AbilityRequestWith`]. New input from `set_input` is
+the input, as an [`AbilityRequest`] carrying it (`AbilityRequest<Aim>`). New input from `set_input` is
 predicted and sent as an [`AbilityInput`]. Both go in order, after the
 activation they're for.
 
@@ -199,5 +199,5 @@ it applies.
 [`InputCheck`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/behaviour/struct.InputCheck.html
 [`Failure::Input`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/enum.Failure.html#variant.Input
 [`AbilityFailed`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityFailed.html
-[`AbilityRequestWith`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityRequestWith.html
+[`AbilityRequest`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityRequest.html
 [`AbilityInput`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityInput.html

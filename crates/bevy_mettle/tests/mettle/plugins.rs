@@ -22,9 +22,9 @@ fn registry(app: &App) -> EffectRegistry {
     let world = app.world();
     world
         .resource::<EffectRegistry>()
-        .recheck(
+        .rebuild(
             &[buff()],
-            EffectChecks {
+            EffectScope {
                 tags: &TagRegistry::default(),
                 curves: &CurveRegistry::default(),
                 attributes: world.resource(),

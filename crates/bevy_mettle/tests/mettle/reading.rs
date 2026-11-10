@@ -6,7 +6,7 @@ use bevy_mettle::prelude::*;
 
 use crate::common::{
     AttackSpeed, Charges, Cooldown, Damage, FIRE, Life, MaxLife, MaxResistance, PHYSICAL,
-    Projectiles, Resistance, Strength, actor, app, close, get, id, own, set_base, value,
+    Projectiles, Resistance, Strength, actor, app, close, get, own, set_base, value,
 };
 
 #[test]
@@ -15,11 +15,11 @@ fn an_attribute_is_flat_then_additive_then_multiplicative() {
     let npc = actor(
         &mut app,
         [
-            Modifier::flat(id::<Damage>(), 10.0),
-            Modifier::additive(id::<Damage>(), 0.2),
-            Modifier::additive(id::<Damage>(), 0.3),
-            Modifier::multiplicative(id::<Damage>(), 0.2),
-            Modifier::multiplicative(id::<Damage>(), 0.5),
+            ModifierSpec::flat::<Damage>(10.0),
+            ModifierSpec::additive::<Damage>(0.2),
+            ModifierSpec::additive::<Damage>(0.3),
+            ModifierSpec::multiplicative::<Damage>(0.2),
+            ModifierSpec::multiplicative::<Damage>(0.5),
         ],
     );
     // (10 + 10) × 1.5 × 1.2 × 1.5
@@ -32,10 +32,10 @@ fn divide_sums_then_divides_and_unscaled_comes_after() {
     let npc = actor(
         &mut app,
         [
-            Modifier::divide(id::<Cooldown>(), 0.5),
-            Modifier::divide(id::<Cooldown>(), 0.5),
-            Modifier::additive(id::<Damage>(), 1.0),
-            Modifier::unscaled(id::<Damage>(), 5.0),
+            ModifierSpec::divide::<Cooldown>(0.5),
+            ModifierSpec::divide::<Cooldown>(0.5),
+            ModifierSpec::additive::<Damage>(1.0),
+            ModifierSpec::unscaled::<Damage>(5.0),
         ],
     );
     assert!(close(get::<Cooldown>(&app, npc), 2.0));
@@ -48,10 +48,10 @@ fn a_base_modifier_replaces_the_base_and_an_override_everything() {
     let npc = actor(
         &mut app,
         [
-            Modifier::base(id::<Damage>(), 20.0),
-            Modifier::additive(id::<Damage>(), 0.5),
-            Modifier::overriding(id::<AttackSpeed>(), 3.0),
-            Modifier::additive(id::<AttackSpeed>(), 1.0),
+            ModifierSpec::base::<Damage>(20.0),
+            ModifierSpec::additive::<Damage>(0.5),
+            ModifierSpec::overriding::<AttackSpeed>(3.0),
+            ModifierSpec::additive::<AttackSpeed>(1.0),
         ],
     );
     assert!(close(get::<Damage>(&app, npc), 30.0));
@@ -64,8 +64,8 @@ fn reduced_or_less_past_everything_is_nothing() {
     let npc = actor(
         &mut app,
         [
-            Modifier::additive(id::<Damage>(), -1.5),
-            Modifier::multiplicative(id::<AttackSpeed>(), -2.0),
+            ModifierSpec::additive::<Damage>(-1.5),
+            ModifierSpec::multiplicative::<AttackSpeed>(-2.0),
         ],
     );
     assert!(close(get::<Damage>(&app, npc), 0.0));
@@ -75,7 +75,7 @@ fn reduced_or_less_past_everything_is_nothing() {
 #[test]
 fn a_whole_number_attribute_comes_rounded() {
     let mut app = app();
-    let npc = actor(&mut app, [Modifier::flat(id::<Projectiles>(), 1.9)]);
+    let npc = actor(&mut app, [ModifierSpec::flat::<Projectiles>(1.9)]);
     assert!(close(get::<Projectiles>(&app, npc), 2.0));
 }
 
@@ -85,8 +85,8 @@ fn a_limit_counts_what_counts_for_the_read() {
     let npc = actor(
         &mut app,
         [
-            Modifier::flat(id::<Resistance>(), 0.9),
-            Modifier::flat(id::<MaxResistance>(), 0.05).read_tagged(FIRE),
+            ModifierSpec::flat::<Resistance>(0.9),
+            ModifierSpec::flat::<MaxResistance>(0.05).read_tagged(FIRE),
         ],
     );
     let fire = AttributeContext::new().tag(FIRE);
@@ -100,7 +100,7 @@ fn a_modifier_read_tagged_a_branch_counts_for_reads_tagged_under_it() {
     let mut app = app();
     let npc = actor(
         &mut app,
-        [Modifier::flat(id::<Resistance>(), 0.2).read_tagged("damage.elemental")],
+        [ModifierSpec::flat::<Resistance>(0.2).read_tagged("damage.elemental")],
     );
     let fire = AttributeContext::new().tag(FIRE);
     let physical = AttributeContext::new().tag(PHYSICAL);
@@ -114,8 +114,8 @@ fn a_limit_reads_the_other_attribute_for_the_same_read() {
     let npc = actor(
         &mut app,
         [
-            Modifier::flat(id::<Resistance>(), 0.9),
-            Modifier::flat(id::<MaxResistance>(), 0.1).read_tagged("delivery.spell"),
+            ModifierSpec::flat::<Resistance>(0.9),
+            ModifierSpec::flat::<MaxResistance>(0.1).read_tagged("delivery.spell"),
         ],
     );
     assert!(close(get::<Resistance>(&app, npc), 0.75));
@@ -126,7 +126,7 @@ fn a_limit_reads_the_other_attribute_for_the_same_read() {
 #[test]
 fn a_base_is_kept_within_limits_on_reads() {
     let mut app = app();
-    let npc = actor(&mut app, [Modifier::flat(id::<MaxLife>(), 10.0)]);
+    let npc = actor(&mut app, [ModifierSpec::flat::<MaxLife>(10.0)]);
     set_base::<Life>(&mut app, npc, 35.0);
     app.tick();
     assert!(close(get::<Life>(&app, npc), 35.0), "damage taken");
@@ -144,8 +144,8 @@ fn a_per_modifier_counts_once_for_each_whole_so_much() {
     let npc = actor(
         &mut app,
         [
-            Modifier::flat(id::<MaxLife>(), 2.0).per(id::<Strength>(), 10.0),
-            Modifier::flat(id::<Strength>(), 15.0),
+            ModifierSpec::flat::<MaxLife>(2.0).per::<Strength>(10.0),
+            ModifierSpec::flat::<Strength>(15.0),
         ],
     );
     assert!(close(get::<MaxLife>(&app, npc), 54.0));
@@ -154,7 +154,7 @@ fn a_per_modifier_counts_once_for_each_whole_so_much() {
 #[test]
 fn a_whole_number_attribute_is_rounded_then_kept_within_its_limits() {
     let mut app = app();
-    let npc = actor(&mut app, [Modifier::flat(id::<Charges>(), 1.8)]);
+    let npc = actor(&mut app, [ModifierSpec::flat::<Charges>(1.8)]);
     assert!(
         close(get::<Charges>(&app, npc), 2.5),
         "2.8, up to 3, kept to 2.5"
@@ -167,8 +167,8 @@ fn of_bases_and_overrides_the_last_counts_whether_or_not_it_always_does() {
     let npc = actor(
         &mut app,
         [
-            Modifier::overriding(id::<Damage>(), 1.0).owner_has("state.low_life"),
-            Modifier::overriding(id::<Damage>(), 2.0),
+            ModifierSpec::overriding::<Damage>(1.0).owner_has("state.low_life"),
+            ModifierSpec::overriding::<Damage>(2.0),
         ],
     );
     own(&mut app, npc, "state.low_life", true);
@@ -177,8 +177,8 @@ fn of_bases_and_overrides_the_last_counts_whether_or_not_it_always_does() {
     let other = actor(
         &mut app,
         [
-            Modifier::overriding(id::<Damage>(), 2.0),
-            Modifier::overriding(id::<Damage>(), 1.0).owner_has("state.low_life"),
+            ModifierSpec::overriding::<Damage>(2.0),
+            ModifierSpec::overriding::<Damage>(1.0).owner_has("state.low_life"),
         ],
     );
     own(&mut app, other, "state.low_life", true);
@@ -195,8 +195,8 @@ fn a_loop_only_modifiers_make_stops_where_it_would_loop() {
     let npc = actor(
         &mut app,
         [
-            Modifier::flat(id::<Strength>(), 1.0).per(id::<MaxLife>(), 10.0),
-            Modifier::flat(id::<MaxLife>(), 1.0).per(id::<Strength>(), 10.0),
+            ModifierSpec::flat::<Strength>(1.0).per::<MaxLife>(10.0),
+            ModifierSpec::flat::<MaxLife>(1.0).per::<Strength>(10.0),
         ],
     );
     assert!(close(get::<MaxLife>(&app, npc), 51.0));
@@ -207,10 +207,10 @@ fn a_loop_only_modifiers_make_stops_where_it_would_loop() {
 fn a_local_modifier_counts_only_for_reads_naming_its_source() {
     let mut app = app();
     let npc = actor(&mut app, []);
-    let sword = app.spawn((
-        ModifierOf(npc),
-        Modifiers(vec![Modifier::flat(id::<Damage>(), 7.0).local()]),
-    ));
+    let sword = app.spawn(ModifierOf(npc));
+    app.world_mut()
+        .entity_mut(sword)
+        .modifiers([ModifierSpec::flat::<Damage>(7.0).local()]);
     app.tick();
     assert!(close(get::<Damage>(&app, npc), 10.0));
     assert!(close(
@@ -225,10 +225,10 @@ fn a_breakdown_reports_the_sums_apart() {
     let npc = actor(
         &mut app,
         [
-            Modifier::flat(id::<Damage>(), 5.0),
-            Modifier::additive(id::<Damage>(), 0.5),
-            Modifier::multiplicative(id::<Damage>(), 1.0),
-            Modifier::unscaled(id::<Damage>(), 1.0),
+            ModifierSpec::flat::<Damage>(5.0),
+            ModifierSpec::additive::<Damage>(0.5),
+            ModifierSpec::multiplicative::<Damage>(1.0),
+            ModifierSpec::unscaled::<Damage>(1.0),
         ],
     );
     let breakdown = app.run_system(move |attributes: AttributeReader| {
@@ -250,8 +250,8 @@ fn current_values_are_plain_components() {
     let npc = actor(
         &mut app,
         [
-            Modifier::flat(id::<Projectiles>(), 2.4),
-            Modifier::flat(id::<Resistance>(), 0.3),
+            ModifierSpec::flat::<Projectiles>(2.4),
+            ModifierSpec::flat::<Resistance>(0.3),
         ],
     );
     let (count, resistance) = app.run_system(
@@ -286,7 +286,7 @@ fn a_per_modifier_counts_a_fractional_every_whole() {
     let mut app = app();
     let npc = actor(
         &mut app,
-        [Modifier::flat(id::<Damage>(), 1.0).per(id::<Resistance>(), 0.1)],
+        [ModifierSpec::flat::<Damage>(1.0).per::<Resistance>(0.1)],
     );
     set_base::<Resistance>(&mut app, npc, 0.3);
     app.tick();
@@ -301,7 +301,7 @@ fn a_multiplicative_per_modifier_multiplies_once_each_time() {
     let mut app = app();
     let npc = actor(
         &mut app,
-        [Modifier::multiplicative(id::<Damage>(), 0.1).per(id::<Strength>(), 5.0)],
+        [ModifierSpec::multiplicative::<Damage>(0.1).per::<Strength>(5.0)],
     );
     // 10 × 1.1 × 1.1
     assert!(close(get::<Damage>(&app, npc), 12.1));
@@ -310,7 +310,7 @@ fn a_multiplicative_per_modifier_multiplies_once_each_time() {
 #[test]
 fn a_divide_of_minus_all_or_less_divides_by_a_hundredth() {
     let mut app = app();
-    let npc = actor(&mut app, [Modifier::divide(id::<Cooldown>(), -1.5)]);
+    let npc = actor(&mut app, [ModifierSpec::divide::<Cooldown>(-1.5)]);
     assert!(close(get::<Cooldown>(&app, npc), 400.0));
 }
 
@@ -320,7 +320,7 @@ fn a_change_to_a_base_is_kept_within_a_limit_changed_since_kept() {
     let npc = actor(&mut app, []);
     set_base::<MaxLife>(&mut app, npc, 200.0);
     app.world_mut()
-        .apply_to_base(npc, id::<Life>(), Operation::Flat, 100.0);
+        .apply_to_base::<Life>(npc, Operation::Flat, 100.0);
     assert!(close(app.entity(npc).get::<Base<Life>>().get(), 150.0));
 }
 
@@ -330,8 +330,8 @@ fn a_per_loop_reads_the_same_whichever_end_is_read_first() {
     let npc = actor(
         &mut app,
         [
-            Modifier::flat(id::<Strength>(), 1.0).per(id::<Damage>(), 5.0),
-            Modifier::flat(id::<Damage>(), 1.0).per(id::<Strength>(), 5.0),
+            ModifierSpec::flat::<Strength>(1.0).per::<Damage>(5.0),
+            ModifierSpec::flat::<Damage>(1.0).per::<Strength>(5.0),
         ],
     );
     // Read afresh, each from its own end, against what refreshing all found.
@@ -353,8 +353,7 @@ fn taking_a_base_off_takes_the_attribute_away() {
     app.entity_mut(npc).remove::<Base<Damage>>();
     app.tick();
     assert_eq!(
-        app.world()
-            .value_at(npc, id::<Damage>(), &AttributeContext::new()),
+        app.world().value::<Damage>(npc, &AttributeContext::new()),
         None
     );
     app.entity(npc).assert_lacks::<Current<Damage>>();
@@ -379,7 +378,7 @@ fn an_actors_attributes_reflect() {
     use bevy::reflect::TypePath;
 
     let mut app = app();
-    let npc = actor(&mut app, [Modifier::flat(id::<Damage>(), 5.0)]);
+    let npc = actor(&mut app, [ModifierSpec::flat::<Damage>(5.0)]);
     let registry = app.resource::<AppTypeRegistry>().clone();
     let registry = registry.read();
     let base = registry

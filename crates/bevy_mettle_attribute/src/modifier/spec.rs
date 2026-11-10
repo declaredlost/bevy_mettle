@@ -2,33 +2,16 @@
 //! entity: what code writes, as Bevy resolves a component's type as it's
 //! inserted.
 
-use std::any::TypeId;
-
 use bevy::ecs::system::EntityCommands;
 use bevy::prelude::*;
 use bevy_mettle_core::Error;
 use bevy_mettle_core::condition::Condition;
+use bevy_mettle_core::registry::{AnyAttribute, Ref};
 use bevy_mettle_core::tag::TagKey;
 
 use super::{Modifier, Modifiers, Operation, Per};
 use crate::Attribute;
 use crate::registry::AttributeRegistry;
-
-/// An attribute named by type, to be resolved to its number.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Named {
-    type_id: TypeId,
-    name: &'static str,
-}
-
-impl Named {
-    fn of<A: Attribute>() -> Self {
-        Self {
-            type_id: TypeId::of::<A>(),
-            name: A::NAME,
-        }
-    }
-}
 
 /// A modifier as code writes it: its attributes named by type.
 ///
@@ -53,11 +36,11 @@ impl Named {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModifierSpec {
-    attribute: Named,
+    attribute: Ref<AnyAttribute>,
     op: Operation,
     value: f32,
     condition: Option<Condition>,
-    per: Option<(Named, f32)>,
+    per: Option<(Ref<AnyAttribute>, f32)>,
     local: bool,
 }
 
@@ -66,7 +49,7 @@ impl ModifierSpec {
     #[must_use]
     pub fn new<A: Attribute>(op: Operation, value: f32) -> Self {
         Self {
-            attribute: Named::of::<A>(),
+            attribute: Ref::of::<A>(),
             op,
             value,
             condition: None,
@@ -145,7 +128,7 @@ impl ModifierSpec {
     /// Counting once for each whole `every` of `A` (more than 0).
     #[must_use]
     pub fn per<A: Attribute>(mut self, every: f32) -> Self {
-        self.per = Some((Named::of::<A>(), every));
+        self.per = Some((Ref::of::<A>(), every));
         self
     }
 
@@ -163,10 +146,10 @@ impl ModifierSpec {
     ///
     /// If an attribute it names isn't added.
     pub fn resolve(&self, attributes: &AttributeRegistry) -> Result<Modifier, Error> {
-        let id = |named: Named| {
-            attributes.id_of_type(named.type_id).ok_or_else(|| {
+        let id = |named: Ref<AnyAttribute>| {
+            attributes.find(named).ok_or_else(|| {
                 Error::invalid(
-                    format!("a modifier of `{}`, which isn't added", named.name),
+                    format!("a modifier of `{}`, which isn't added", named.label()),
                     None,
                 )
             })

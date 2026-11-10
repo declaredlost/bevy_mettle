@@ -25,6 +25,6 @@ pub mod __core {
 
 pub use self::commands::{EffectCommands, EffectWorld};
 pub use self::plugin::EffectPlugin;
-pub use self::registry::{EffectChecks, EffectRegistry};
+pub use self::registry::{EffectRegistry, EffectScope};
 pub use self::snapshot::Snapshots;
-pub use self::spec::{Effect, EffectSpec, IntoEffectId, Snapshot};
+pub use self::spec::{Effect, EffectSpec, Snapshot};

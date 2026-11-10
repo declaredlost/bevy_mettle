@@ -70,6 +70,7 @@ bevy_replicon = { version = "0.45", default-features = false, features = [] }
 # Testing
 bevy_harness = { git = "https://github.com/declaredlost/bevy_harness", version = "0.1.0" }
 criterion = { version = "0.8", default-features = false, features = [] }
+trybuild = { version = "1.0", features = [] }
 
 # (De)serialization
 serde = { version = "1.0", features = [] }

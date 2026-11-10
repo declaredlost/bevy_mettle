@@ -49,7 +49,7 @@ pub(crate) fn show_replicas(
         };
         commands
             .entity(entity)
-            .insert(GrantedAbility::new(def, replica.level, None));
+            .insert(GrantedAbility::new(def, replica.level));
     }
     for (replica, mut granted) in &mut changed {
         if granted.def.id != replica.id {

@@ -43,6 +43,9 @@ mod tests {
             struct BurnTime;
         };
         let expanded = expand(&input).unwrap().to_string();
-        assert!(expanded.contains("NAME"), "{expanded}");
+        assert!(
+            expanded.contains("const KEY : & 'static str = \"burn_time\""),
+            "{expanded}"
+        );
     }
 }

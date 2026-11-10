@@ -3,10 +3,11 @@
 use std::any::{Any, TypeId};
 use std::sync::Arc;
 
+use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::ecs::system::IntoSystem;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
-use bevy_mettle_core::registry::{Id, Kind, Registry};
+use bevy_mettle_core::registry::{Id, Keyed, Kind, Registry};
 pub use bevy_mettle_macros::Behaviour;
 
 /// A behaviour: the component in code that runs an ability.
@@ -31,19 +32,33 @@ pub use bevy_mettle_macros::Behaviour;
     label = "not a behaviour",
     note = "derive it: `#[derive(Component, Default, Behaviour)]`"
 )]
-pub trait Behaviour: Component + Default {
-    /// The name data names it by, and what's shown for it: `"cast_fireball"`.
-    /// Its number is the app's: [`BehaviourRegistry`].
-    const NAME: &'static str;
-
+pub trait Behaviour: Keyed<Kind = AnyBehaviour> + Component + Default {
     /// The input its abilities are activated with, put on the ability next to
     /// it: what the client chose (an aim, a target). [`NoInput`] if none.
     type Input: Component + Clone;
 }
 
 /// The [`Behaviour::Input`] of a behaviour that takes none: nothing to send.
-#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
+///
+/// What its requests and starts carry (`AbilityRequest<NoInput>`, the
+/// default), written as nothing.
+#[derive(
+    Component,
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize
+)]
 pub struct NoInput;
+
+impl MapEntities for NoInput {
+    fn map_entities<M: EntityMapper>(&mut self, _: &mut M) {}
+}
 
 /// The behaviour kind: what data names, and a [`BehaviourId`] numbers.
 ///
@@ -110,7 +125,7 @@ impl BehaviourRegistry {
 
     /// Adds `B`, made by `fns`, or replaces what's there: its number.
     fn add<B: Behaviour>(&mut self, fns: BehaviourFns) -> BehaviourId {
-        self.0.add::<B>(B::NAME, fns)
+        self.0.add::<B>(B::KEY, fns)
     }
 }
 

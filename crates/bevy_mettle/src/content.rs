@@ -5,7 +5,7 @@ use bevy_mettle_ability::behaviour::BehaviourRegistry;
 #[cfg(feature = "ability")]
 use bevy_mettle_ability::data::{AbilityData, Grant};
 #[cfg(feature = "ability")]
-use bevy_mettle_ability::{AbilityChecks, AbilityRegistry};
+use bevy_mettle_ability::{AbilityRegistry, AbilityScope};
 #[cfg(feature = "effect")]
 use bevy_mettle_attribute::registry::AttributeRegistry;
 use bevy_mettle_core::curve::{CurveData, CurveRegistry};
@@ -16,7 +16,7 @@ use bevy_mettle_effect::code::{CalculationRegistry, ExecutionRegistry, RouteRegi
 #[cfg(feature = "effect")]
 use bevy_mettle_effect::data::EffectData;
 #[cfg(feature = "effect")]
-use bevy_mettle_effect::{EffectChecks, EffectRegistry};
+use bevy_mettle_effect::{EffectRegistry, EffectScope};
 use serde::{Deserialize, Serialize};
 
 /// The game's content, all of it: tags, curves, effects and abilities.
@@ -40,7 +40,7 @@ use serde::{Deserialize, Serialize};
 ///     ],
 ///     effects: vec![
 ///         EffectData::lasting("fireball.cooldown", 2.0)
-///             .grant("cooldown.fireball"),
+///             .owner_tag("cooldown.fireball"),
 ///     ],
 ///     ..Default::default()
 /// };
@@ -105,9 +105,9 @@ impl MettleContent {
         #[cfg(feature = "effect")]
         let effects = match (&tags, &curves) {
             (Some(tags), Some(curves)) => held(
-                resource::<EffectRegistry>(world).recheck(
+                resource::<EffectRegistry>(world).rebuild(
                     &self.effects,
-                    EffectChecks {
+                    EffectScope {
                         tags,
                         curves,
                         attributes: &resource::<AttributeRegistry>(world),
@@ -123,10 +123,10 @@ impl MettleContent {
         #[cfg(feature = "ability")]
         let abilities = match (&tags, &effects) {
             (Some(tags), Some(effects)) => held(
-                resource::<AbilityRegistry>(world).recheck(
+                resource::<AbilityRegistry>(world).rebuild(
                     &self.abilities,
                     &self.grants,
-                    AbilityChecks {
+                    AbilityScope {
                         tags,
                         effects,
                         behaviours: &resource::<BehaviourRegistry>(world),

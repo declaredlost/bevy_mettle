@@ -59,11 +59,11 @@ impl ExecutionFn for ShotDamage {
             Self::Reads(read) => {
                 *read.lock().unwrap() = Some((
                     cx.source(),
-                    cx.context().causer,
-                    cx.context().object,
-                    cx.context().ability,
-                    cx.context().hit,
-                    cx.context().origin,
+                    cx.get::<Causer>().copied(),
+                    cx.get::<SourceObject>().copied(),
+                    cx.get::<AbilityRef>().copied(),
+                    cx.get::<Hit>().copied(),
+                    cx.get::<Origin>().copied(),
                     cx.get::<Shot>().cloned(),
                     cx.get::<Tracer>().cloned(),
                 ));
@@ -77,11 +77,11 @@ impl ExecutionFn for ShotDamage {
 /// hit, origin, shot and tracer.
 type Parts = (
     Option<Entity>,
-    Option<Entity>,
-    Option<Entity>,
+    Option<Causer>,
+    Option<SourceObject>,
     Option<AbilityRef>,
     Option<Hit>,
-    Option<Vec3>,
+    Option<Origin>,
     Option<Shot>,
     Option<Tracer>,
 );
@@ -105,8 +105,8 @@ struct Falloff;
 
 impl CalculationFn for Falloff {
     fn calculate(&self, cx: &ExecutionContext) -> f32 {
-        match (cx.context().hit, cx.context().origin) {
-            (Some(hit), Some(origin)) => -hit.point.distance(origin),
+        match (cx.get::<Hit>(), cx.get::<Origin>()) {
+            (Some(hit), Some(origin)) => -hit.point.distance(origin.0),
             _ => 0.0,
         }
     }
@@ -178,9 +178,9 @@ fn app(seen: &Seen, code: impl FnOnce(&mut App)) -> TestApp {
             let world = app.world();
             let registry = world
                 .resource::<EffectRegistry>()
-                .recheck(
+                .rebuild(
                     &effects(),
-                    EffectChecks {
+                    EffectScope {
                         tags: world.resource(),
                         curves: world.resource(),
                         attributes: world.resource(),
@@ -215,11 +215,11 @@ fn everything(
     effect
         .into()
         .source(source)
-        .causer(causer)
-        .object(object)
-        .ability(ability())
-        .hit(hit())
-        .origin(Vec3::new(0.0, 0.0, 4.0))
+        .with(Causer(causer))
+        .with(SourceObject(object))
+        .with(ability())
+        .with(hit())
+        .with(Origin(Vec3::new(0.0, 0.0, 4.0)))
         .with(Shot { headshot: true })
         .with(Tracer { marked })
 }
@@ -255,13 +255,16 @@ fn an_execution_reads_the_context_it_was_applied_with() {
         panic!("two strikes seen: {seen:?}");
     };
     assert_eq!(body.get::<Shot>(), Some(&Shot { headshot: false }));
-    assert_eq!(body.causer, None);
+    assert_eq!(body.get::<Causer>(), None);
     assert_eq!(head.source, Some(archer));
-    assert_eq!(head.causer, Some(arrow));
-    assert_eq!(head.object, Some(bow));
-    assert_eq!(head.ability, Some(ability()));
-    assert_eq!(head.hit, Some(hit()));
-    assert_eq!(head.origin, Some(Vec3::new(0.0, 0.0, 4.0)));
+    assert_eq!(head.get::<Causer>(), Some(&Causer(arrow)));
+    assert_eq!(head.get::<SourceObject>(), Some(&SourceObject(bow)));
+    assert_eq!(head.get::<AbilityRef>(), Some(&ability()));
+    assert_eq!(head.get::<Hit>(), Some(&hit()));
+    assert_eq!(
+        head.get::<Origin>(),
+        Some(&Origin(Vec3::new(0.0, 0.0, 4.0)))
+    );
     assert_eq!(head.get::<Tracer>(), Some(&Tracer { marked: npc }));
 }
 
@@ -281,11 +284,11 @@ fn an_execution_reads_each_part_of_the_context() {
         read.lock().unwrap().take(),
         Some((
             Some(archer),
-            Some(arrow),
-            Some(bow),
+            Some(Causer(arrow)),
+            Some(SourceObject(bow)),
             Some(ability()),
             Some(hit()),
-            Some(Vec3::new(0.0, 0.0, 4.0)),
+            Some(Origin(Vec3::new(0.0, 0.0, 4.0))),
             Some(Shot { headshot: true }),
             Some(Tracer { marked: npc }),
         ))
@@ -300,7 +303,10 @@ fn a_calculation_reads_the_hit_and_the_origin() {
     apply(
         &mut app,
         npc,
-        Graze.spec().hit(hit()).origin(Vec3::new(0.0, 0.0, 4.0)),
+        Graze
+            .spec()
+            .with(hit())
+            .with(Origin(Vec3::new(0.0, 0.0, 4.0))),
     );
     assert!(
         close(get::<Life>(&app, npc), 45.0),
@@ -323,7 +329,7 @@ fn an_effect_chained_carries_the_context_of_what_chained_it() {
     apply(&mut app, npc, first.clone());
     assert_eq!(seen.take(), [("echo", first.context.clone())], "on apply");
     // Applied again at the limit: its overflow carries the new one's.
-    let second = Fuse.spec().causer(bow).with(Shot { headshot: false });
+    let second = Fuse.spec().with(Causer(bow)).with(Shot { headshot: false });
     apply(&mut app, npc, second.clone());
     assert_eq!(seen.take(), [("echo", second.context)], "overflowed");
     app.secs(0.5);
@@ -349,8 +355,8 @@ fn events_and_cues_are_told_the_context() {
         panic!("the strike, once: {executed:?}");
     };
     assert_eq!(executed.context, spec.context);
-    assert_eq!(executed.context.causer, Some(arrow));
-    assert_eq!(executed.context.hit, Some(hit()));
+    assert_eq!(executed.context.get::<Causer>(), Some(&Causer(arrow)));
+    assert_eq!(executed.context.get::<Hit>(), Some(&hit()));
     assert_eq!(
         executed.context.get::<Shot>(),
         Some(&Shot { headshot: true })
@@ -361,10 +367,8 @@ fn events_and_cues_are_told_the_context() {
     };
     assert_eq!(played.tag.name(), "cue.hit");
     assert_eq!(played.context, spec.context);
-    assert_eq!(played.context.causer, Some(arrow));
-    assert_eq!(played.context.hit, Some(hit()));
-    assert_eq!(played.location(), Some(hit().point), "where it hit");
-    assert_eq!(played.normal(), Some(hit().normal), "which way it faces");
+    assert_eq!(played.context.get::<Causer>(), Some(&Causer(arrow)));
+    assert_eq!(played.context.get::<Hit>(), Some(&hit()), "where it hit");
     assert_eq!(
         played.context.get::<Tracer>(),
         Some(&Tracer { marked: npc })

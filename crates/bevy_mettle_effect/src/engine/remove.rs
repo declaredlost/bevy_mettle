@@ -125,8 +125,8 @@ pub(super) fn mark_removing(world: &mut World, effect: Entity) {
     }
 }
 
-/// `effect`, taken off `target` by the game rather than through
-/// `remove_effect`: told and chained as removed, if `target`'s still there.
+/// `effect`, taken off `target` by the game (despawned) rather than by
+/// mettle: told and chained as removed, if `target`'s still there.
 pub(crate) fn removed_unasked(
     world: &mut World,
     target: Entity,

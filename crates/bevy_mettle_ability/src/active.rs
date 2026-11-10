@@ -7,29 +7,29 @@ use bevy::ecs::world::DeferredWorld;
 use bevy::prelude::*;
 use bevy_mettle_core::Activation;
 use bevy_mettle_core::registry::AbilityId;
-use bevy_mettle_core::tag::{OwnedTags, Tags};
-use bevy_mettle_effect::context::AbilityRef;
-use bevy_mettle_effect::{EffectSpec, IntoEffectId};
+use bevy_mettle_core::tag::Tags;
+use bevy_mettle_effect::context::{AbilityRef, Causer};
+use bevy_mettle_effect::{Effect, EffectSpec};
 
 use crate::behaviour::BehaviourId;
 use crate::data::AbilityDef;
+use crate::engine::{self, Ended};
 use crate::events::GameplayEvent;
 
 /// An ability granted to an actor: an entity of its own, [`AbilityOf`] it.
 ///
 /// Unreal's `GameplayAbilitySpec`. While it's active, it carries
 /// [`ActiveAbility`] and its behaviour's component. One an effect granted is
-/// [`GrantedBy`] it, and taken away with it however it goes. Despawned while
-/// it's active, it takes back the tags it granted its owner.
+/// [`GrantedBy`] it, and taken away with it however it goes. Taking it away
+/// is despawning it: active, it's cancelled, as `cancel_ability` ends it,
+/// once commands are applied, if its actor's still there.
 #[derive(Component, Debug)]
 #[component(on_discard = take_back)]
 pub struct GrantedAbility {
     pub(crate) def: Arc<AbilityDef>,
     pub(crate) level: f32,
-    /// The effect that granted it, if one did: as its [`GrantedBy`] says.
-    pub(crate) source: Option<Entity>,
-    /// The tags it granted its owner as it activated, to take back.
-    pub(crate) granted: Tags,
+    /// The tags it gave its owner as it activated, to take back.
+    pub(crate) owner_tags: Tags,
     /// The cues it held on its owner as it activated, to let go of.
     pub(crate) cues: Tags,
     /// The behaviour whose component it activated with, to take off: its
@@ -42,12 +42,11 @@ pub struct GrantedAbility {
 }
 
 impl GrantedAbility {
-    pub(crate) fn new(def: Arc<AbilityDef>, level: f32, source: Option<Entity>) -> Self {
+    pub(crate) fn new(def: Arc<AbilityDef>, level: f32) -> Self {
         Self {
             def,
             level,
-            source,
-            granted: Tags::new(),
+            owner_tags: Tags::new(),
             cues: Tags::new(),
             running: None,
             cost_paid: false,
@@ -73,12 +72,6 @@ impl GrantedAbility {
         self.level
     }
 
-    /// The effect that granted it, if one did.
-    #[must_use]
-    pub fn source(&self) -> Option<Entity> {
-        self.source
-    }
-
     /// Whether this activation's cost is paid: once it's committed it, or
     /// its cost alone. One without a cost has nothing to pay.
     #[must_use]
@@ -101,22 +94,31 @@ impl GrantedAbility {
     }
 }
 
-/// Takes back the tags `GrantedAbility` granted its owner as it activated, as
-/// it's taken off its entity however: despawned, or replicated away.
+/// Ends the ability, cancelled, if it's active, as `GrantedAbility` is taken
+/// off its entity however: despawned, or replicated away. What it held is
+/// given back, and its ending told, once commands are applied.
 fn take_back(mut world: DeferredWorld, context: HookContext) {
-    let Some(granted) = world.get::<GrantedAbility>(context.entity) else {
+    let ability = context.entity;
+    let (Some(granted), Some(active), Some(of)) = (
+        world.get::<GrantedAbility>(ability),
+        world.get::<ActiveAbility>(ability),
+        world.get::<AbilityOf>(ability),
+    ) else {
         return;
     };
-    if granted.granted.is_empty() {
-        return;
-    }
-    let granted = granted.granted.clone();
-    let Some(actor) = world.get::<AbilityOf>(context.entity).map(|of| of.0) else {
-        return;
+    let ended = Ended {
+        actor: of.0,
+        ability,
+        id: granted.def.id,
+        net: granted.def.net,
+        activation: active.activation,
+        owner_tags: granted.owner_tags.clone(),
+        cues: granted.cues.clone(),
+        running: granted.running,
     };
-    if let Some(mut owned) = world.get_mut::<OwnedTags>(actor) {
-        owned.remove_all(&granted);
-    }
+    world
+        .commands()
+        .queue(move |world: &mut World| engine::ended_unasked(world, ended));
 }
 
 /// On a granted ability: the effect that granted it, as a Bevy relationship.
@@ -159,7 +161,7 @@ pub struct ActiveAbility {
 }
 
 impl ActiveAbility {
-    /// A spec of `effect`, as this activation applies it: from its actor,
+    /// A spec of `E`, as this activation applies it: from its actor,
     /// struck by it, under this activation, at its level, its context told
     /// this ability.
     ///
@@ -170,9 +172,9 @@ impl ActiveAbility {
     /// An effect applied on another's behalf (a summon's, a reflected
     /// projectile's) is theirs: make its spec yourself.
     #[must_use]
-    pub fn effect_spec(&self, effect: impl IntoEffectId) -> EffectSpec {
+    pub fn effect_spec<E: Effect>(&self) -> EffectSpec {
         outgoing(
-            effect.into_spec(),
+            EffectSpec::of::<E>(),
             self.actor,
             self.ability,
             self.level,
@@ -193,8 +195,8 @@ pub(crate) fn outgoing(
     let spec = spec
         .level(level)
         .source(actor)
-        .causer(actor)
-        .ability(AbilityRef { id: ability, level });
+        .with(Causer(actor))
+        .with(AbilityRef { id: ability, level });
     match activation {
         Some(activation) => spec.activation(activation),
         None => spec,

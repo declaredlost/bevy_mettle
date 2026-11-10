@@ -119,7 +119,7 @@ pub(crate) fn show(
             period: None,
             until_period: 0.0,
             inhibited: true,
-            granted: Tags::new(),
+            owner_tags: Tags::new(),
             cues: Tags::new(),
             source_tags: replica.source_tags(tags),
             predicted: 0,
