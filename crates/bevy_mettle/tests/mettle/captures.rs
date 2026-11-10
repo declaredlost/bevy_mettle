@@ -7,7 +7,6 @@ use std::sync::{Arc, Mutex};
 use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
 use bevy_harness::TestApp;
-use bevy_mettle::core::registry::Name;
 use bevy_mettle::effect::data::MagnitudeDef;
 use bevy_mettle::prelude::*;
 
@@ -37,13 +36,13 @@ const BURNING: &str = "state.burning";
 fn curves() -> CurveRegistry {
     CurveRegistry::build(&[
         CurveData {
-            name: Name::from_static("growth"),
+            name: Key::from_static("growth"),
             interpolation: Interpolation::Linear,
             keys: vec![(1.0, 1.0), (11.0, 11.0)],
         },
         // Diminishing returns: 1 for 1 up to 10, then 1 for 2.
         CurveData {
-            name: Name::from_static("softcap"),
+            name: Key::from_static("softcap"),
             interpolation: Interpolation::Linear,
             keys: vec![(0.0, 0.0), (10.0, 10.0), (30.0, 20.0)],
         },
@@ -708,11 +707,11 @@ fn a_calculation_reads_what_it_declares_it_captures() {
     let reads = Reads::default();
     let might = adding::<Damage>(
         EffectData::infinite("might"),
-        Magnitude::Custom(Name::from_static("kept")),
+        Magnitude::Custom(Key::from_static("kept")),
     );
     let aura = adding::<Mana>(
         EffectData::infinite("aura"),
-        Magnitude::Custom(Name::from_static("following")),
+        Magnitude::Custom(Key::from_static("following")),
     );
     let mut app = app(&[might, aura], |app| {
         app.add_effect::<Might>()

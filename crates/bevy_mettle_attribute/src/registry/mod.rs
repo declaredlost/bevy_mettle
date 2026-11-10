@@ -8,7 +8,7 @@ pub(crate) mod state;
 
 use bevy::prelude::*;
 use bevy_mettle_core::Error;
-use bevy_mettle_core::registry::{AnyAttribute, AttributeId, Name, Registry};
+use bevy_mettle_core::registry::{AnyAttribute, AttributeId, Key, Registry};
 
 pub use self::events::AttributeChanged;
 pub use self::rules::{Bound, Limit, OnLimit, Rounding};
@@ -89,7 +89,7 @@ impl AttributeRegistry {
     /// If there's no such attribute.
     pub fn resolve(
         &self,
-        name: &Name<AnyAttribute>,
+        name: &Key<AnyAttribute>,
         within: Option<&str>,
     ) -> Result<AttributeId, Error> {
         self.id(name.as_str())

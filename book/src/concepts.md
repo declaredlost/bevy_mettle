@@ -11,7 +11,7 @@ Mettle splits a game's gameplay in two:
   `Life` and `Mana`, so a system asks for `Current<Life>`. What an ability
   does is a component of yours, run by your systems.
 - **Data** is content: gameplay tags, curves, effects and abilities. Each
-  is named by a [`Name`], such as `"burning"` or `"fireball"`, so a designer
+  is named by a [`Key`], such as `"burning"` or `"fireball"`, so a designer
   or a mod can add one without code.
 
 Code names things by type, never by string. A tag code uses is a
@@ -152,7 +152,7 @@ blocked by one. [Gameplay tags](tags.md) covers them.
 - **A change made after mettle ran.** A base changed after `MettleSystems`
   reaches `Current` the next time it runs.
 
-[`Name`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/struct.Name.html
+[`Key`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/struct.Key.html
 [`MettleContent`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleContent.html
 [`TagRegistry`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagRegistry.html
 [`CurveRegistry`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveRegistry.html

@@ -18,9 +18,9 @@ curves, the condition language, and the registries everything is numbered in.
 
 ## Overview
 
-- A [`Name<K>`] names what content defines: a tag, a curve, an effect, of a
-  [`Kind`] such as `AnyEffect`. Checked, it's known by its number, a
-  [`Key<K>`], in a [`Registry`]: entries by number, numbers by name and by
+- A [`Key<K>`] names what content defines: a tag, a curve, an effect, of a
+  [`Kind`] such as `AnyEffect`. Checked, it's known by its number, an
+  [`Id<K>`], in a [`Registry`]: entries by number, numbers by name and by
   type, as Bevy keeps components.
 - A [`TagRegistry`] is the gameplay tags there are, from [`Tag`]s in data, each a
   path such as `damage.elemental.fire`. What has a tag has every tag above
@@ -56,7 +56,6 @@ bevy_mettle_core = "0.1"
 ## Usage
 
 ```rust
-use bevy_mettle_core::registry::Name;
 use bevy_mettle_core::prelude::*;
 
 // Tags code names, as types: a misspelled one doesn't compile.
@@ -82,7 +81,7 @@ assert!(hit.contains(Elemental));
 
 // Damage by level: 10 at level 1, 110 at level 11, linearly between.
 let curves = CurveRegistry::build(&[CurveData {
-    name: Name::new("fireball.damage"),
+    name: Key::new("fireball.damage"),
     interpolation: Interpolation::Linear,
     keys: vec![(1.0, 10.0), (11.0, 110.0)],
 }])
@@ -112,8 +111,8 @@ for development setup and guidelines.
 Licensed under either of [Apache License, Version 2.0](https://github.com/declaredlost/bevy_mettle/blob/main/LICENSE-APACHE)
 or [MIT license](https://github.com/declaredlost/bevy_mettle/blob/main/LICENSE-MIT) at your option.
 
-[`Name<K>`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/struct.Name.html
 [`Key<K>`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/struct.Key.html
+[`Id<K>`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/struct.Id.html
 [`Registry`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/struct.Registry.html
 [`Kind`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/trait.Kind.html
 [`TagRegistry`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagRegistry.html

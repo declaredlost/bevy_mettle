@@ -6,7 +6,7 @@ use std::sync::Arc;
 use bevy::ecs::system::IntoSystem;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
-use bevy_mettle_core::registry::{Key, Kind, Registry};
+use bevy_mettle_core::registry::{Id, Kind, Registry};
 pub use bevy_mettle_macros::Behaviour;
 
 /// A behaviour: the component in code that runs an ability.
@@ -47,7 +47,7 @@ pub struct NoInput;
 
 /// The behaviour kind: what data names, and a [`BehaviourId`] numbers.
 ///
-/// A behaviour's name in data is a `Name<AnyBehaviour>`, until it's resolved
+/// A behaviour's name in data is a `Key<AnyBehaviour>`, until it's resolved
 /// to a [`BehaviourId`].
 #[derive(Kind)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -56,7 +56,7 @@ pub enum AnyBehaviour {}
 /// A behaviour's number in an app: what abilities and their requests use.
 ///
 /// Given as it's added.
-pub type BehaviourId = Key<AnyBehaviour>;
+pub type BehaviourId = Id<AnyBehaviour>;
 
 /// What an input check is given: the input, and whose it is.
 ///

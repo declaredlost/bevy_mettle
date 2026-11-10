@@ -9,7 +9,7 @@ use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 use bevy::reflect::{CreateTypeData, TypeRegistry};
-use bevy_mettle_core::registry::{Key, Kind, Registry};
+use bevy_mettle_core::registry::{Id, Kind, Registry};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -96,7 +96,7 @@ pub enum AnyContextData {}
 /// A context data type's number in an app, in order of name.
 ///
 /// What it's replicated by.
-pub type ContextDataId = Key<AnyContextData>;
+pub type ContextDataId = Id<AnyContextData>;
 
 /// What a game added to a context, its type erased.
 pub(super) type Data = Arc<dyn Erased>;

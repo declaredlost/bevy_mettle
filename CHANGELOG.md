@@ -17,9 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MettleCorePlugin::new` says otherwise, from a system in `MettleSystems`,
   which game systems order themselves against. Every part's plugin adds it
   if it isn't there yet (`MettleCorePlugin::ensure`).
-- Names and numbers, as Bevy's `ComponentId`: content names what it defines
-  by a `Name<K>`, of a `Kind` (`#[derive(Kind)]`, an empty enum such as
-  `AnyEffect`); checked, it's known by its number, a `Key<K>`. `TagId`,
+- Keys and ids, as Bevy's `ComponentId`: content names what it defines by
+  a key, a `Key<K>` (`"fireball.cost"`), of a `Kind` (`#[derive(Kind)]`, an
+  empty enum such as `AnyEffect`); checked, it's known by its number, an
+  `Id<K>`. Keys are written as strings; ids aren't written. `TagId`,
   `CurveId`, `AttributeId`, `EffectId` and `AbilityId`, with their `Any*`
   kinds, are in `registry`, so one part names another's without depending
   on it. Everything that runs, and everything sent, holds numbers; names

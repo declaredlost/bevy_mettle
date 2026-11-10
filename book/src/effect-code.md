@@ -24,8 +24,8 @@ the struct's fields are what it's set up with. Register a value of it with
 and behaviours are; it's numbered as it's registered, in the
 [`ExecutionRegistry`] or the [`CalculationRegistry`], and registering its
 type again replaces it. The derive also declares the attributes it
-[captures](#captures), `source(..)` and `target(..)`. Data names it by that name, an `Name<AnyExecution>`
-or an `Name<AnyCalculation>`; checking the content resolves the name to its
+[captures](#captures), `source(..)` and `target(..)`. Data names it by that name, a `Key<AnyExecution>`
+or a `Key<AnyCalculation>`; checking the content resolves the name to its
 number, and rejects a name that isn't registered:
 
 ```rust
@@ -453,7 +453,7 @@ assert_eq!(base(&app, attacker), 52.0, "a fifth stolen back");
 
 A route's router is [`RouteFn::route`] on its type, and a value of it is
 registered with [`add_route`], numbered in the [`RouteRegistry`]. In data, a modifier deals a route by naming it,
-`"incoming_damage"`, an `Name<AnyRoute>`, in place of an attribute. A router
+`"incoming_damage"`, a `Key<AnyRoute>`, in place of an attribute. A router
 gets all that an
 execution dealt its route, summed: the effect's modifiers and executions
 both. Its changes come after the effect's own, and are rounded and kept

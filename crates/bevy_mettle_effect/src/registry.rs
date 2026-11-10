@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use bevy_mettle_attribute::modifier::{Operation, Per};
 use bevy_mettle_attribute::registry::AttributeRegistry;
 use bevy_mettle_core::curve::CurveRegistry;
-use bevy_mettle_core::registry::{AnyEffect, EffectId, Name, Registry};
+use bevy_mettle_core::registry::{AnyEffect, EffectId, Key, Registry};
 use bevy_mettle_core::tag::TagRegistry;
 use bevy_mettle_core::{Error, Errors};
 
@@ -281,7 +281,7 @@ impl Compile<'_> {
 
     /// The numbers of the effects `names` names, those there are; what's
     /// wrong noted.
-    fn effects(&mut self, names: &[Name<AnyEffect>], within: &str) -> Vec<EffectId> {
+    fn effects(&mut self, names: &[Key<AnyEffect>], within: &str) -> Vec<EffectId> {
         names
             .iter()
             .filter_map(|name| {
@@ -627,7 +627,7 @@ impl Compile<'_> {
     /// The attribute named `name`'s number, or that there's none noted.
     fn attribute(
         &mut self,
-        name: &Name<bevy_mettle_core::registry::AnyAttribute>,
+        name: &Key<bevy_mettle_core::registry::AnyAttribute>,
         within: &str,
     ) -> Option<bevy_mettle_core::registry::AttributeId> {
         let resolved = self.checks.attributes.resolve(name, Some(within));
@@ -641,7 +641,7 @@ impl Compile<'_> {
     }
 
     /// The route named `name`'s number, or that there's none noted.
-    fn route(&mut self, name: &Name<AnyRoute>, within: &str) -> Option<RouteId> {
+    fn route(&mut self, name: &Key<AnyRoute>, within: &str) -> Option<RouteId> {
         let id = self.checks.routes.resolve(name, Some(within));
         self.held(id)
     }

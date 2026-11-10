@@ -1,7 +1,7 @@
 //! How much: a number in an effect's definition, as a small expression.
 
 use bevy_mettle_attribute::Attribute;
-use bevy_mettle_core::registry::{AnyAttribute, AnyCurve, Name};
+use bevy_mettle_core::registry::{AnyAttribute, AnyCurve, Key};
 use bevy_mettle_core::tag::{TagKey, Tags};
 use serde::{Deserialize, Serialize};
 
@@ -45,11 +45,11 @@ pub enum Magnitude {
     /// An attribute of the source's or the target's, captured as it says.
     Attribute(AttributeRead),
     /// Worked out by a calculation registered in code.
-    Custom(Name<AnyCalculation>),
+    Custom(Key<AnyCalculation>),
     /// A curve's value at `at`: the spec's level, unless it says.
     Curve {
         /// The curve.
-        curve: Name<AnyCurve>,
+        curve: Key<AnyCurve>,
         /// Where it's read: the spec's level, unless it says.
         #[serde(default = "level")]
         at: Box<Magnitude>,
@@ -103,7 +103,7 @@ impl Magnitude {
 
     /// `curve` at the spec's level.
     #[must_use]
-    pub fn curve(curve: impl Into<Name<AnyCurve>>) -> Self {
+    pub fn curve(curve: impl Into<Key<AnyCurve>>) -> Self {
         Self::Curve {
             curve: curve.into(),
             at: level(),
@@ -112,7 +112,7 @@ impl Magnitude {
 
     /// `curve` at `at`: an attribute's value, for diminishing returns.
     #[must_use]
-    pub fn curve_at(curve: impl Into<Name<AnyCurve>>, at: impl Into<Magnitude>) -> Self {
+    pub fn curve_at(curve: impl Into<Key<AnyCurve>>, at: impl Into<Magnitude>) -> Self {
         Self::Curve {
             curve: curve.into(),
             at: Box::new(at.into()),
@@ -121,7 +121,7 @@ impl Magnitude {
 
     /// `base` times `curve` at the spec's level: Unreal's scalable float.
     #[must_use]
-    pub fn scaled(base: f32, curve: impl Into<Name<AnyCurve>>) -> Self {
+    pub fn scaled(base: f32, curve: impl Into<Key<AnyCurve>>) -> Self {
         Self::Product(vec![Self::Value(base), Self::curve(curve)])
     }
 
@@ -184,7 +184,7 @@ impl From<AttributeRead> for Magnitude {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AttributeRead {
     /// The attribute.
-    pub attribute: Name<AnyAttribute>,
+    pub attribute: Key<AnyAttribute>,
     /// Whose: the source's, unless it says.
     #[serde(default)]
     pub from: Capture,
@@ -218,7 +218,7 @@ fn is_yes(snapshot: &bool) -> bool {
 impl AttributeRead {
     pub(crate) fn new<A: Attribute>(from: Capture) -> Self {
         Self {
-            attribute: Name::from_static(A::NAME),
+            attribute: Key::from_static(A::NAME),
             from,
             value: Read::Current,
             snapshot: true,

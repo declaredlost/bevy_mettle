@@ -4,7 +4,7 @@
 use bevy::prelude::*;
 use bevy_harness::TestApp;
 use bevy_mettle::core::Errors;
-use bevy_mettle::core::registry::{AttributeId, Name};
+use bevy_mettle::core::registry::AttributeId;
 use bevy_mettle::effect::events::Routed;
 use bevy_mettle::prelude::*;
 
@@ -292,7 +292,7 @@ fn a_route_is_dealt_flat_by_what_executes_and_never_read() {
     let reads = EffectData::instant("reads").modifier(EffectModifier::new::<Strength>(
         Operation::Flat,
         Magnitude::Attribute(AttributeRead {
-            attribute: Name::from_static("incoming_damage"),
+            attribute: Key::from_static("incoming_damage"),
             from: Capture::Source,
             value: Read::Current,
             snapshot: true,
@@ -319,7 +319,7 @@ fn a_route_is_dealt_flat_by_what_executes_and_never_read() {
 #[test]
 fn a_modifier_changes_an_attribute_or_a_route() {
     let mut both = EffectModifier::route::<IncomingDamage>(1.0);
-    both.attribute = Some(Name::from_static("life"));
+    both.attribute = Some(Key::from_static("life"));
     let mut neither = EffectModifier::route::<IncomingDamage>(1.0);
     neither.route = None;
     let errors = errors(&[

@@ -63,7 +63,7 @@ defaults. [Loading data](loading-data.md) says more.
 
 ## Naming effects in code
 
-Content names effects by string, since it's data: an `Name<AnyEffect>`. Code names an effect by
+Content names effects by string, since it's data: a `Key<AnyEffect>`. Code names an effect by
 its type, as it does a [tag](tags.md#tags-in-code). Derive [`Effect`] on a
 unit struct, and add it to the app:
 

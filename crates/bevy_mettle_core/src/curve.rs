@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
 use crate::error::{Error, Errors};
-use crate::registry::{AnyCurve, CurveId, Kind, Name, Registry};
+use crate::registry::{AnyCurve, CurveId, Key, Kind, Registry};
 
 /// How a curve goes between its keys: held, straight, or eased.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
@@ -31,7 +31,7 @@ pub enum Interpolation {
 ///
 /// What an effect's magnitude scales by, read at the spec's level as Unreal's
 /// `ScalableFloat` is, or at what else the magnitude says: an attribute, for
-/// diminishing returns. Named by a `Name<AnyCurve>`.
+/// diminishing returns. Named by a `Key<AnyCurve>`.
 ///
 /// ```
 /// # use bevy_mettle_core::prelude::*;
@@ -46,7 +46,7 @@ pub enum Interpolation {
 #[serde(deny_unknown_fields)]
 pub struct CurveData {
     /// Its name.
-    pub name: Name<AnyCurve>,
+    pub name: Key<AnyCurve>,
     /// How it goes between keys: linearly, unless it says.
     #[serde(default)]
     pub interpolation: Interpolation,
@@ -183,7 +183,7 @@ impl CurveRegistry {
     /// # Errors
     ///
     /// If there's no such curve.
-    pub fn known(&self, curve: &Name<AnyCurve>, within: Option<&str>) -> Result<CurveId, Error> {
+    pub fn known(&self, curve: &Key<AnyCurve>, within: Option<&str>) -> Result<CurveId, Error> {
         self.id(curve.as_str())
             .ok_or_else(|| Error::unknown::<AnyCurve>(curve.as_str(), within))
     }
@@ -204,7 +204,7 @@ mod tests {
 
     fn table(interpolation: Interpolation) -> CurveRegistry {
         CurveRegistry::build(&[CurveData {
-            name: Name::from_static("damage"),
+            name: Key::from_static("damage"),
             interpolation,
             keys: vec![(1.0, 10.0), (10.0, 100.0), (20.0, 300.0)],
         }])
@@ -233,7 +233,7 @@ mod tests {
     #[test]
     fn a_single_key_is_its_value_everywhere() {
         let table = CurveRegistry::build(&[CurveData {
-            name: Name::from_static("flat"),
+            name: Key::from_static("flat"),
             interpolation: Interpolation::Linear,
             keys: vec![(1.0, 7.0)],
         }])
@@ -243,7 +243,7 @@ mod tests {
 
     fn curve(name: &'static str) -> CurveData {
         CurveData {
-            name: Name::from_static(name),
+            name: Key::from_static(name),
             interpolation: Interpolation::Linear,
             keys: vec![(1.0, 1.0)],
         }
@@ -264,7 +264,7 @@ mod tests {
     #[test]
     fn a_curve_table_checks_its_keys() {
         let mut def = CurveData {
-            name: Name::from_static("damage"),
+            name: Key::from_static("damage"),
             interpolation: Interpolation::Linear,
             keys: vec![(10.0, 100.0), (1.0, 10.0)],
         };

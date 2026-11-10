@@ -58,6 +58,8 @@ it. Whatever format your game reads, the shape is the same:
   `"cooldown.fireball"`, and a set of tags as a list of names. So is what a
   definition names: an effect's `name`, the attributes, curves, effects,
   executions, calculations and routes it names, an ability's behaviour.
+  Each of these is a key, a [`Key`] of its kind, such as `Key<AnyEffect>`
+  for an effect.
   Attributes are named as their types are, in `snake_case` unless they say
   otherwise, so `Mana` is `"mana"`.
 - **Choices are enums**, written as the format writes an enum's variant:
@@ -307,5 +309,6 @@ the content before.
 [`CurveRegistry`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveRegistry.html
 [`EffectRegistry`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectRegistry.html
 [`AbilityRegistry`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilityRegistry.html
+[`Key`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/struct.Key.html
 [`Magnitude`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/enum.Magnitude.html
 [`Operation`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/enum.Operation.html

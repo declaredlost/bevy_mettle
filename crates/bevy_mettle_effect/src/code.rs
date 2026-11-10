@@ -11,7 +11,7 @@ use bevy_mettle_attribute::modifier::Operation;
 use bevy_mettle_attribute::read::{AttributeContext, AttributeWorld, Breakdown};
 use bevy_mettle_attribute::registry::AttributeRegistry;
 use bevy_mettle_core::Error;
-use bevy_mettle_core::registry::{AttributeId, EffectId, Key, Kind, Name, Registry};
+use bevy_mettle_core::registry::{AttributeId, EffectId, Id, Key, Kind, Registry};
 use bevy_mettle_core::tag::{OwnedTags, TagKey};
 
 use crate::context::{ContextData, EffectContext};
@@ -382,14 +382,14 @@ pub use bevy_mettle_macros::Route;
 
 /// The route kind: what data names and deals, and a [`RouteId`] numbers.
 ///
-/// A route's name in data is a `Name<AnyRoute>`, until it's resolved to a
+/// A route's name in data is a `Key<AnyRoute>`, until it's resolved to a
 /// [`RouteId`].
 #[derive(Kind)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnyRoute {}
 
 /// A route's number in an app, given as it's added: what executions deal by.
-pub type RouteId = Key<AnyRoute>;
+pub type RouteId = Id<AnyRoute>;
 
 /// An execution: a formula in code run as an effect executes, such as damage.
 ///
@@ -446,14 +446,14 @@ pub use bevy_mettle_macros::Execution;
 
 /// The execution kind: what data names, and an [`ExecutionId`] numbers.
 ///
-/// An execution's name in data is a `Name<AnyExecution>`, until it's resolved
+/// An execution's name in data is a `Key<AnyExecution>`, until it's resolved
 /// to an [`ExecutionId`].
 #[derive(Kind)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnyExecution {}
 
 /// An execution's number in an app, given as it's added, as effects know it.
-pub type ExecutionId = Key<AnyExecution>;
+pub type ExecutionId = Id<AnyExecution>;
 
 /// A calculation: a magnitude worked out in code, such as a burn's duration.
 ///
@@ -507,14 +507,14 @@ pub use bevy_mettle_macros::Calculation;
 
 /// The calculation kind: what data names, and a [`CalculationId`] numbers.
 ///
-/// A calculation's name in data is a `Name<AnyCalculation>`, until it's
+/// A calculation's name in data is a `Key<AnyCalculation>`, until it's
 /// resolved to a [`CalculationId`].
 #[derive(Kind)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnyCalculation {}
 
 /// A calculation's number in an app, given as it's added, as effects know it.
-pub type CalculationId = Key<AnyCalculation>;
+pub type CalculationId = Id<AnyCalculation>;
 
 /// What an [`Execution`] runs: what it changes, worked out from its context.
 ///
@@ -611,7 +611,7 @@ impl ExecutionRegistry {
     /// If there's no such execution.
     pub fn resolve(
         &self,
-        name: &Name<AnyExecution>,
+        name: &Key<AnyExecution>,
         within: Option<&str>,
     ) -> Result<ExecutionId, Error> {
         self.id(name.as_str())
@@ -649,7 +649,7 @@ impl CalculationRegistry {
     /// If there's no such calculation.
     pub fn resolve(
         &self,
-        name: &Name<AnyCalculation>,
+        name: &Key<AnyCalculation>,
         within: Option<&str>,
     ) -> Result<CalculationId, Error> {
         self.id(name.as_str())
@@ -684,7 +684,7 @@ impl RouteRegistry {
     /// # Errors
     ///
     /// If there's no such route.
-    pub fn resolve(&self, name: &Name<AnyRoute>, within: Option<&str>) -> Result<RouteId, Error> {
+    pub fn resolve(&self, name: &Key<AnyRoute>, within: Option<&str>) -> Result<RouteId, Error> {
         self.id(name.as_str())
             .ok_or_else(|| Error::unknown::<AnyRoute>(name.as_str(), within))
     }

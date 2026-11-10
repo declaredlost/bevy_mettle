@@ -108,9 +108,8 @@ adaptors:
 
 ```rust
 # use bevy_mettle::prelude::*;
-# use bevy_mettle::core::registry::Name;
 # let curves = CurveRegistry::build(&[CurveData {
-#     name: Name::from_static("burning.damage"),
+#     name: Key::from_static("burning.damage"),
 #     interpolation: Interpolation::Linear,
 #     keys: vec![(1.0, 4.0), (20.0, 40.0)],
 # }])

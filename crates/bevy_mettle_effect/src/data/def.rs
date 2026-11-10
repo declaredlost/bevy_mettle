@@ -3,7 +3,7 @@
 
 use bevy_mettle_attribute::modifier::{Operation, Per};
 use bevy_mettle_core::condition::Condition;
-use bevy_mettle_core::registry::{AnyEffect, AttributeId, CurveId, EffectId, Name};
+use bevy_mettle_core::registry::{AnyEffect, AttributeId, CurveId, EffectId, Key};
 use bevy_mettle_core::tag::{TagKey, Tags};
 
 use super::{Capture, EffectDuration, Period, Read, Stacking};
@@ -22,7 +22,7 @@ pub struct EffectDef {
     /// Its number.
     pub id: EffectId,
     /// Its name.
-    pub name: Name<AnyEffect>,
+    pub name: Key<AnyEffect>,
     /// What it's labelled.
     pub tags: Tags,
     /// How long it lasts.

@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use bevy::ecs::entity::MapEntities;
 use bevy::prelude::*;
 use bevy_harness::TestApp;
-use bevy_mettle::core::registry::{AbilityId, Name};
+use bevy_mettle::core::registry::AbilityId;
 use bevy_mettle::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -136,7 +136,7 @@ fn effects() -> Vec<EffectData> {
             .cue("cue.hit"),
         EffectData::instant("graze").modifier(EffectModifier::new::<Life>(
             Operation::Flat,
-            Magnitude::Custom(Name::from_static("falloff")),
+            Magnitude::Custom(Key::from_static("falloff")),
         )),
         EffectData::lasting("fuse", 0.5)
             .on_apply("echo")
@@ -148,7 +148,7 @@ fn effects() -> Vec<EffectData> {
                 reapply: Reapply::Refresh,
                 reset_period: false,
                 expire: Expire::ClearAll,
-                overflow: vec![Name::from_static("echo")],
+                overflow: vec![Key::from_static("echo")],
             }),
         EffectData::instant("echo").execution("witness"),
     ]
