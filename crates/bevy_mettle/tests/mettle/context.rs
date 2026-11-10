@@ -10,7 +10,7 @@ use bevy_mettle::core::registry::{AbilityId, Name};
 use bevy_mettle::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::common::{Life, actor, attributes, close, get, id};
+use crate::common::{Life, actor, attributes, close, get};
 
 /// The game's own: whether a shot was a headshot.
 #[derive(Reflect, Clone, Debug, PartialEq, Serialize, Deserialize, MapEntities)]
@@ -54,7 +54,7 @@ impl ExecutionFn for ShotDamage {
                 seen.note("strike", cx);
                 let headshot = cx.get::<Shot>().is_some_and(|shot| shot.headshot);
                 let damage = if headshot { 20.0 } else { 10.0 };
-                vec![BaseChange::new(id::<Life>(), Operation::Flat, -damage)]
+                vec![BaseChange::of::<Life>(Operation::Flat, -damage)]
             }
             Self::Reads(read) => {
                 *read.lock().unwrap() = Some((

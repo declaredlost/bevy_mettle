@@ -88,8 +88,8 @@ struct Price;
 impl RouteFn for Price {
     fn route(&self, _: &ExecutionContext, price: f32) -> Vec<BaseChange> {
         vec![
-            BaseChange::new(id::<Mana>(), Operation::Flat, -price),
-            BaseChange::new(id::<Strength>(), Operation::Flat, 1.0).on_source(),
+            BaseChange::of::<Mana>(Operation::Flat, -price),
+            BaseChange::of::<Strength>(Operation::Flat, 1.0).on_source(),
         ]
     }
 }

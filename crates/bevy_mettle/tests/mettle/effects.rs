@@ -67,8 +67,7 @@ impl ExecutionFn for StrikeDamage {
         let resist = context
             .value::<Resistance>(context.target, &AttributeContext::new().tag(FIRE))
             .unwrap_or_default();
-        vec![BaseChange::new(
-            id::<Life>(),
+        vec![BaseChange::of::<Life>(
             Operation::Flat,
             -damage * (1.0 - resist),
         )]

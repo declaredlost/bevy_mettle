@@ -2,12 +2,14 @@
 //!
 //! Each numbered as it's added.
 
+use std::any::TypeId;
 use std::sync::Arc;
 
 use bevy::prelude::*;
 use bevy_mettle_attribute::Attribute;
 use bevy_mettle_attribute::modifier::Operation;
 use bevy_mettle_attribute::read::{AttributeContext, AttributeWorld, Breakdown};
+use bevy_mettle_attribute::registry::AttributeRegistry;
 use bevy_mettle_core::Error;
 use bevy_mettle_core::registry::{AttributeId, EffectId, Key, Kind, Name, Registry};
 use bevy_mettle_core::tag::{OwnedTags, TagKey};
@@ -192,10 +194,11 @@ pub enum Changes {
 /// A change an execution or a router makes, as an instant modifier.
 ///
 /// To an attribute's base, or dealt a route; its target's, unless it says.
+/// Named by type, `BaseChange::of::<Life>(..)`, it's numbered as it's applied.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BaseChange {
-    /// What it changes.
-    pub changes: Changes,
+    /// What it changes: by number, or by type until it's applied.
+    names: Names,
     /// How: only `Flat` is dealt a route.
     pub op: Operation,
     /// By how much.
@@ -204,28 +207,68 @@ pub struct BaseChange {
     pub on: Whose,
 }
 
+/// What a change changes, as it was named: by number, or by type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Names {
+    /// By number.
+    Numbered(Changes),
+    /// An attribute's base, by its type.
+    Attribute(Typed),
+    /// What's dealt a route, by its type.
+    Route(Typed),
+}
+
+/// A type a change names, and its name, to warn of it by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Typed {
+    type_id: TypeId,
+    name: &'static str,
+}
+
 impl BaseChange {
-    /// `op` of `value` to `attribute`'s base.
+    /// `op` of `value` to `A`'s base.
     #[must_use]
-    pub fn new(attribute: AttributeId, op: Operation, value: f32) -> Self {
-        Self {
-            changes: Changes::Attribute(attribute),
+    pub fn of<A: Attribute>(op: Operation, value: f32) -> Self {
+        Self::named(
+            Names::Attribute(Typed {
+                type_id: TypeId::of::<A>(),
+                name: A::NAME,
+            }),
             op,
             value,
-            on: Whose::Target,
-        }
+        )
     }
 
-    /// `value` dealt `route`, for its router: what a hit deals, before shields
-    /// and resistances.
+    /// `value` dealt `R`, for its router: what a hit deals, before shields and
+    /// resistances.
+    #[must_use]
+    pub fn dealt<R: Route>(value: f32) -> Self {
+        Self::named(
+            Names::Route(Typed {
+                type_id: TypeId::of::<R>(),
+                name: R::NAME,
+            }),
+            Operation::Flat,
+            value,
+        )
+    }
+
+    /// `op` of `value` to `attribute`'s base, by its number.
+    #[must_use]
+    pub fn new(attribute: AttributeId, op: Operation, value: f32) -> Self {
+        Self::changing(Changes::Attribute(attribute), op, value)
+    }
+
+    /// `value` dealt `route`, by its number, for its router.
     #[must_use]
     pub fn route(route: RouteId, value: f32) -> Self {
-        Self {
-            changes: Changes::Route(route),
-            op: Operation::Flat,
-            value,
-            on: Whose::Target,
-        }
+        Self::changing(Changes::Route(route), Operation::Flat, value)
+    }
+
+    /// `op` of `value` to what `changes` names, by number.
+    #[must_use]
+    pub fn changing(changes: Changes, op: Operation, value: f32) -> Self {
+        Self::named(Names::Numbered(changes), op, value)
     }
 
     /// To the source's, not the target's.
@@ -233,6 +276,59 @@ impl BaseChange {
     pub fn on_source(mut self) -> Self {
         self.on = Whose::Source;
         self
+    }
+
+    /// What it changes, by number: `None` only if it's named by type and not
+    /// applied yet.
+    #[must_use]
+    pub fn changes(&self) -> Option<Changes> {
+        match self.names {
+            Names::Numbered(changes) => Some(changes),
+            Names::Attribute(_) | Names::Route(_) => None,
+        }
+    }
+
+    /// Numbered as `world` numbers its type, if it's named by one; `None`,
+    /// warned of once, if that type isn't added.
+    pub(crate) fn numbered(self, world: &World) -> Option<Self> {
+        let changes = match self.names {
+            Names::Numbered(_) => return Some(self),
+            Names::Attribute(typed) => world
+                .get_resource::<AttributeRegistry>()
+                .and_then(|attributes| attributes.id_of_type(typed.type_id))
+                .map(Changes::Attribute)
+                .ok_or(("attribute", typed)),
+            Names::Route(typed) => world
+                .get_resource::<RouteRegistry>()
+                .and_then(|routes| routes.0.id_of_type(typed.type_id))
+                .map(Changes::Route)
+                .ok_or(("route", typed)),
+        };
+        match changes {
+            Ok(changes) => Some(Self {
+                names: Names::Numbered(changes),
+                ..self
+            }),
+            Err((what, typed)) => {
+                if crate::context::first_warning(format!("unadded {what} {}", typed.name)) {
+                    warn!(
+                        "a change to the {what} `{}`, which isn't added: dropped",
+                        typed.name
+                    );
+                }
+                None
+            }
+        }
+    }
+
+    /// Named so.
+    fn named(names: Names, op: Operation, value: f32) -> Self {
+        Self {
+            names,
+            op,
+            value,
+            on: Whose::Target,
+        }
     }
 }
 
@@ -255,16 +351,12 @@ impl BaseChange {
 ///
 /// impl RouteFn for IncomingDamage {
 ///     fn route(&self, cx: &ExecutionContext, amount: f32) -> Vec<BaseChange> {
-///         let (Some(shield), Some(life)) = (cx.attribute_id::<Shield>(), cx.attribute_id::<Life>())
-///         else {
-///             return Vec::new();
-///         };
 ///         // The shield takes what it can, and life the rest.
 ///         let held = cx.value::<Shield>(cx.target, &AttributeContext::new()).unwrap_or_default();
 ///         let absorbed = amount.min(held);
 ///         vec![
-///             BaseChange::new(shield, Operation::Flat, -absorbed),
-///             BaseChange::new(life, Operation::Flat, absorbed - amount),
+///             BaseChange::of::<Shield>(Operation::Flat, -absorbed),
+///             BaseChange::of::<Life>(Operation::Flat, absorbed - amount),
 ///         ]
 ///     }
 /// }
@@ -323,10 +415,7 @@ pub type RouteId = Key<AnyRoute>;
 ///         let power = cx.captured::<SpellPower>(Capture::Source).unwrap_or_default();
 ///         let resisted = cx.captured::<Resistance>(Capture::Target).unwrap_or_default();
 ///         let dealt = damage * (1.0 + power / 100.0) * (1.0 - resisted);
-///         let Some(life) = cx.attribute_id::<Life>() else {
-///             return Vec::new();
-///         };
-///         vec![BaseChange::new(life, Operation::Flat, -dealt)]
+///         vec![BaseChange::of::<Life>(Operation::Flat, -dealt)]
 ///     }
 /// }
 ///

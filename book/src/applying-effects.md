@@ -499,9 +499,9 @@ fn spawn_mage(mut commands: Commands) {
 ## Previewing
 
 [`EffectWorld::preview_effect`] says what applying a spec as an instant
-effect would change, without changing it: a list of [`BaseChange`]s. An
-ability checks it can pay its cost this way. A tooltip can show what a hit
-would do.
+effect would change, without changing it: a list of [`BaseChange`]s, each
+named by number. An ability checks it can pay its cost this way. A tooltip
+can show what a hit would do.
 
 ## Pitfalls
 

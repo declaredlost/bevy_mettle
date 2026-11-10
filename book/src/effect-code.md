@@ -64,11 +64,7 @@ impl ExecutionFn for FireDamage {
         let power = effect.captured::<SpellPower>(Capture::Source).unwrap_or_default();
         let resisted = effect.captured::<Resistance>(Capture::Target).unwrap_or_default();
         let dealt = damage * (1.0 + power / 100.0) * (1.0 - resisted) * effect.stacks as f32;
-        // A change names its attribute by number, as the app has it.
-        let Some(life) = effect.attribute_id::<Life>() else {
-            return Vec::new();
-        };
-        vec![BaseChange::new(life, Operation::Flat, -dealt)]
+        vec![BaseChange::of::<Life>(Operation::Flat, -dealt)]
     }
 }
 
@@ -145,8 +141,7 @@ A caster with 25 spell power hits a mage with 50% fire resistance for 20:
 #         let damage = effect.param(DamageParam).unwrap_or_default();
 #         let resisted = effect.captured::<Resistance>(Capture::Target).unwrap_or_default();
 #         let dealt = damage * (1.0 + power(effect) / 100.0) * (1.0 - resisted) * effect.stacks as f32;
-#         let Some(life) = effect.attribute_id::<Life>() else { return Vec::new() };
-#         vec![BaseChange::new(life, Operation::Flat, -dealt)]
+#         vec![BaseChange::of::<Life>(Operation::Flat, -dealt)]
 #     }
 # }
 # impl CalculationFn for BurnTime {
@@ -231,7 +226,7 @@ only, and what's being applied.
 | `get::<C>()` | What the game put on the context of type `C`, a [`ContextData`] |
 | `captured::<A>(from)` | What it declared it [captures](#captures) of the source's or the target's `A` |
 | `owned(entity)` | What an entity owns: its [`OwnedTags`] |
-| `attribute_id::<A>()`, `route_id::<R>()` | An attribute's or a route's number, for a change to name |
+| `attribute_id::<A>()`, `route_id::<R>()` | An attribute's or a route's number |
 | `value::<A>(entity, read)` | An entity's attribute, read in context |
 | `breakdown::<A>(entity, read)` | An entity's attribute's modifiers, summed but not applied |
 
@@ -291,10 +286,7 @@ struct Sear;
 impl ExecutionFn for Sear {
     fn execute(&self, effect: &ExecutionContext) -> Vec<BaseChange> {
         let resisted = effect.captured::<Resistance>(Capture::Target).unwrap_or_default();
-        let Some(life) = effect.attribute_id::<Life>() else {
-            return Vec::new();
-        };
-        vec![BaseChange::new(life, Operation::Flat, -10.0 * (1.0 - resisted))]
+        vec![BaseChange::of::<Life>(Operation::Flat, -10.0 * (1.0 - resisted))]
     }
 }
 
@@ -339,15 +331,19 @@ applied, and every tick would deal 5.
 
 An execution runs whenever its effect executes: as an instant effect applies,
 or as a periodic effect's period comes round. It runs after the effect's own
-modifiers have been worked out, and returns a list of [`BaseChange`]s. Each
-names an attribute, an [`Operation`] and a value, and changes the target's
-base as an executing modifier would: `Flat` adds, `Additive` scales,
-`Override` sets. The base is then rounded and kept within its limits.
+modifiers have been worked out, and returns a list of [`BaseChange`]s.
+`BaseChange::of::<Life>(op, value)` changes the target's life's base as an
+executing modifier would: `Flat` adds, `Additive` scales, `Override` sets.
+The base is then rounded and kept within its limits.
 
 A change is to the target's base, unless `.on_source()` says it's to the
 source's: life stolen back. An execution can also deal a [route](#routes),
-with `BaseChange::route(route, damage)`, for its router to route: the
-route's number is `effect.route_id::<IncomingDamage>()`.
+with `BaseChange::dealt::<IncomingDamage>(damage)`, for its router to route.
+
+A change named by type is numbered as it's applied. One to an attribute or a
+route the app hasn't added is warned of once, and dropped. Code holding a
+number instead names it so: `BaseChange::new(attribute, op, value)`, or
+`BaseChange::route(route, value)`.
 
 Executions don't scale with stacks by themselves, since they work out their
 own numbers. Multiply by `stacks` where the effect should count once per
@@ -378,10 +374,7 @@ impl ExecutionFn for Strike {
         };
         let mut hit = caster;
         hit.additive += taken.additive;
-        let Some(life) = effect.attribute_id::<Life>() else {
-            return Vec::new();
-        };
-        vec![BaseChange::new(life, Operation::Flat, -hit.total())]
+        vec![BaseChange::of::<Life>(Operation::Flat, -hit.total())]
     }
 }
 # App::new().add_execution(Strike);
@@ -414,19 +407,15 @@ struct Hit;
 /// fifth of what life lost.
 impl RouteFn for IncomingDamage {
     fn route(&self, effect: &ExecutionContext, damage: f32) -> Vec<BaseChange> {
-        let (Some(shield), Some(life)) = (effect.attribute_id::<Shield>(), effect.attribute_id::<Life>())
-        else {
-            return Vec::new();
-        };
         let held = effect
             .value::<Shield>(effect.target, &AttributeContext::new())
             .unwrap_or_default();
         let absorbed = damage.min(held);
         let taken = damage - absorbed;
         vec![
-            BaseChange::new(shield, Operation::Flat, -absorbed),
-            BaseChange::new(life, Operation::Flat, -taken),
-            BaseChange::new(life, Operation::Flat, taken / 5.0).on_source(),
+            BaseChange::of::<Shield>(Operation::Flat, -absorbed),
+            BaseChange::of::<Life>(Operation::Flat, -taken),
+            BaseChange::of::<Life>(Operation::Flat, taken / 5.0).on_source(),
         ]
     }
 }

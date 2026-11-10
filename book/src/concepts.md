@@ -44,8 +44,9 @@ by.
 - **Code is numbered as it's added.** `add_attribute::<Life>()` gives `Life`
   the next [`AttributeId`]; behaviours, routes, executions and calculations
   get theirs the same way. Ask for one with `world.attribute_id::<Life>()`,
-  as Bevy has `world.component_id::<T>()`. Typed reads, such as
-  `value::<Life>()` and `Current<Life>`, find it for you.
+  as Bevy has `world.component_id::<T>()`. Typed reads and changes, such
+  as `value::<Life>()`, `Current<Life>` and `BaseChange::of::<Life>`, find
+  it for you.
 - **Content is numbered as it's checked.** Tags, curves, effects and
   abilities get a [`TagId`], a [`CurveId`], an [`EffectId`] and an
   [`AbilityId`], in order of name. A reload keeps the numbers things had,

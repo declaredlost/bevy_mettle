@@ -189,9 +189,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ExecutionFn::execute` and `CalculationFn::calculate` taking `&self`, a
   value registered with `add_execution(FireDamage)` and
   `add_calculation(..)` into `ExecutionRegistry` and
-  `CalculationRegistry`. An execution returns `BaseChange`s;
-  `BaseChange::on_source()` changes the source's base, life stolen back
-  (`Whose`).
+  `CalculationRegistry`. An execution returns `BaseChange`s, named by
+  type, `BaseChange::of::<Life>(op, value)` and
+  `BaseChange::dealt::<IncomingDamage>(value)`, and numbered as they're
+  applied: one to a type that isn't added is warned of once and dropped.
+  `BaseChange::new`, `BaseChange::route` and `BaseChange::changing` name
+  by number, read back with `changes()`. `BaseChange::on_source()` changes
+  the source's base, life stolen back (`Whose`).
 - Declared captures: `#[execution(source(A, ..), target(B, ..))]` and
   `#[calculation(..)]`, with the `AttributeRead` options (`base`, `bonus`,
   `live`, `tagged(..)`), as `Execution::captures` and
@@ -209,7 +213,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shields into life. Single-pass, the same on a server and a predicting
   client, and seen by previews and ability costs. Dealt flat, by effects
   that execute: in data `(route: "incoming_damage", value: ..)`, in code
-  `EffectModifier::route` or `BaseChange::route`; never read, held or
+  `EffectModifier::route` or `BaseChange::dealt`; never read, held or
   replicated.
 - Effects tick in `MettleSet::Effects`, added by `EffectPlugin`: time runs
   down alongside the game, and only what's due is done with the whole

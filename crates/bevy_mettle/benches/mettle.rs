@@ -43,15 +43,9 @@ impl RouteFn for IncomingDamage {
             .value::<Shield>(effect.target, &AttributeContext::new())
             .unwrap_or_default();
         let absorbed = damage.min(shield);
-        let (Some(shield), Some(life)) = (
-            effect.attribute_id::<Shield>(),
-            effect.attribute_id::<Life>(),
-        ) else {
-            return Vec::new();
-        };
         vec![
-            BaseChange::new(shield, Operation::Flat, -absorbed),
-            BaseChange::new(life, Operation::Flat, absorbed - damage),
+            BaseChange::of::<Shield>(Operation::Flat, -absorbed),
+            BaseChange::of::<Life>(Operation::Flat, absorbed - damage),
         ]
     }
 }
@@ -71,11 +65,7 @@ struct Strike;
 
 impl ExecutionFn for Strike {
     fn execute(&self, effect: &ExecutionContext) -> Vec<BaseChange> {
-        effect
-            .attribute_id::<Life>()
-            .map(|life| BaseChange::new(life, Operation::Flat, -effect.level()))
-            .into_iter()
-            .collect()
+        vec![BaseChange::of::<Life>(Operation::Flat, -effect.level())]
     }
 }
 
@@ -89,11 +79,10 @@ impl ExecutionFn for Scorch {
     fn execute(&self, effect: &ExecutionContext) -> Vec<BaseChange> {
         let power = effect.captured::<A0>(Capture::Source).unwrap_or_default();
         let resist = effect.captured::<A1>(Capture::Target).unwrap_or_default();
-        effect
-            .attribute_id::<Life>()
-            .map(|life| BaseChange::new(life, Operation::Flat, (resist - power).min(0.0)))
-            .into_iter()
-            .collect()
+        vec![BaseChange::of::<Life>(
+            Operation::Flat,
+            (resist - power).min(0.0),
+        )]
     }
 }
 

@@ -157,17 +157,17 @@ pub(super) fn changes(
                 .unwrap_or_default();
             value *= per.times(of);
         }
-        changes.push(BaseChange {
-            changes: modifier.changes,
-            op: modifier.op,
-            value,
-            on: Whose::Target,
-        });
+        changes.push(BaseChange::changing(modifier.changes, modifier.op, value));
     }
     for (execution, reads) in &def.executions {
         if let Some(execution) = registry.execution(*execution) {
             let running = ExecutionContext { reads, ..context };
-            changes.extend(execution.execute(&running));
+            changes.extend(
+                execution
+                    .execute(&running)
+                    .into_iter()
+                    .filter_map(|change| change.numbered(world)),
+            );
         }
     }
     route(&context, registry, changes)
@@ -186,7 +186,7 @@ fn route(
     let mut kept = Vec::with_capacity(changes.len());
     let mut routed: Vec<Routed> = Vec::new();
     for change in changes {
-        let Changes::Route(route) = change.changes else {
+        let Some(Changes::Route(route)) = change.changes() else {
             kept.push(change);
             continue;
         };
@@ -210,8 +210,9 @@ fn route(
         let Some(run) = registered.get(dealt.route) else {
             continue;
         };
-        for change in run.route(context, dealt.amount) {
-            if let Changes::Route(other) = change.changes {
+        let changes = run.route(context, dealt.amount).into_iter();
+        for change in changes.filter_map(|change| change.numbered(context.world)) {
+            if let Some(Changes::Route(other)) = change.changes() {
                 warn!(
                     "the router of `{}` deals route `{}`: dropped, as routing is single-pass",
                     name(dealt.route),
@@ -283,7 +284,7 @@ pub(super) fn execute(
     let mut stolen: Vec<Delta> = Vec::new();
     for change in &worked.changes {
         // Routes are routed by now: what's left changes attributes.
-        let Changes::Attribute(attribute) = change.changes else {
+        let Some(Changes::Attribute(attribute)) = change.changes() else {
             continue;
         };
         let (entity, deltas) = match change.on {

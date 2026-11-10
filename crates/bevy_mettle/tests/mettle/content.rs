@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use bevy_harness::TestApp;
 use bevy_mettle::prelude::*;
 
-use crate::common::{Life, Mana, attributes, close, id, mettle};
+use crate::common::{Life, Mana, attributes, close, mettle};
 
 #[derive(Component, Default, Behaviour)]
 struct Cast;
@@ -20,7 +20,7 @@ struct Burn;
 
 impl ExecutionFn for Burn {
     fn execute(&self, _: &ExecutionContext) -> Vec<BaseChange> {
-        vec![BaseChange::new(id::<Life>(), Operation::Flat, -5.0)]
+        vec![BaseChange::of::<Life>(Operation::Flat, -5.0)]
     }
 }
 
