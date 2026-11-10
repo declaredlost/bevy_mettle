@@ -106,7 +106,23 @@ pub struct AttributeState {
     remote: bool,
     /// Whether a prediction counts for it: its values are its own.
     provisional: bool,
-    stale: bool,
+    /// What changed since values were last worked out.
+    #[reflect(ignore)]
+    stale: Stale,
+}
+
+/// What changed of an actor's attributes since its values were last worked
+/// out: what's worked out again.
+#[derive(Debug, Clone, Default, PartialEq)]
+enum Stale {
+    /// Nothing: its values are as worked out.
+    #[default]
+    Fresh,
+    /// These attributes: each worked out again, with what's worked out
+    /// through it.
+    These(Vec<AttributeId>),
+    /// Everything: every value worked out again.
+    All,
 }
 
 impl AttributeState {
@@ -119,13 +135,32 @@ impl AttributeState {
     /// Sets `attribute`'s value as served: synced from its `Served`.
     pub(crate) fn set_served(&mut self, attribute: AttributeId, value: f32) {
         self.served.insert(attribute, value);
-        self.stale = true;
+        self.mark(attribute);
     }
 
     /// Sets whether the actor's authority is another world.
     pub(crate) fn set_remote(&mut self, remote: bool) {
         self.remote = remote;
-        self.stale = true;
+        self.mark_all();
+    }
+
+    /// Notes `attribute` changed: worked out again, with what's worked out
+    /// through it, as values are next.
+    fn mark(&mut self, attribute: AttributeId) {
+        match &mut self.stale {
+            Stale::All => {}
+            Stale::These(changed) => {
+                if !changed.contains(&attribute) {
+                    changed.push(attribute);
+                }
+            }
+            Stale::Fresh => self.stale = Stale::These(vec![attribute]),
+        }
+    }
+
+    /// Notes everything changed: every value worked out again.
+    fn mark_all(&mut self) {
+        self.stale = Stale::All;
     }
 
     /// `attribute`'s value with nothing in play as served, if it's shown so:
@@ -145,14 +180,14 @@ impl AttributeState {
     /// it.
     pub(crate) fn set_base(&mut self, attribute: AttributeId, value: f32) {
         self.bases.insert(attribute, value);
-        self.stale = true;
+        self.mark(attribute);
     }
 
     /// Forgets `attribute`: its `Base` was taken off.
     pub(crate) fn remove(&mut self, attribute: AttributeId) {
         self.bases.remove(attribute);
         self.current.remove(attribute);
-        self.stale = true;
+        self.mark_all();
     }
 
     /// Folds `modifiers`, each with its source, in the order they were
@@ -167,7 +202,7 @@ impl AttributeState {
     ) {
         self.folded.clear();
         self.provisional = provisional;
-        self.stale = true;
+        self.mark_all();
         for (order, (source, modifier)) in (0u32..).zip(modifiers) {
             if let Err(error) = modifier.check_values(registry) {
                 warn!("a modifier from {source} is skipped: {error}");
@@ -224,7 +259,7 @@ impl AttributeState {
             return value;
         }
         if plain
-            && !self.stale
+            && self.stale == Stale::Fresh
             && !owned.is_pending()
             && let Some(value) = self.current.get(attribute)
         {
@@ -259,23 +294,83 @@ impl AttributeState {
 
     /// Works out every value the actor has with nothing in play, or takes it
     /// as served if it's shown so: whether any changed.
-    pub(crate) fn refresh(&mut self, registry: &AttributeRegistry, owned: &TagCounts) -> bool {
+    pub(crate) fn refresh(
+        &mut self,
+        registry: &AttributeRegistry,
+        owned: &TagCounts,
+        owned_changed: bool,
+    ) -> bool {
+        // What a condition counts by, the owner's tags, changed: what has a
+        // modifier that counts only sometimes is worked out again.
+        if owned_changed && self.stale != Stale::All {
+            let scoped: Vec<AttributeId> = self
+                .folded
+                .iter()
+                .filter(|(_, folded)| !folded.scoped.is_empty())
+                .map(|(attribute, _)| attribute)
+                .collect();
+            for attribute in scoped {
+                self.mark(attribute);
+            }
+        }
         let context = AttributeContext::new();
         let mut walk = Walk::default();
-        let current: Slots<f32> = self
-            .bases
-            .keys()
-            .map(|attribute| {
-                let value = self
-                    .shown_served(attribute)
-                    .unwrap_or_else(|| self.eval(registry, owned, attribute, &context, &mut walk));
-                (attribute, value)
-            })
-            .collect();
+        let work = |state: &Self, attribute: AttributeId, walk: &mut Walk| {
+            state
+                .shown_served(attribute)
+                .unwrap_or_else(|| state.eval(registry, owned, attribute, &context, walk))
+        };
+        let current: Slots<f32> = if self.stale == Stale::All {
+            self.bases
+                .keys()
+                .map(|attribute| (attribute, work(self, attribute, &mut walk)))
+                .collect()
+        } else {
+            let mut current = self.current.clone();
+            for attribute in self.through(registry) {
+                if self.has(attribute) {
+                    current.insert(attribute, work(self, attribute, &mut walk));
+                }
+            }
+            current
+        };
         let changed = current != self.current;
         self.previous = std::mem::replace(&mut self.current, current);
-        self.stale = false;
+        self.stale = Stale::Fresh;
         changed
+    }
+
+    /// What's changed, and every attribute worked out through it: what a
+    /// limit is, what a modifier's per.
+    fn through(&self, registry: &AttributeRegistry) -> Vec<AttributeId> {
+        let mut affected = match &self.stale {
+            Stale::These(changed) => changed.clone(),
+            Stale::Fresh | Stale::All => Vec::new(),
+        };
+        let mut next = 0;
+        while let Some(&changed) = affected.get(next) {
+            next += 1;
+            let limited = registry.iter().filter_map(|(attribute, info)| {
+                [info.min.as_ref(), info.max.as_ref()]
+                    .into_iter()
+                    .flatten()
+                    .any(|bound| matches!(bound, Bound::Attribute(other) if *other == changed))
+                    .then_some(attribute)
+            });
+            let per = self.folded.iter().filter_map(|(attribute, folded)| {
+                folded
+                    .scoped
+                    .iter()
+                    .any(|scoped| scoped.per.is_some_and(|(per, _)| per == changed))
+                    .then_some(attribute)
+            });
+            for attribute in limited.chain(per).collect::<Vec<_>>() {
+                if !affected.contains(&attribute) {
+                    affected.push(attribute);
+                }
+            }
+        }
+        affected
     }
 
     /// What `attribute`'s value with nothing in play moved from and to, the
@@ -294,7 +389,7 @@ impl AttributeState {
 
     /// Whether something changed since values were last worked out.
     pub(crate) fn is_stale(&self) -> bool {
-        self.stale
+        self.stale != Stale::Fresh
     }
 
     /// `attribute`'s value with nothing in play, as last worked out.

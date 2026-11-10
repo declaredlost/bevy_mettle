@@ -4,7 +4,8 @@ use bevy_mettle::core::registry::AttributeId;
 use bevy_mettle::prelude::*;
 
 use crate::common::{
-    Damage, FLOWN, Life, MaxLife, MaxResistance, Strength, actor, app, close, get, id, value,
+    Damage, FLOWN, Life, MaxLife, MaxResistance, Strength, actor, app, close, get, id, own,
+    set_base, value,
 };
 
 fn flat(value: f32) -> Modifiers {
@@ -286,4 +287,40 @@ fn a_read_in_context_counts_what_its_value_is_worked_out_through() {
     let other = AttributeContext::new().tag("state");
     assert!(close(value::<Life>(&app, npc, &other), 50.0));
     assert!(close(value::<Damage>(&app, npc, &other), 12.0));
+}
+
+#[test]
+fn what_one_change_moves_is_worked_out_again_and_nothing_else_is_lost() {
+    let mut app = app();
+    // Life kept to its most; damage per strength; strength more while enraged.
+    let npc = actor(
+        &mut app,
+        [
+            Modifier::flat(id::<Life>(), 30.0),
+            Modifier::flat(id::<Damage>(), 1.0).per(id::<Strength>(), 5.0),
+            Modifier::flat(id::<Strength>(), 5.0).owner_has("state.enraged"),
+        ],
+    );
+    app.tick();
+    assert!(close(get::<Life>(&app, npc), 50.0), "kept to its most: 50");
+    assert!(
+        close(get::<Damage>(&app, npc), 12.0),
+        "10, and 2 per strength"
+    );
+    // Its most's base alone: life, kept to it, follows.
+    set_base::<MaxLife>(&mut app, npc, 70.0);
+    app.tick();
+    assert!(close(get::<Life>(&app, npc), 70.0), "its most moved: 70");
+    // Strength's base alone: damage, per it, follows.
+    set_base::<Strength>(&mut app, npc, 20.0);
+    app.tick();
+    assert!(close(get::<Damage>(&app, npc), 14.0), "4 per strength now");
+    // A tag alone: strength counts it, and damage, per strength, follows.
+    own(&mut app, npc, "state.enraged", true);
+    app.tick();
+    assert!(close(get::<Strength>(&app, npc), 25.0), "enraged: 25");
+    assert!(close(get::<Damage>(&app, npc), 15.0), "5 per strength");
+    // What none of them moves is as it was.
+    assert!(close(get::<Life>(&app, npc), 70.0));
+    assert!(close(get::<MaxLife>(&app, npc), 70.0));
 }
