@@ -314,7 +314,11 @@ impl AttributeState {
             }
         }
         let context = AttributeContext::new();
-        let mut walk = Walk::default();
+        let affected = match &self.stale {
+            Stale::These(_) => Some(self.through(registry)),
+            Stale::Fresh | Stale::All => None,
+        };
+        let mut walk = self.walk_knowing(None, affected.as_deref());
         let work = |state: &Self, attribute: AttributeId, walk: &mut Walk| {
             state
                 .shown_served(attribute)
@@ -327,7 +331,7 @@ impl AttributeState {
                 .collect()
         } else {
             let mut current = self.current.clone();
-            for attribute in self.through(registry) {
+            for attribute in affected.unwrap_or_default() {
                 if self.has(attribute) {
                     current.insert(attribute, work(self, attribute, &mut walk));
                 }
@@ -338,6 +342,69 @@ impl AttributeState {
         self.previous = std::mem::replace(&mut self.current, current);
         self.stale = Stale::Fresh;
         changed
+    }
+
+    /// A walk with nothing in play, from `start` if it's given, that knows
+    /// each value as last worked out but those `affected` (all of them, if
+    /// it's `None`): what didn't change isn't worked out again. Not on an
+    /// actor shown as served: what it last worked out is what it was served.
+    fn walk_knowing(&self, start: Option<AttributeId>, affected: Option<&[AttributeId]>) -> Walk {
+        let mut walk = start.map_or_else(Walk::default, Walk::from);
+        let Some(affected) = affected else {
+            return walk;
+        };
+        if self.remote && !self.provisional {
+            return walk;
+        }
+        for (attribute, value) in self.current.iter() {
+            if Some(attribute) != start && !affected.contains(&attribute) {
+                walk.memo.insert(attribute, *value);
+            }
+        }
+        walk
+    }
+
+    /// What keeping `attribute` within its limits reads: each limit that's
+    /// another attribute, and what that's worked out through, in turn.
+    pub(crate) fn limits_read(
+        &self,
+        registry: &AttributeRegistry,
+        attribute: AttributeId,
+    ) -> Vec<AttributeId> {
+        let mut read: Vec<AttributeId> = Vec::new();
+        let mut next = 0;
+        let add = |read: &mut Vec<AttributeId>, other: AttributeId| {
+            if other != attribute && !read.contains(&other) {
+                read.push(other);
+            }
+        };
+        let limits = |of: AttributeId| {
+            registry.get(of).into_iter().flat_map(|info| {
+                [info.min.as_ref(), info.max.as_ref()]
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|bound| match bound {
+                        Bound::Attribute(other) => Some(*other),
+                        Bound::Value(_) => None,
+                    })
+            })
+        };
+        for other in limits(attribute) {
+            add(&mut read, other);
+        }
+        while let Some(&of) = read.get(next) {
+            next += 1;
+            let per = self
+                .folded
+                .get(of)
+                .into_iter()
+                .flat_map(|folded| folded.scoped.iter().filter_map(|scoped| scoped.per))
+                .map(|(per, _)| per);
+            for other in limits(of).chain(per).collect::<Vec<_>>() {
+                add(&mut read, other);
+            }
+        }
+        read
     }
 
     /// What's changed, and every attribute worked out through it: what a
@@ -407,14 +474,13 @@ impl AttributeState {
         value: f32,
     ) -> f32 {
         let context = AttributeContext::new();
-        self.kept(
-            registry,
-            owned,
-            attribute,
-            value,
-            &context,
-            &mut Walk::from(attribute),
-        )
+        let affected = match &self.stale {
+            Stale::These(_) => Some(self.through(registry)),
+            Stale::Fresh => Some(Vec::new()),
+            Stale::All => None,
+        };
+        let mut walk = self.walk_knowing(Some(attribute), affected.as_deref());
+        self.kept(registry, owned, attribute, value, &context, &mut walk)
     }
 
     /// `value` rounded as `attribute` is, then kept within its limits: the

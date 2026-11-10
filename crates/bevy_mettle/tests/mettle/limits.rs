@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use bevy_harness::TestApp;
 use bevy_mettle::prelude::*;
 
-use crate::common::{Life, MaxLife, actor, app, get, id};
+use crate::common::{Life, MaxLife, Strength, actor, app, get, id};
 
 /// A ward kept at the same fraction of its maximum.
 #[derive(Attribute)]
@@ -73,4 +73,30 @@ fn a_remote_actors_base_is_left_to_its_authority() {
         50.0,
         "what the server serves moves"
     );
+}
+
+#[test]
+fn a_base_changed_is_kept_within_limits_changed_the_same_frame() {
+    let mut app = app();
+    // Its most gains one per strength: what keeping life reads, through it.
+    let mage = actor(
+        &mut app,
+        [Modifier::flat(id::<MaxLife>(), 1.0).per(id::<Strength>(), 1.0)],
+    );
+    app.tick();
+    let life = id::<Life>();
+    // Its most's base set, not yet synced: a change to life reads it anyway.
+    app.entity_mut(mage).insert(Base::<MaxLife>::new(80.0));
+    assert!(
+        app.world_mut()
+            .apply_to_base(mage, life, Operation::Flat, 1000.0)
+    );
+    assert_eq!(base::<Life>(&app, mage), 90.0, "80, and 10 for strength");
+    // What its most is worked out through, set and not synced: read too.
+    app.entity_mut(mage).insert(Base::<Strength>::new(30.0));
+    assert!(
+        app.world_mut()
+            .apply_to_base(mage, life, Operation::Flat, 1000.0)
+    );
+    assert_eq!(base::<Life>(&app, mage), 110.0, "80, and 30 for strength");
 }
