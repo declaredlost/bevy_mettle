@@ -6,6 +6,8 @@ mod slots;
 mod sum;
 mod systems;
 
+use std::sync::OnceLock;
+
 use bevy::prelude::*;
 use bevy_mettle_core::condition::Condition;
 use bevy_mettle_core::tag::{OwnedTags, TagCounts};
@@ -98,10 +100,11 @@ pub struct AttributeState {
     /// The attributes whose values can differ by read: a modifier of one, or
     /// of what it's worked out through (what a modifier's per, a limit
     /// that's another attribute), counts by the read's context. Any other is
-    /// read as cached, whatever the context. Worked out as modifiers are
-    /// folded: with none folded, none can.
+    /// read as cached, whatever the context. Worked out the first time a read
+    /// in context needs it, and again after modifiers are folded: a frame
+    /// with no such read works out nothing.
     #[reflect(ignore)]
-    contextual: Slots<bool>,
+    contextual: OnceLock<Slots<bool>>,
     /// Whether the authority is another world: its values are served.
     remote: bool,
     /// Whether a prediction counts for it: its values are its own.
@@ -221,25 +224,35 @@ impl AttributeState {
                 });
             }
         }
-        self.contextual.clear();
-        // With nothing that counts only sometimes, nothing counts by a read.
-        if self
-            .folded
-            .iter()
-            .all(|(_, folded)| folded.scoped.is_empty())
-        {
-            return;
-        }
-        let mut visiting = Vec::new();
-        for (attribute, _) in registry.iter() {
-            reads_context(
-                &self.folded,
-                registry,
-                attribute,
-                &mut self.contextual,
-                &mut visiting,
-            );
-        }
+        self.contextual = OnceLock::new();
+    }
+
+    /// Which attributes' values can differ by read: worked out the first time
+    /// it's asked after modifiers are folded.
+    fn contextual(&self, registry: &AttributeRegistry) -> &Slots<bool> {
+        self.contextual.get_or_init(|| {
+            let mut contextual = Slots::default();
+            // With nothing that counts only sometimes, nothing counts by a
+            // read.
+            if self
+                .folded
+                .iter()
+                .all(|(_, folded)| folded.scoped.is_empty())
+            {
+                return contextual;
+            }
+            let mut visiting = Vec::new();
+            for (attribute, _) in registry.iter() {
+                reads_context(
+                    &self.folded,
+                    registry,
+                    attribute,
+                    &mut contextual,
+                    &mut visiting,
+                );
+            }
+            contextual
+        })
     }
 
     /// `attribute`'s value in `context`, with the owner owning `owned`; with
@@ -254,7 +267,7 @@ impl AttributeState {
         context: &AttributeContext,
     ) -> f32 {
         // A context nothing of it counts by reads as no context: as cached.
-        let plain = context.is_empty() || self.contextual.get(attribute) != Some(&true);
+        let plain = context.is_empty() || self.contextual(registry).get(attribute) != Some(&true);
         if plain && let Some(value) = self.shown_served(attribute) {
             return value;
         }
