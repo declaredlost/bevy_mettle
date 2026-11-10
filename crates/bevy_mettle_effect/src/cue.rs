@@ -558,10 +558,11 @@ fn burst(
     activation: Option<u64>,
     effect: Option<EffectId>,
 ) {
-    let Some(tag) = world
-        .get_resource::<TagRegistry>()
-        .and_then(|tags| tags.id(cue.tag))
-    else {
+    let Some(tags) = world.get_resource::<TagRegistry>() else {
+        no_tag_tree();
+        return;
+    };
+    let Some(tag) = tags.id(cue.tag) else {
         warn!("cue `{}` isn't in the tag tree: not replicated", cue.tag);
         return;
     };
@@ -616,8 +617,11 @@ pub(crate) fn show(
     handlers: Res<CueHandlers>,
     mut commands: Commands,
 ) {
-    let tree = tree.as_deref().cloned().unwrap_or_default();
     let serving = *role == NetRole::Server;
+    if serving && tree.is_none() && !actors.is_empty() {
+        no_tag_tree();
+    }
+    let tree = tree.as_deref().cloned().unwrap_or_default();
     for (actor, sources, mut served, shown, spawned) in &mut actors {
         // A client just come to see the actor joins the cues it's served.
         let joining = spawned.is_spawned() && !serving;
@@ -693,7 +697,12 @@ pub(crate) fn play(
     time: Res<Time>,
     mut commands: Commands,
 ) {
-    let tree = tree.as_deref().cloned().unwrap_or_default();
+    let Some(tree) = tree.as_deref().cloned() else {
+        if !actors.is_empty() {
+            no_tag_tree();
+        }
+        return;
+    };
     let data = data.as_deref().cloned().unwrap_or_default();
     predicted.forget(time.elapsed_secs_f64() - REMEMBERED);
     for (actor, bursts, played) in &mut actors {
@@ -763,5 +772,16 @@ fn route(world: &mut World, event: CueEvent) {
     };
     if let Err(error) = world.run_system_with(handler, event) {
         warn!("a cue handler failed to run: {error}");
+    }
+}
+
+/// Warns, once, that there's no tag tree: cues go by its numbers, so without
+/// it none is replicated, served or played.
+fn no_tag_tree() {
+    if crate::context::first_warning("no tag tree".to_owned()) {
+        warn!(
+            "there's no `TagRegistry`: cues go over the network by its numbers, so none is \
+             replicated, served or played (loading content inserts it)"
+        );
     }
 }

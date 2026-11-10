@@ -302,6 +302,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   server to cancel its own; a cancel that overtakes its request is held
   for it. Kept in `AbilitySystems`, in `PreUpdate`, added by
   `AbilityPlugin`.
+- A prediction the server never answers is taken back after
+  `PredictionTimeout` (5 seconds by default), as a rejection is, with
+  what it triggered, failing `Failure::Unanswered`; a reply after that is
+  ignored. `abandon_pending` takes back every one at once.
 
 #### `bevy_mettle_lightyear`
 
@@ -315,6 +319,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A client holds a reply confirming its prediction until its actor's
   state as of the reply has arrived, so what it predicted gives way to
   the server's in the same frame: never paid twice, or not at all.
+- A client disconnecting takes back every prediction still awaiting its
+  answer at once, each failing `Failure::Unanswered`, and drops the
+  replies it holds.
 - Owner-only replicas: an actor's effect and ability replicas go to the
   client controlling it alone, following control as it changes hands;
   every client that sees it gets its cues (`ServedCues`, `CueBursts`).

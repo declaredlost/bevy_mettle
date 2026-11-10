@@ -139,6 +139,10 @@ pub enum Failure {
     /// Its input wasn't given, or isn't what its behaviour takes, or doesn't
     /// pass its check: at activation, or given while it was active.
     Input,
+    /// The server didn't answer it in time: taken back, as the connection
+    /// went, or the answer did
+    /// ([`PredictionTimeout`](crate::net::PredictionTimeout)).
+    Unanswered,
 }
 
 /// Triggered on an actor as one of its abilities ends, or is cancelled.

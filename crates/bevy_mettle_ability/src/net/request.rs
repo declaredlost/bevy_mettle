@@ -84,25 +84,54 @@ impl MapEntities for AbilityReply {
     }
 }
 
-/// The abilities a client predicted, by activation, not yet answered; and the
-/// activations derived from each, predicted as it triggered them.
+/// The abilities a client predicted, by activation, not yet answered, with
+/// when each was asked; and the activations derived from each, predicted as it
+/// triggered them.
 #[derive(Resource, Debug, Default)]
 pub(crate) struct Pending {
-    abilities: HashMap<u64, Entity>,
+    abilities: HashMap<u64, Asked>,
     derived: HashMap<u64, Vec<u64>>,
 }
 
+/// A predicted activation awaiting its answer, as it was asked: what's needed
+/// to take it back, and say so, whatever becomes of its entities by then.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Asked {
+    /// The granted ability.
+    pub(crate) ability: Entity,
+    /// Whose it is.
+    pub(crate) actor: Entity,
+    /// Which ability it is.
+    pub(crate) id: AbilityId,
+    /// When it was asked: seconds elapsed.
+    pub(crate) at: f64,
+}
+
+impl Asked {
+    /// `ability`, asked now, if it's granted.
+    pub(crate) fn of(world: &World, ability: Entity) -> Option<Self> {
+        let actor = world.get::<AbilityOf>(ability)?.0;
+        let id = world.get::<GrantedAbility>(ability)?.def.id;
+        Some(Self {
+            ability,
+            actor,
+            id,
+            at: now(world),
+        })
+    }
+}
+
 impl Pending {
-    /// `ability`, predicted under `activation`.
-    pub(crate) fn insert(&mut self, activation: u64, ability: Entity) {
-        self.abilities.insert(activation, ability);
+    /// `asked`, predicted under `activation`.
+    pub(crate) fn insert(&mut self, activation: u64, asked: Asked) {
+        self.abilities.insert(activation, asked);
     }
 
-    /// `ability`, predicted under `activation`, derived from `parent`'s: undone
+    /// `asked`, predicted under `activation`, derived from `parent`'s: undone
     /// with it while it awaits its answer. Derived after it's answered, it
     /// stands alone, answered on its own.
-    pub(crate) fn insert_derived(&mut self, parent: u64, activation: u64, ability: Entity) {
-        self.insert(activation, ability);
+    pub(crate) fn insert_derived(&mut self, parent: u64, activation: u64, asked: Asked) {
+        self.insert(activation, asked);
         if self.abilities.contains_key(&parent) {
             self.derived.entry(parent).or_default().push(activation);
         }
@@ -110,7 +139,28 @@ impl Pending {
 
     /// What was predicted under `activation`, taken: answered.
     fn take(&mut self, activation: u64) -> Option<Entity> {
+        self.take_asked(activation).map(|asked| asked.ability)
+    }
+
+    /// What was predicted under `activation`, as it was asked, taken.
+    fn take_asked(&mut self, activation: u64) -> Option<Asked> {
         self.abilities.remove(&activation)
+    }
+
+    /// The activations asked before `before` (every one, if it's `None`),
+    /// oldest first: what's waited too long for an answer.
+    fn overdue(&self, before: Option<f64>) -> Vec<u64> {
+        let mut overdue: Vec<(u64, f64)> = self
+            .abilities
+            .iter()
+            .filter(|(_, asked)| before.is_none_or(|before| asked.at < before))
+            .map(|(activation, asked)| (*activation, asked.at))
+            .collect();
+        overdue.sort_by(|one, other| one.1.total_cmp(&other.1).then(one.0.cmp(&other.0)));
+        overdue
+            .into_iter()
+            .map(|(activation, _)| activation)
+            .collect()
     }
 
     /// The activations derived from `parent`'s, taken.
@@ -262,9 +312,11 @@ fn predicting(
     activate: impl FnOnce(&mut World, u64) -> Result<(), Failure>,
 ) -> Result<u64, Failure> {
     let activation = engine::next_activation(world);
-    world
-        .get_resource_or_init::<Pending>()
-        .insert(activation, ability);
+    if let Some(asked) = Asked::of(world, ability) {
+        world
+            .get_resource_or_init::<Pending>()
+            .insert(activation, asked);
+    }
     if let Err(failure) = activate(world, activation) {
         if let Some(mut pending) = world.get_resource_mut::<Pending>() {
             pending.take(activation);
@@ -511,11 +563,97 @@ fn undo(world: &mut World, actor: Entity, activation: u64, ability: Option<Entit
     }
 }
 
+/// How long a client waits for a predicted activation's answer: 5 s at first.
+///
+/// Waited out, it's taken back as a rejection is, failing
+/// [`Failure::Unanswered`].
+///
+/// Over a transport that delivers its messages, an answer only goes missing
+/// as the connection does; this is what's left to take back then. One that
+/// comes later is ignored.
+#[derive(Resource, Debug, Clone, Copy, PartialEq)]
+pub struct PredictionTimeout(pub std::time::Duration);
+
+impl Default for PredictionTimeout {
+    fn default() -> Self {
+        Self(std::time::Duration::from_secs(5))
+    }
+}
+
+/// Seconds elapsed in `world`: when something's asked.
+pub(crate) fn now(world: &World) -> f64 {
+    world
+        .get_resource::<Time>()
+        .map_or(0.0, Time::elapsed_secs_f64)
+}
+
+/// On a client: takes back each predicted activation that's waited longer
+/// than [`PredictionTimeout`] for its answer, as a rejection would.
+pub(crate) fn expire(world: &mut World) {
+    let timeout = world
+        .get_resource::<PredictionTimeout>()
+        .copied()
+        .unwrap_or_default();
+    let before = now(world) - timeout.0.as_secs_f64();
+    abandon(world, Some(before));
+}
+
+/// Takes back every activation this client predicted that awaits its answer,
+/// as a rejection would, each failing [`Failure::Unanswered`]: what a lost
+/// connection leaves.
+pub fn abandon_pending(world: &mut World) {
+    abandon(world, None);
+}
+
+/// Takes back each activation asked before `before` (every one, if `None`)
+/// that awaits its answer, failing [`Failure::Unanswered`].
+fn abandon(world: &mut World, before: Option<f64>) {
+    let Some(overdue) = world
+        .get_resource::<Pending>()
+        .map(|pending| pending.overdue(before))
+    else {
+        return;
+    };
+    for activation in overdue {
+        // Taken back with its parent already, as one it triggered.
+        let Some(asked) = world
+            .get_resource_mut::<Pending>()
+            .and_then(|mut pending| pending.take_asked(activation))
+        else {
+            continue;
+        };
+        // Its entities may be gone (a disconnect takes a client's replicas
+        // first): what it predicted is taken back, and it's told, all the
+        // same.
+        let ability = world
+            .get_entity(asked.ability)
+            .is_ok()
+            .then_some(asked.ability);
+        undo(world, asked.actor, activation, ability);
+        world.trigger(AbilityFailed {
+            entity: asked.actor,
+            id: asked.id,
+            reason: Failure::Unanswered,
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use bevy::prelude::*;
+    use bevy_mettle_core::registry::AbilityId;
 
-    use super::Pending;
+    use super::{Asked, Pending};
+
+    /// `ability`, asked of nobody in particular.
+    fn asked(ability: Entity) -> Asked {
+        Asked {
+            ability,
+            actor: ability,
+            id: AbilityId::new(0),
+            at: 0.0,
+        }
+    }
 
     #[test]
     fn a_child_links_to_its_parent_only_while_the_parent_awaits_its_answer() {
@@ -526,15 +664,15 @@ mod tests {
             world.spawn_empty().id(),
         );
         let mut pending = Pending::default();
-        pending.insert(1, parent);
-        pending.insert_derived(1, 2, first);
+        pending.insert(1, asked(parent));
+        pending.insert_derived(1, 2, asked(first));
         assert_eq!(pending.derived.get(&1), Some(&vec![2]), "linked");
 
         // Answered: confirmed, what it triggered answered on its own.
         assert_eq!(pending.take(1), Some(parent));
         assert_eq!(pending.take_derived(1), [2]);
 
-        pending.insert_derived(1, 3, second);
+        pending.insert_derived(1, 3, asked(second));
         assert_eq!(pending.take_derived(1), [], "not linked: answered already");
         assert_eq!(pending.take(3), Some(second), "but pending itself");
         assert_eq!(pending.take(2), Some(first));

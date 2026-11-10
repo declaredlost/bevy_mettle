@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy_mettle_ability::events::Failure;
 use bevy_mettle_ability::net::{
     AbilityCancelRequest, AbilityEnd, AbilityInput, AbilityReply, AbilityRequest,
-    AbilityRequestWith, AbilityStarted, AbilityStartedWith,
+    AbilityRequestWith, AbilityStarted, AbilityStartedWith, abandon_pending,
 };
 use bevy_replicon::prelude::RepliconTick;
 use bevy_replicon::server::server_tick::ServerTick;
@@ -40,6 +40,22 @@ impl MapEntities for Answer {
 /// how many frames each has been.
 #[derive(Resource, Default)]
 pub(super) struct Held(Vec<(Answer, u32)>);
+
+/// On a client losing its server: every activation it predicted that awaits
+/// its answer is taken back, failing `Unanswered`, and the replies held for
+/// it let go of. They'd never come now.
+pub(super) fn abandon(
+    disconnected: On<Add<Disconnected>>,
+    clients: Query<(), With<Client>>,
+    mut held: ResMut<Held>,
+    mut commands: Commands,
+) {
+    if !clients.contains(disconnected.entity) {
+        return;
+    }
+    held.0.clear();
+    commands.queue(abandon_pending);
+}
 
 /// On a client: sends the requests with input, and the new input, mettle
 /// wrote to the server.

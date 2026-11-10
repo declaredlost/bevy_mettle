@@ -2087,3 +2087,74 @@ fn a_client_cant_cancel_a_server_only_ability() {
         .entity(ability::<Smite>(server, there))
         .assert_has::<Smiting>();
 }
+
+/// The client's fireball on `here` predicted and asked for, the server not
+/// yet run since: what's left waiting on its answer.
+fn awaiting(world: &mut TestWorld, here: Entity) {
+    let client = &mut world["client"];
+    client.watch_triggered::<AbilityFailed>();
+    // Never on its own, within the test.
+    client
+        .world_mut()
+        .insert_resource(PredictionTimeout(Duration::from_secs(60)));
+    client.world_mut().activate_ability(here, Fireball).unwrap();
+    client.tick();
+    assert!(same(mana(client, here), 10.0), "predicted");
+    assert!(running::<Fireball>(client, here).is_some());
+}
+
+/// The client, disconnected.
+fn disconnect(world: &mut TestWorld) {
+    let client = &mut world["client"];
+    let peer = client.query::<Entity, With<Client>>().single();
+    client.entity_mut(peer).insert(Disconnected::default());
+}
+
+/// The one failure the client heard of: its fireball's, unanswered.
+fn unanswered(client: &mut TestApp, here: Entity) {
+    let fireball = client
+        .resource::<AbilityRegistry>()
+        .id_of::<Fireball>()
+        .unwrap();
+    assert_eq!(
+        client.read_triggered::<AbilityFailed>(),
+        [AbilityFailed {
+            entity: here,
+            id: fireball,
+            reason: Failure::Unanswered,
+        }],
+        "failed unanswered, at once"
+    );
+}
+
+#[test]
+fn a_client_disconnecting_takes_back_what_awaits_its_answer_at_once() {
+    let mut world = net();
+    // What was replicated stays as the client disconnects.
+    let peer = world["client"].query::<Entity, With<Client>>().single();
+    world["client"].entity_mut(peer).insert(Persistent);
+    let (_, here) = mage(&mut world, true);
+    awaiting(&mut world, here);
+    disconnect(&mut world);
+    let client = &mut world["client"];
+    unanswered(client, here);
+    client.tick();
+    assert_eq!(running::<Fireball>(client, here), None, "taken back");
+    assert!(same(mana(client, here), 30.0), "mana back");
+    assert_eq!(effects(client, here), [], "the cooldown taken off");
+    client.ticks(5);
+    assert_eq!(client.read_triggered::<AbilityFailed>(), [], "once");
+}
+
+#[test]
+fn a_client_disconnecting_tells_of_what_it_predicted_as_its_replicas_go() {
+    let mut world = net();
+    let (_, here) = mage(&mut world, true);
+    awaiting(&mut world, here);
+    disconnect(&mut world);
+    let client = &mut world["client"];
+    unanswered(client, here);
+    client.ticks(5);
+    assert!(client.world().get_entity(here).is_err(), "despawned");
+    assert_eq!(client.read_triggered::<AbilityFailed>(), [], "once");
+}

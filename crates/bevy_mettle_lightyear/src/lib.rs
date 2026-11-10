@@ -145,6 +145,7 @@ impl Plugin for MettleNetPlugin {
         app.component::<AbilityReplica>().replicate();
         app.component::<AbilityOf>().replicate();
         app.component::<ModifiersReplica>().replicate();
+        app.add_observer(abilities::abandon);
         app.init_resource::<Held>()
             .add_systems(
                 PreUpdate,

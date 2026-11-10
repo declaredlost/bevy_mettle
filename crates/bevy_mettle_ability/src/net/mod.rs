@@ -28,9 +28,12 @@ pub use self::input::AbilityInput;
 pub(crate) use self::input::{add_input, send_input};
 pub use self::replica::AbilityReplica;
 pub(crate) use self::replica::{show_replicas, sync_replicas};
-pub use self::request::{AbilityReply, AbilityRequest, AbilityRequestWith};
+pub use self::request::{
+    AbilityReply, AbilityRequest, AbilityRequestWith, PredictionTimeout, abandon_pending,
+};
 pub(crate) use self::request::{
-    Pending, answer, predict, predict_granted, predict_tagged, predict_with, reject, resolve, serve,
+    Asked, Pending, answer, expire, predict, predict_granted, predict_tagged, predict_with, reject,
+    resolve, serve,
 };
 pub use self::start::{AbilityStarted, AbilityStartedWith};
 pub(crate) use self::start::{hear_started, hear_started_with, started, tells_start};

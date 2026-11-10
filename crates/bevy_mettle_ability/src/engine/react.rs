@@ -57,10 +57,12 @@ pub(crate) fn send(world: &mut World, event: GameplayEvent) {
                 if parent & crate::net::SERVERS != 0 {
                     continue;
                 }
-                if activate(world, ability, Some(event.clone()), Some(activation)).is_ok() {
+                if activate(world, ability, Some(event.clone()), Some(activation)).is_ok()
+                    && let Some(asked) = crate::net::Asked::of(world, ability)
+                {
                     world
                         .get_resource_or_init::<crate::net::Pending>()
-                        .insert_derived(parent, activation, ability);
+                        .insert_derived(parent, activation, asked);
                 }
             }
             NetRole::Server => {

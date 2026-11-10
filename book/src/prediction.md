@@ -298,6 +298,16 @@ assert!(client.world().get::<ActiveEffects>(mage).is_none_or(|effects| effects.i
 client does with a reply. Abilities call them for you as replies arrive. Call
 them yourself only for effects you predict under an activation of your own.
 
+### Unanswered
+
+A reply can go missing with the connection. A prediction still waiting after
+[`PredictionTimeout`] (5 seconds by default) is taken back as a rejection is,
+with what it triggered, and [`AbilityFailed`] says `Failure::Unanswered`. A
+reply that comes after that is ignored: the server's state still arrives, as
+it would anyway. [`abandon_pending`] takes back every prediction waiting at
+once, for a transport that knows its connection is gone. Over lightyear, a
+disconnect does that for you.
+
 ## Endings, both ways
 
 A predicted ability runs on both sides, and the server decides how it ends:
@@ -366,6 +376,8 @@ Ability requests, replies and replicas are handled in [`AbilitySystems`], in
 [`AbilityFailed`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityFailed.html
 [`AbilityReplica`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityReplica.html
 [`AbilityReply`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityReply.html
+[`PredictionTimeout`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.PredictionTimeout.html
+[`abandon_pending`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/fn.abandon_pending.html
 [`AbilityEnd`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityEnd.html
 [`AbilityCancelRequest`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityCancelRequest.html
 [`AbilityRequest`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityRequest.html
