@@ -176,13 +176,13 @@ impl AttributeApp for App {
                 .in_set(crate::plugin::Phase::Sync),
         )
         .add_systems(
-            bevy_mettle_core::schedule::Mettle,
+            bevy_mettle_core::Mettle,
             (
                 crate::registry::state::publish::<A>,
                 crate::authority::serve::<A>,
             )
                 .chain()
-                .in_set(bevy_mettle_core::schedule::MettleSet::Publish),
+                .in_set(bevy_mettle_core::MettleSet::Publish),
         )
     }
 }

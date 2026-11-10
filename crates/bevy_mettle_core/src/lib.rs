@@ -10,7 +10,8 @@ mod error;
 pub mod net;
 pub mod prelude;
 pub mod registry;
-pub mod schedule;
+mod schedule;
 pub mod tag;
 
 pub use self::error::{Error, Errors};
+pub use self::schedule::{Mettle, MettleCorePlugin, MettleSet, MettleSystems};

@@ -78,7 +78,7 @@ fn seed<A: Attribute>(mut world: DeferredWorld, context: HookContext) {
 ///
 /// Every modifier that counts with nothing in play (GAS's current value).
 /// Mettle's to write, as mettle publishes values
-/// ([`MettleSet::Publish`](bevy_mettle_core::schedule::MettleSet::Publish)),
+/// ([`MettleSet::Publish`](bevy_mettle_core::MettleSet::Publish)),
 /// and only when it changes: `Changed<Current<A>>` is it changing. For a read
 /// in context (a hit's tags), see
 /// [`AttributeReader`](crate::read::AttributeReader).

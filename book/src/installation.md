@@ -147,11 +147,11 @@ plugins one by one, also add [`MettleContentPlugin`]. It loads
   after them. [Over lightyear](lightyear.md) shows how.
 
 [`MettlePlugins`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettlePlugins.html
-[`Mettle`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/schedule/struct.Mettle.html
-[`MettleSet`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/schedule/enum.MettleSet.html
-[`MettleSystems`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/schedule/struct.MettleSystems.html
-[`MettleCorePlugin`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/schedule/struct.MettleCorePlugin.html
-[`MettleCorePlugin::new`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/schedule/struct.MettleCorePlugin.html#method.new
+[`Mettle`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.Mettle.html
+[`MettleSet`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/enum.MettleSet.html
+[`MettleSystems`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.MettleSystems.html
+[`MettleCorePlugin`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.MettleCorePlugin.html
+[`MettleCorePlugin::new`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.MettleCorePlugin.html#method.new
 [`AbilitySystems`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilitySystems.html
 [`MettleContentPlugin`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleContentPlugin.html
 [`MettleContent`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleContent.html

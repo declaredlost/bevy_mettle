@@ -164,8 +164,8 @@ or [MIT license](https://github.com/declaredlost/bevy_mettle/blob/main/LICENSE-M
 [`ModifierOf`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.ModifierOf.html
 [`AttributeReader`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/read/struct.AttributeReader.html
 [`Served`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/authority/struct.Served.html
-[`Mettle`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/schedule/struct.Mettle.html
-[`MettleSet::Attributes`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/schedule/enum.MettleSet.html#variant.Attributes
-[`MettleSet::Publish`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/schedule/enum.MettleSet.html#variant.Publish
-[`MettleCorePlugin::new`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/schedule/struct.MettleCorePlugin.html#method.new
-[`MettleSystems`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/schedule/struct.MettleSystems.html
+[`Mettle`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.Mettle.html
+[`MettleSet::Attributes`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/enum.MettleSet.html#variant.Attributes
+[`MettleSet::Publish`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/enum.MettleSet.html#variant.Publish
+[`MettleCorePlugin::new`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.MettleCorePlugin.html#method.new
+[`MettleSystems`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.MettleSystems.html

@@ -1,8 +1,8 @@
 use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
 use bevy_mettle_core::net::NetRole;
-use bevy_mettle_core::schedule::{self, Mettle, MettleSet};
 use bevy_mettle_core::tag::{OwnedTags, publish_tags};
+use bevy_mettle_core::{Mettle, MettleCorePlugin, MettleSet};
 
 use crate::authority::{self, Remote};
 use crate::modifier::{ModifierOf, ModifierSources, Modifiers, ModifiersReplica, Provisional};
@@ -44,7 +44,7 @@ pub struct AttributePlugin;
 
 impl Plugin for AttributePlugin {
     fn build(&self, app: &mut App) {
-        schedule::ensure(app);
+        MettleCorePlugin::ensure(app);
         app.register_type::<Modifiers>()
             .register_type::<ModifierOf>()
             .register_type::<ModifiersReplica>()

@@ -61,6 +61,14 @@ impl MettleCorePlugin {
     pub fn run_in(&self) -> InternedScheduleLabel {
         self.run_in
     }
+
+    /// Adds the default to `app` if mettle doesn't run there yet, as every
+    /// part's plugin does.
+    pub fn ensure(app: &mut App) {
+        if !app.world().contains_resource::<RunIn>() {
+            app.add_plugins(Self::default());
+        }
+    }
 }
 
 impl Default for MettleCorePlugin {
@@ -105,14 +113,6 @@ impl Plugin for MettleCorePlugin {
                     .chain(),
             )
             .add_systems(self.run_in, run.in_set(MettleSystems));
-    }
-}
-
-/// Adds [`MettleCorePlugin`] to `app` if it isn't there yet, as parts
-/// do.
-pub fn ensure(app: &mut App) {
-    if !app.world().contains_resource::<RunIn>() {
-        app.add_plugins(MettleCorePlugin::default());
     }
 }
 

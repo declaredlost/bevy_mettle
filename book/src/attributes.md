@@ -293,5 +293,5 @@ predictions show until the server answers.
 [`Current`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/struct.Current.html
 [`AttributeChanged<A>`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/registry/struct.AttributeChanged.html
 [`Remote`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/authority/struct.Remote.html
-[`Mettle`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/schedule/struct.Mettle.html
-[`MettleSystems`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/schedule/struct.MettleSystems.html
+[`Mettle`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.Mettle.html
+[`MettleSystems`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.MettleSystems.html

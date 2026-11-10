@@ -13,7 +13,7 @@ use crate::Attribute;
 /// went. Told to observers of the actor (`commands.entity(hero).observe(..)`)
 /// and to global ones (`On<AttributeChanged<Life>>`), as mettle publishes
 /// values
-/// ([`MettleSet::Publish`](bevy_mettle_core::schedule::MettleSet::Publish)).
+/// ([`MettleSet::Publish`](bevy_mettle_core::MettleSet::Publish)).
 /// Values that only differ for some reads (a hit's bonus) aren't told.
 #[derive(EntityEvent)]
 pub struct AttributeChanged<A: Attribute> {

@@ -5,7 +5,7 @@
 #![cfg_attr(not(doctest), doc = include_str!("../README.md"))]
 
 use bevy::app::plugin_group;
-use bevy_mettle_core::schedule::MettleCorePlugin;
+use bevy_mettle_core::MettleCorePlugin;
 
 mod content;
 

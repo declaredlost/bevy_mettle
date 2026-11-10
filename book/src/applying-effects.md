@@ -522,9 +522,9 @@ would do.
 [`EffectWorld::preview_effect`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/trait.EffectWorld.html#tymethod.preview_effect
 [`EffectRegistry`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectRegistry.html
 [`EffectPlugin`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectPlugin.html
-[`Mettle`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/schedule/struct.Mettle.html
-[`MettleSet::Effects`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/schedule/enum.MettleSet.html#variant.Effects
-[`MettleSet::Attributes`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/schedule/enum.MettleSet.html#variant.Attributes
+[`Mettle`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.Mettle.html
+[`MettleSet::Effects`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/enum.MettleSet.html#variant.Effects
+[`MettleSet::Attributes`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/enum.MettleSet.html#variant.Attributes
 [`ActiveEffect`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/active/struct.ActiveEffect.html
 [`ActiveEffects`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/active/struct.ActiveEffects.html
 [`EffectOf`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/active/struct.EffectOf.html

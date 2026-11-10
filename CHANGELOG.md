@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MettleCorePlugin` runs it, in `FixedPostUpdate` unless
   `MettleCorePlugin::new` says otherwise, from a system in `MettleSystems`,
   which game systems order themselves against. Every part's plugin adds it
-  if it isn't there yet (`schedule::ensure`); `MettlePlugins` has it first.
+  if it isn't there yet (`MettleCorePlugin::ensure`); `MettlePlugins` has it first.
   `Mettle`, `MettleSet`, `MettleSystems` and `MettleCorePlugin` are in the
   preludes.
 - `AttributeFold`: the schedule attributes are folded in, run from
