@@ -149,7 +149,7 @@ fn tags() -> TagRegistry {
 }
 
 fn curves() -> CurveRegistry {
-    CurveRegistry::build(&[LevelCurve {
+    CurveRegistry::build(&[CurveData {
         name: Name::from_static("damage"),
         interpolation: Interpolation::Linear,
         keys: vec![(1.0, 10.0), (11.0, 110.0)],

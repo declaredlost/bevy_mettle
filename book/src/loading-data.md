@@ -50,7 +50,7 @@ it. Whatever format your game reads, the shape is the same:
   and is empty if it is. Unknown fields are errors, so a typo in a field's
   name doesn't pass quietly.
 - **Each definition** is a struct with the fields its chapter lists:
-  [`LevelCurve`](curves.md), [`EffectData`](effects.md#fields),
+  [`CurveData`](curves.md), [`EffectData`](effects.md#fields),
   [`AbilityData`](abilities.md#the-fields) and [`Grant`](grants-triggers.md).
   Fields that have a default can be left out. Unknown fields are errors here
   too.

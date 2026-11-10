@@ -59,7 +59,7 @@ mod tests {
     #[test]
     fn a_kind_is_called_without_any() {
         assert_eq!(called("AnyEffect"), "effect");
-        assert_eq!(called("AnyLevelCurve"), "level_curve");
+        assert_eq!(called("AnyCurveData"), "curve_data");
         assert_eq!(called("Anything"), "anything");
         assert_eq!(called("Item"), "item");
     }

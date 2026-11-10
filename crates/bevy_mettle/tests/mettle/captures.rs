@@ -36,13 +36,13 @@ const BURNING: &str = "state.burning";
 
 fn curves() -> CurveRegistry {
     CurveRegistry::build(&[
-        LevelCurve {
+        CurveData {
             name: Name::from_static("growth"),
             interpolation: Interpolation::Linear,
             keys: vec![(1.0, 1.0), (11.0, 11.0)],
         },
         // Diminishing returns: 1 for 1 up to 10, then 1 for 2.
-        LevelCurve {
+        CurveData {
             name: Name::from_static("softcap"),
             interpolation: Interpolation::Linear,
             keys: vec![(0.0, 0.0), (10.0, 10.0), (30.0, 20.0)],

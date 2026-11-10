@@ -28,7 +28,7 @@ curves, the condition language, and the registries everything is numbered in.
 - [`Tags`] is a set of them, what an effect or an ability is labelled with;
   [`OwnedTags`] is what an actor owns by count, as its states come and go,
   told by [`TagAdded`] and [`TagRemoved`].
-- A [`CurveRegistry`] is values by level, from [`LevelCurve`]s in data, built as
+- A [`CurveRegistry`] is values by level, from [`CurveData`]s in data, built as
   Bevy's curves: what effects scale by.
 - A [`Condition`] is an expression over a read's tags, what its owner,
   target and source own, and the facts it supplies, weighed from 0 to 1.
@@ -81,7 +81,7 @@ hit.insert(Fire);
 assert!(hit.contains(Elemental));
 
 // Damage by level: 10 at level 1, 110 at level 11, linearly between.
-let curves = CurveRegistry::build(&[LevelCurve {
+let curves = CurveRegistry::build(&[CurveData {
     name: Name::new("fireball.damage"),
     interpolation: Interpolation::Linear,
     keys: vec![(1.0, 10.0), (11.0, 110.0)],
@@ -123,6 +123,6 @@ or [MIT license](https://github.com/declaredlost/bevy_mettle/blob/main/LICENSE-M
 [`TagAdded`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagAdded.html
 [`TagRemoved`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagRemoved.html
 [`CurveRegistry`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveRegistry.html
-[`LevelCurve`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.LevelCurve.html
+[`CurveData`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveData.html
 [`Condition`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/condition/type.Condition.html
 [`Error`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/enum.Error.html

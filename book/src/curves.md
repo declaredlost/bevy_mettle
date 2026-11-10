@@ -1,24 +1,27 @@
 # Curves
 
-A curve gives a value by level. The mage's fireball hits harder as it levels
-up: 10 damage at level 1, 85 at level 10, 240 at level 20. Effects scale
-their numbers by curves, as Unreal's curve tables do.
+A curve gives a value by key. Usually the key is the level: the mage's
+fireball hits harder as it levels up, 10 damage at level 1, 85 at level 10,
+240 at level 20. Effects scale their numbers by curves, as Unreal's curve
+tables do. A magnitude can read a curve at anything else it works out too,
+an attribute for diminishing returns: see
+[Magnitudes](effects.md#magnitudes).
 
 ## Defining a curve
 
-A curve is data, a [`LevelCurve`]: a name, how it goes between its keys, and
-its keys as `(level, value)` pairs, levels rising:
+A curve is data, a [`CurveData`]: a name, how it goes between its keys, and
+its keys as `(at, value)` pairs, rising:
 
 ```rust
 # use bevy_mettle::prelude::*;
-fn curves() -> Vec<LevelCurve> {
+fn curves() -> Vec<CurveData> {
     vec![
-        LevelCurve {
+        CurveData {
             name: "fireball.damage".into(),
             interpolation: Interpolation::Constant,
             keys: vec![(1.0, 10.0), (10.0, 85.0), (20.0, 240.0)],
         },
-        LevelCurve {
+        CurveData {
             name: "burning.damage".into(),
             interpolation: Interpolation::Linear,
             keys: vec![(1.0, 4.0), (20.0, 40.0)],
@@ -29,7 +32,7 @@ fn curves() -> Vec<LevelCurve> {
 ```
 
 Here the fireball's damage steps up at levels 10 and 20, and burning's
-grows steadily between its keys. `LevelCurve` is a serde type: in a file, it's
+grows steadily between its keys. `CurveData` is a serde type: in a file, it's
 a struct with a `name` (a string), an `interpolation`, and
 `keys` as a list of pairs. `interpolation` can be left out: it's `Linear`
 unless it says.
@@ -59,14 +62,14 @@ a curve's number by its name:
 
 ```rust
 # use bevy_mettle::prelude::*;
-# fn curves() -> Vec<LevelCurve> {
+# fn curves() -> Vec<CurveData> {
 #     vec![
-#         LevelCurve {
+#         CurveData {
 #             name: "fireball.damage".into(),
 #             interpolation: Interpolation::Constant,
 #             keys: vec![(1.0, 10.0), (10.0, 85.0), (20.0, 240.0)],
 #         },
-#         LevelCurve {
+#         CurveData {
 #             name: "burning.damage".into(),
 #             interpolation: Interpolation::Linear,
 #             keys: vec![(1.0, 4.0), (20.0, 40.0)],
@@ -106,7 +109,7 @@ adaptors:
 ```rust
 # use bevy_mettle::prelude::*;
 # use bevy_mettle::core::registry::Name;
-# let curves = CurveRegistry::build(&[LevelCurve {
+# let curves = CurveRegistry::build(&[CurveData {
 #     name: Name::from_static("burning.damage"),
 #     interpolation: Interpolation::Linear,
 #     keys: vec![(1.0, 4.0), (20.0, 40.0)],
@@ -124,7 +127,7 @@ assert_eq!(graph.len(), 20);
 - **Easing goes from one key to the next.** `Ease(QuadraticIn)` starts slow
   after every key, not once across the whole curve.
 
-[`LevelCurve`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.LevelCurve.html
+[`CurveData`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveData.html
 [`MettleContent`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleContent.html
 [`CurveRegistry::build`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveRegistry.html#method.build
 [`CurveId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.CurveId.html
