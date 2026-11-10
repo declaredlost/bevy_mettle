@@ -42,12 +42,12 @@ type Touched = Or<(Changed<AttributeState>, Changed<OwnedTags>)>;
 /// marking its state changed only where one did.
 pub(crate) fn refresh(
     registry: Res<AttributeRegistry>,
-    mut actors: Query<(&mut AttributeState, &OwnedTags), Touched>,
+    mut actors: Query<(&mut AttributeState, Ref<OwnedTags>), Touched>,
 ) {
     for (mut state, owned) in &mut actors {
         if state
             .bypass_change_detection()
-            .refresh(&registry, owned.counts())
+            .refresh(&registry, owned.counts(), owned.is_changed())
         {
             state.set_changed();
         }
@@ -103,7 +103,7 @@ pub(crate) fn rework(
         if state.is_stale() {
             state
                 .bypass_change_detection()
-                .refresh(&registry, owned.counts());
+                .refresh(&registry, owned.counts(), false);
         }
     }
 }

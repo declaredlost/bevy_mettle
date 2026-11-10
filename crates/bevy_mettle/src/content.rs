@@ -8,7 +8,7 @@ use bevy_mettle_ability::data::{AbilityData, Grant};
 use bevy_mettle_ability::{AbilityChecks, AbilityRegistry};
 #[cfg(feature = "effect")]
 use bevy_mettle_attribute::registry::AttributeRegistry;
-use bevy_mettle_core::curve::{CurveRegistry, LevelCurve};
+use bevy_mettle_core::curve::{CurveData, CurveRegistry};
 use bevy_mettle_core::tag::{TagKey, TagRegistry};
 use bevy_mettle_core::{Error, Errors};
 #[cfg(feature = "effect")]
@@ -18,8 +18,6 @@ use bevy_mettle_effect::data::EffectData;
 #[cfg(feature = "effect")]
 use bevy_mettle_effect::{EffectChecks, EffectRegistry};
 use serde::{Deserialize, Serialize};
-
-use crate::MettleSystems;
 
 /// The game's content, all of it: tags, curves, effects and abilities.
 ///
@@ -54,7 +52,7 @@ pub struct MettleContent {
     /// ([`add_tag`](bevy_mettle_core::tag::TagApp::add_tag)).
     pub tags: Vec<TagKey>,
     /// The curves effects scale by.
-    pub curves: Vec<LevelCurve>,
+    pub curves: Vec<CurveData>,
     /// The effects there are.
     #[cfg(feature = "effect")]
     pub effects: Vec<EffectData>,
@@ -191,8 +189,18 @@ impl Plugin for MettleContentPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Loaded>()
             .add_systems(PreStartup, load.run_if(changed))
-            .add_systems(PreUpdate, load.run_if(changed).before(MettleSystems));
+            .add_systems(PreUpdate, loading());
     }
+}
+
+/// Loading content in `PreUpdate`: before abilities serve and resolve what
+/// arrived, so they do with the content it names. Effects and attributes
+/// run after it, in the fixed step.
+fn loading() -> bevy::ecs::schedule::ScheduleConfigs<bevy::ecs::system::ScheduleSystem> {
+    let load = load.run_if(changed);
+    #[cfg(feature = "ability")]
+    let load = load.before(bevy_mettle_ability::AbilitySystems);
+    load.into_configs()
 }
 
 /// The change to [`MettleContent`] last loaded or rejected: whichever

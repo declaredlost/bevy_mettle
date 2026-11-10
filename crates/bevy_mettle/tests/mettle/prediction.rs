@@ -2,6 +2,8 @@
 //! and the client keeps or undoes what it predicted. The transport is by hand
 //! here: what an adapter (lightyear's) ships.
 
+use core::time::Duration;
+
 use bevy::ecs::entity::{EntityHashMap, MapEntities};
 use bevy::ecs::message::Messages;
 use bevy::prelude::*;
@@ -29,6 +31,12 @@ struct Bolt;
 #[derive(Ability)]
 struct Kindle;
 
+#[derive(Ability)]
+struct Flare;
+
+#[derive(Ability)]
+struct Spark;
+
 /// Sets its caster burning as it starts, through its activation.
 #[derive(Component, Default, Behaviour)]
 struct Kindling;
@@ -40,6 +48,22 @@ fn kindle(add: On<Add<Kindling>>, active: Query<&ActiveAbility>, mut commands: C
             .apply_effect(active.effect_spec(Burn));
     }
 }
+
+/// Sends its caster `event.spark` under its activation as it starts.
+#[derive(Component, Default, Behaviour)]
+struct Flaring;
+
+fn flare(add: On<Add<Flaring>>, active: Query<&ActiveAbility>, mut commands: Commands) {
+    let Ok(active) = active.get(add.entity) else {
+        return;
+    };
+    let event =
+        GameplayEvent::new(active.actor, TagKey::named("event.spark")).under(active.activation);
+    commands.queue(move |world: &mut World| AbilityWorld::send_event(world, event));
+}
+
+#[derive(Component, Default, Behaviour)]
+struct Sparking;
 
 #[derive(Effect)]
 #[effect(name = "fireball.cooldown")]
@@ -61,11 +85,13 @@ struct Cast;
 #[derive(Route)]
 struct Price;
 
-fn route_price(_: &ExecutionContext, price: f32) -> Vec<BaseChange> {
-    vec![
-        BaseChange::new(id::<Mana>(), Operation::Flat, -price),
-        BaseChange::new(id::<Strength>(), Operation::Flat, 1.0).on_source(),
-    ]
+impl RouteFn for Price {
+    fn route(&self, _: &ExecutionContext, price: f32) -> Vec<BaseChange> {
+        vec![
+            BaseChange::of::<Mana>(Operation::Flat, -price),
+            BaseChange::of::<Strength>(Operation::Flat, 1.0).on_source(),
+        ]
+    }
 }
 
 /// Where a shot is aimed: how far along.
@@ -91,10 +117,35 @@ const TAGS: &[&str] = &[
     "state.stunned",
     "cooldown",
     "cooldown.fireball",
+    "event",
+    "event.spark",
 ];
 
 fn tags() -> TagRegistry {
     TagRegistry::build(TAGS.iter().map(|&name| TagKey::named(name))).unwrap()
+}
+
+/// Every ability both sides have, as data.
+fn abilities() -> [AbilityData; 8] {
+    let fireball = AbilityData::new(Key::of::<Fireball>(), Key::of::<Cast>())
+        .cost("fireball.cost")
+        .cooldown(Key::of::<FireballCooldown>())
+        .blocked_by("state.stunned")
+        .cancel_if(Condition::owner_has("state.stunned"));
+    let charge = AbilityData::new(Key::of::<Charge>(), Key::of::<Cast>())
+        .cost("fireball.cost")
+        .commit(Commit::Manual);
+    let focus = AbilityData::new(Key::of::<Focus>(), Key::of::<Cast>()).cost("focus.cost");
+    let shot = AbilityData::new(Key::of::<Shot>(), Key::of::<Shoot>()).cost("fireball.cost");
+    let bolt = AbilityData::new(Key::of::<Bolt>(), Key::of::<Cast>())
+        .cost("bolt.cost")
+        .blocked_by("state.stunned");
+    let kindle =
+        AbilityData::new(Key::of::<Kindle>(), Key::of::<Kindling>()).blocked_by("state.stunned");
+    let flare = AbilityData::new(Key::of::<Flare>(), Key::of::<Flaring>()).cost("fireball.cost");
+    let spark = AbilityData::new(Key::of::<Spark>(), Key::of::<Sparking>())
+        .trigger(Trigger::Event(TagKey::named("event.spark")));
+    [fireball, charge, focus, shot, bolt, kindle, flare, spark]
 }
 
 /// A world playing as `role`, with fireball.
@@ -104,7 +155,7 @@ fn world(role: NetRole) -> TestApp {
         .with(move |app| {
             app.insert_resource(role);
         })
-        .plugins((EffectPlugin::default(), AbilityPlugin))
+        .plugins((EffectPlugin, AbilityPlugin))
         .with(move |app| {
             // The server knows a shot reaches only 10; the client, 100.
             let reach = if role == NetRole::Server { 10.0 } else { 100.0 };
@@ -112,6 +163,11 @@ fn world(role: NetRole) -> TestApp {
                 .add_behaviour::<Shoot>()
                 .add_behaviour::<Kindling>()
                 .add_observer(kindle)
+                .add_behaviour::<Flaring>()
+                .add_behaviour::<Sparking>()
+                .add_observer(flare)
+                .add_ability::<Flare>()
+                .add_ability::<Spark>()
                 .add_ability::<Kindle>()
                 .check_input::<Aim, _>(in_reach)
                 .insert_resource(Reach(reach))
@@ -120,7 +176,7 @@ fn world(role: NetRole) -> TestApp {
                 .add_ability::<Focus>()
                 .add_ability::<Shot>()
                 .add_ability::<Bolt>()
-                .add_route::<Price>(route_price)
+                .add_route(Price)
                 .add_effect::<FireballCooldown>()
                 .add_effect::<Burn>()
                 .add_effect::<Ward>()
@@ -136,13 +192,13 @@ fn world(role: NetRole) -> TestApp {
                 EffectData::instant("fireball.cost")
                     .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
                 EffectData::instant("bolt.cost").modifier(EffectModifier::route::<Price>(20.0)),
-                EffectData::lasting("fireball.cooldown", 1.0).grant("cooldown.fireball"),
+                EffectData::lasting(Key::of::<FireballCooldown>(), 1.0).grant("cooldown.fireball"),
                 EffectData::instant("focus.cost")
                     .modifier(EffectModifier::new::<Mana>(Operation::Additive, -0.5)),
-                EffectData::lasting("burn", 5.0)
+                EffectData::lasting(Key::of::<Burn>(), 5.0)
                     .period(0.5, false)
                     .modifier(EffectModifier::new::<Mana>(Operation::Flat, -1.0)),
-                EffectData::lasting("ward", 5.0)
+                EffectData::lasting(Key::of::<Ward>(), 5.0)
                     .modifier(EffectModifier::new::<Mana>(Operation::Flat, 1.0))
                     .stacking(Stacking {
                         by: StackBy::Target,
@@ -152,7 +208,7 @@ fn world(role: NetRole) -> TestApp {
                         expire: Expire::ClearAll,
                         overflow: Vec::new(),
                     }),
-                EffectData::infinite("blessed").modifier(
+                EffectData::infinite(Key::of::<Blessed>()).modifier(
                     EffectModifier::new::<Mana>(Operation::Flat, 10.0)
                         .condition(Condition::source_has("state.stunned")),
                 ),
@@ -167,24 +223,10 @@ fn world(role: NetRole) -> TestApp {
             },
         )
         .unwrap();
-    let fireball = AbilityData::new("fireball", "cast")
-        .cost("fireball.cost")
-        .cooldown("fireball.cooldown")
-        .blocked_by("state.stunned")
-        .cancel_if(Condition::owner_has("state.stunned"));
-    let charge = AbilityData::new("charge", "cast")
-        .cost("fireball.cost")
-        .commit(Commit::Manual);
-    let focus = AbilityData::new("focus", "cast").cost("focus.cost");
-    let shot = AbilityData::new("shot", "shoot").cost("fireball.cost");
-    let bolt = AbilityData::new("bolt", "cast")
-        .cost("bolt.cost")
-        .blocked_by("state.stunned");
-    let kindle = AbilityData::new("kindle", "kindling").blocked_by("state.stunned");
     let abilities = world
         .resource::<AbilityRegistry>()
         .recheck(
-            &[fireball, charge, focus, shot, bolt, kindle],
+            &abilities(),
             &[],
             AbilityChecks {
                 tags: world.resource(),
@@ -220,21 +262,48 @@ impl Game {
         let mut client = world(NetRole::Client);
         let there = actor(&mut server, modifiers.to_vec());
         let here = actor(&mut client, modifiers.to_vec());
-        let ability = server.world_mut().grant_ability(there, ability).unwrap();
-        server.tick();
-        let replica = server
-            .world()
-            .get::<AbilityReplica>(ability)
-            .unwrap()
-            .clone();
-        client.spawn((replica, AbilityOf(here)));
-        client.tick();
-        Self {
+        let mut game = Self {
             server,
             client,
             there,
             here,
-        }
+        };
+        game.grant(ability);
+        game
+    }
+
+    /// Grants the mage `ability` on the server, its replica shipped to the
+    /// client.
+    fn grant(&mut self, ability: impl Into<AbilitySpec>) {
+        let ability = self
+            .server
+            .world_mut()
+            .grant_ability(self.there, ability)
+            .unwrap();
+        self.server.tick();
+        let replica = self
+            .server
+            .world()
+            .get::<AbilityReplica>(ability)
+            .unwrap()
+            .clone();
+        self.client.spawn((replica, AbilityOf(self.here)));
+        self.client.tick();
+    }
+
+    /// Waits on the client no longer than `secs` for an answer.
+    fn timeout(&mut self, secs: f32) {
+        self.client
+            .world_mut()
+            .insert_resource(PredictionTimeout(Duration::from_secs_f32(secs)));
+    }
+
+    /// Drops the client's requests: lost on the way.
+    fn lose(&mut self) {
+        self.client
+            .world_mut()
+            .resource_mut::<Messages<AbilityRequest>>()
+            .clear();
     }
 
     /// Ships the client's requests to the server, and runs it.
@@ -653,13 +722,15 @@ fn a_predicted_periodic_effect_predicts_nothing_once_answered() {
     let mut game = Game::new();
     game.client
         .world_mut()
-        .apply_effect(game.here, Burn.spec().activation(7));
+        .apply_effect(game.here, Burn.spec().activation(Activation::client(7)));
     game.client.secs(1.0);
     assert!(
         get::<Mana>(&game.client, game.here) < 30.0,
         "burning, predicted"
     );
-    game.client.world_mut().confirm_prediction(7);
+    game.client
+        .world_mut()
+        .confirm_prediction(Activation::client(7));
     game.client.tick();
     game.client.secs(1.0);
     assert!(
@@ -687,7 +758,7 @@ fn a_stack_predicted_onto_the_servers_effect_is_kept_apart() {
     let ward = shown(&mut game, Ward);
     game.client
         .world_mut()
-        .apply_effect(game.here, Ward.spec().activation(7));
+        .apply_effect(game.here, Ward.spec().activation(Activation::client(7)));
     game.client.tick();
     let stacks = |game: &Game| {
         game.client
@@ -704,7 +775,9 @@ fn a_stack_predicted_onto_the_servers_effect_is_kept_apart() {
         .remaining = Some(5.0);
     game.client.tick();
     assert_eq!(stacks(&game), Some(2), "the predicted stack on top");
-    game.client.world_mut().reject_prediction(7);
+    game.client
+        .world_mut()
+        .reject_prediction(Activation::client(7));
     game.client.tick();
     assert_eq!(stacks(&game), Some(1), "the server's effect stays");
 }
@@ -821,7 +894,7 @@ fn a_request_under_the_servers_bit_is_rejected() {
     game.server.write(AbilityRequest {
         actor: game.there,
         ability: fireball,
-        activation: 1 << 63 | 5,
+        activation: Activation::server(5),
     });
     game.server.tick();
     let replies: Vec<AbilityReply> = game
@@ -1136,4 +1209,197 @@ fn a_cancel_asked_with_the_cast_follows_it_to_the_server() {
     game.server
         .entity(game.ability_there::<Fireball>())
         .assert_lacks::<ActiveAbility>();
+}
+
+#[test]
+fn an_unanswered_prediction_is_taken_back_after_its_timeout() {
+    let mut game = Game::new();
+    game.timeout(0.25);
+    game.client.watch_triggered::<AbilityFailed>();
+    let here = game
+        .client
+        .world_mut()
+        .activate_ability(game.here, Fireball)
+        .unwrap()
+        .ability();
+    game.client.tick();
+    game.lose();
+    assert!(
+        close(get::<Mana>(&game.client, game.here), 10.0),
+        "predicted"
+    );
+    assert_eq!(game.cooldowns_here(), [(true, false)]);
+
+    game.client.secs(0.5);
+    game.client.entity(here).assert_lacks::<ActiveAbility>();
+    assert!(
+        close(get::<Mana>(&game.client, game.here), 30.0),
+        "mana back"
+    );
+    assert_eq!(game.cooldowns_here(), [], "the cooldown taken off");
+    assert!(!owns(&game.client, game.here, "cooldown.fireball"));
+    let fireball = game
+        .client
+        .world()
+        .resource::<AbilityRegistry>()
+        .id_of::<Fireball>()
+        .unwrap();
+    let failed = game.client.read_triggered::<AbilityFailed>();
+    assert_eq!(
+        failed,
+        [AbilityFailed {
+            entity: game.here,
+            id: fireball,
+            reason: Failure::Unanswered,
+        }],
+        "failed once, unanswered"
+    );
+
+    // Nothing left waiting: the next cast predicts, and is answered, as any.
+    game.client
+        .world_mut()
+        .activate_ability(game.here, Fireball)
+        .unwrap();
+    game.client.tick();
+    assert!(close(get::<Mana>(&game.client, game.here), 10.0));
+    assert_eq!(game.cooldowns_here(), [(true, false)]);
+    game.ask();
+    game.answer();
+    assert!(
+        close(get::<Mana>(&game.client, game.here), 10.0),
+        "paid once"
+    );
+    assert_eq!(game.cooldowns_here(), [(false, true)], "the server's");
+    game.client.entity(here).assert_has::<ActiveAbility>();
+    assert_eq!(game.client.read_triggered::<AbilityFailed>(), []);
+}
+
+#[test]
+fn a_prediction_answered_in_time_isnt_taken_back() {
+    let mut game = Game::new();
+    game.timeout(0.5);
+    game.client.watch_triggered::<AbilityFailed>();
+    let here = game
+        .client
+        .world_mut()
+        .activate_ability(game.here, Fireball)
+        .unwrap()
+        .ability();
+    game.client.tick();
+    // The server takes it; its answer takes a while.
+    game.ask();
+    game.client.secs(0.25);
+    game.client.entity(here).assert_has::<ActiveAbility>();
+    assert!(
+        close(get::<Mana>(&game.client, game.here), 10.0),
+        "still waiting"
+    );
+    assert_eq!(game.cooldowns_here(), [(true, false)]);
+    assert_eq!(game.client.read_triggered::<AbilityFailed>(), []);
+
+    // Answered in time: past the timeout now, it's kept.
+    game.answer();
+    game.client.secs(0.5);
+    game.client.entity(here).assert_has::<ActiveAbility>();
+    assert!(close(get::<Mana>(&game.client, game.here), 10.0));
+    assert_eq!(game.client.read_triggered::<AbilityFailed>(), []);
+}
+
+#[test]
+fn a_reply_after_the_timeout_is_ignored() {
+    let mut game = Game::new();
+    game.timeout(0.25);
+    game.client.watch_triggered::<AbilityFailed>();
+    let here = game
+        .client
+        .world_mut()
+        .activate_ability(game.here, Fireball)
+        .unwrap()
+        .ability();
+    game.client.tick();
+    // The server takes it; its answer is slow.
+    game.ask();
+    assert!(close(get::<Mana>(&game.server, game.there), 10.0));
+    game.client.secs(0.5);
+    game.client.entity(here).assert_lacks::<ActiveAbility>();
+    assert!(
+        close(get::<Mana>(&game.client, game.here), 30.0),
+        "taken back"
+    );
+    assert_eq!(game.client.read_triggered::<AbilityFailed>().len(), 1);
+
+    game.answer();
+    game.client
+        .entity(here)
+        .assert_lacks::<ActiveAbility>()
+        .assert_lacks::<Cast>();
+    assert!(
+        close(get::<Mana>(&game.client, game.here), 10.0),
+        "the server's, paid once"
+    );
+    assert_eq!(
+        game.cooldowns_here(),
+        [(false, true)],
+        "the server's, shown"
+    );
+    assert!(owns(&game.client, game.here, "cooldown.fireball"));
+    assert_eq!(
+        game.client.read_triggered::<AbilityFailed>(),
+        [],
+        "not failed again"
+    );
+
+    // The server's state, shown as usual from then on.
+    game.server.tick();
+    game.answer();
+    assert!(close(get::<Mana>(&game.client, game.here), 10.0));
+    game.client.entity(here).assert_lacks::<ActiveAbility>();
+}
+
+#[test]
+fn a_predicted_trigger_is_taken_back_with_its_unanswered_parent() {
+    let mut game = Game::with(Flare, &[]);
+    game.grant(Spark);
+    game.timeout(0.25);
+    game.client.watch_triggered::<AbilityFailed>();
+    let flare = game
+        .client
+        .world_mut()
+        .activate_ability(game.here, Flare)
+        .unwrap()
+        .ability();
+    game.client.tick();
+    game.lose();
+    let spark = game.ability_here::<Spark>();
+    game.client.entity(flare).assert_has::<ActiveAbility>();
+    game.client
+        .entity(spark)
+        .assert_has::<ActiveAbility>()
+        .assert_has::<Sparking>();
+
+    game.client.secs(0.5);
+    game.client.entity(flare).assert_lacks::<ActiveAbility>();
+    game.client
+        .entity(spark)
+        .assert_lacks::<ActiveAbility>()
+        .assert_lacks::<Sparking>();
+    assert!(
+        close(get::<Mana>(&game.client, game.here), 30.0),
+        "mana back"
+    );
+    let flare_id = game
+        .client
+        .world()
+        .resource::<AbilityRegistry>()
+        .id_of::<Flare>()
+        .unwrap();
+    assert_eq!(
+        game.client.read_triggered::<AbilityFailed>(),
+        [AbilityFailed {
+            entity: game.here,
+            id: flare_id,
+            reason: Failure::Unanswered,
+        }],
+        "the flare failed; its spark went with it"
+    );
 }

@@ -192,13 +192,13 @@ fn check_grant(
         .get(id)
         .is_some_and(|effect| !matches!(effect.duration, EffectDuration::Instant));
     if !lasts {
-        errors.push(Error::Invalid {
-            what: format!(
+        errors.push(Error::invalid(
+            format!(
                 "a grant of `{}`: it's instant, so it grants nothing for any while",
                 grant.effect
             ),
-            within: None,
-        });
+            None,
+        ));
         return None;
     }
     Some(id)
@@ -215,10 +215,6 @@ fn compile(
 ) -> Option<AbilityDef> {
     let before = errors.len();
     let within = Some(def.name.as_str());
-    let invalid = |what: String| Error::Invalid {
-        what,
-        within: within.map(ToOwned::to_owned),
-    };
     let mut push = |result: Result<(), Error>| {
         if let Err(error) = result {
             errors.push(error);
@@ -251,10 +247,13 @@ fn compile(
             if let Some(input) = behaviours.input(behaviour)
                 && !def.triggers.is_empty()
             {
-                push(Err(invalid(format!(
-                    "triggers on an ability whose behaviour takes {input}: nothing triggering it \
+                push(Err(Error::invalid(
+                    format!(
+                        "triggers on an ability whose behaviour takes {input}: nothing triggering it \
                      gives it"
-                ))));
+                    ),
+                    within,
+                )));
             }
         }
     }
@@ -291,10 +290,6 @@ fn paid(
     errors: &mut Vec<Error>,
 ) -> (Option<EffectId>, Option<EffectId>) {
     let within = Some(def.name.as_str());
-    let invalid = |what: String| Error::Invalid {
-        what,
-        within: within.map(ToOwned::to_owned),
-    };
     let mut push = |result: Result<(), Error>| {
         if let Err(error) = result {
             errors.push(error);
@@ -309,9 +304,10 @@ fn paid(
             .get(id)
             .is_some_and(|effect| !matches!(effect.duration, EffectDuration::Instant))
         {
-            push(Err(invalid(format!(
-                "a cost of `{cost}`: it isn't instant"
-            ))));
+            push(Err(Error::invalid(
+                format!("a cost of `{cost}`: it isn't instant"),
+                within,
+            )));
         }
         Some(id)
     });
@@ -323,17 +319,19 @@ fn paid(
         if effects.get(id).is_some_and(|effect| {
             matches!(effect.duration, EffectDuration::Instant) || effect.grants.is_empty()
         }) {
-            push(Err(invalid(format!(
-                "a cooldown of `{cooldown}`: it has to last, and grant a tag"
-            ))));
+            push(Err(Error::invalid(
+                format!("a cooldown of `{cooldown}`: it has to last, and grant a tag"),
+                within,
+            )));
         }
         Some(id)
     });
     if def.net == NetExecution::LocalOnly && (def.cost.is_some() || def.cooldown.is_some()) {
-        push(Err(invalid(
+        push(Err(Error::invalid(
             "a cost or a cooldown on an ability run locally only: a server's values would undo \
              what it paid"
                 .to_owned(),
+            within,
         )));
     }
     (cost, cooldown)

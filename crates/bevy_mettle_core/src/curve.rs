@@ -1,4 +1,4 @@
-//! Curves: values by level from content, sampled as Bevy's curves, numbered.
+//! Curves: values by key from content, sampled as Bevy's curves, numbered.
 
 use std::sync::Arc;
 
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
 use crate::error::{Error, Errors};
-use crate::registry::{AnyCurve, CurveId, Kind, Name, Registry};
+use crate::registry::{AnyCurve, CurveId, Key, Kind, Registry};
 
 /// How a curve goes between its keys: held, straight, or eased.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
@@ -27,15 +27,16 @@ pub enum Interpolation {
     Ease(EaseFunction),
 }
 
-/// A curve: a value by level, from keys `(level, value)` with levels rising.
+/// A curve: a value by key, from keys `(at, value)` rising, defined in data.
 ///
-/// What an effect's magnitude scales by, as Unreal's `ScalableFloat` does;
-/// defined in data, and named by an `Name<AnyCurve>`.
+/// What an effect's magnitude scales by, read at the spec's level as Unreal's
+/// `ScalableFloat` is, or at what else the magnitude says: an attribute, for
+/// diminishing returns. Named by a `Key<AnyCurve>`.
 ///
 /// ```
 /// # use bevy_mettle_core::prelude::*;
 /// # use bevy_curve::EaseFunction;
-/// let damage = LevelCurve {
+/// let damage = CurveData {
 ///     name: "fireball.damage".into(),
 ///     interpolation: Interpolation::Ease(EaseFunction::QuadraticIn),
 ///     keys: vec![(1.0, 10.0), (10.0, 85.0), (20.0, 240.0)],
@@ -43,21 +44,21 @@ pub enum Interpolation {
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct LevelCurve {
+pub struct CurveData {
     /// Its name.
-    pub name: Name<AnyCurve>,
+    pub name: Key<AnyCurve>,
     /// How it goes between keys: linearly, unless it says.
     #[serde(default)]
     pub interpolation: Interpolation,
-    /// Its keys, `(level, value)`, levels rising. Before the first and past the
-    /// last, it's as at that one.
+    /// Its keys, `(at, value)`, what they're at rising: a level, or what else
+    /// it's read at. Before the first and past the last, it's as at that one.
     pub keys: Vec<(f32, f32)>,
 }
 
-/// A curve, built: one of Bevy's, over every level.
+/// A curve, built: one of Bevy's, over everything it's read at.
 type Built = dyn BevyCurve<f32> + Send + Sync;
 
-impl LevelCurve {
+impl CurveData {
     /// It as one of Bevy's curves, its keys checked: kept as at its ends beyond
     /// them.
     fn build(&self) -> Result<Arc<Built>, &'static str> {
@@ -67,12 +68,12 @@ impl LevelCurve {
         }
         if keys
             .iter()
-            .any(|(level, value)| !level.is_finite() || !value.is_finite())
+            .any(|(at, value)| !at.is_finite() || !value.is_finite())
         {
             return Err("with a key that isn't finite");
         }
         if keys.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
-            return Err("whose levels don't rise");
+            return Err("whose keys don't rise");
         }
         if let [(_, value)] = keys.as_slice() {
             return Ok(Arc::new(ConstantCurve::new(Interval::EVERYWHERE, *value)));
@@ -99,7 +100,7 @@ impl LevelCurve {
 
 /// The curves there are, checked, built as Bevy's curves, and numbered.
 ///
-/// Each with keys, all finite, levels rising, and numbered, a [`CurveId`], in
+/// Each with keys, all finite, rising, and numbered, a [`CurveId`], in
 /// order of name; [`rebuild`](Self::rebuild) keeps the numbers curves had.
 /// Read as a [`Registry`] of each curve, built: `get(id)`, `id(name)`,
 /// `name(id)`, `iter()`. Cheap to clone; empty by default. A resource: the
@@ -113,9 +114,7 @@ impl CurveRegistry {
     /// # Errors
     ///
     /// Every curve defined twice, or whose keys can't be.
-    pub fn build<'a>(
-        definitions: impl IntoIterator<Item = &'a LevelCurve>,
-    ) -> Result<Self, Errors> {
+    pub fn build<'a>(definitions: impl IntoIterator<Item = &'a CurveData>) -> Result<Self, Errors> {
         Self::default().rebuild(definitions)
     }
 
@@ -128,7 +127,7 @@ impl CurveRegistry {
     /// As `build`'s.
     pub fn rebuild<'a>(
         &self,
-        definitions: impl IntoIterator<Item = &'a LevelCurve>,
+        definitions: impl IntoIterator<Item = &'a CurveData>,
     ) -> Result<Self, Errors> {
         let mut errors = Vec::new();
         let mut built: HashMap<SmolStr, Arc<Built>> = HashMap::new();
@@ -145,10 +144,10 @@ impl CurveRegistry {
                         });
                     }
                 }
-                Err(what) => errors.push(Error::Invalid {
-                    what: format!("a curve {what}"),
-                    within: Some(def.name.to_string()),
-                }),
+                Err(what) => errors.push(Error::invalid(
+                    format!("a curve {what}"),
+                    Some(def.name.as_str()),
+                )),
             }
         }
         if !errors.is_empty() {
@@ -184,7 +183,7 @@ impl CurveRegistry {
     /// # Errors
     ///
     /// If there's no such curve.
-    pub fn known(&self, curve: &Name<AnyCurve>, within: Option<&str>) -> Result<CurveId, Error> {
+    pub fn known(&self, curve: &Key<AnyCurve>, within: Option<&str>) -> Result<CurveId, Error> {
         self.id(curve.as_str())
             .ok_or_else(|| Error::unknown::<AnyCurve>(curve.as_str(), within))
     }
@@ -204,8 +203,8 @@ mod tests {
     use super::*;
 
     fn table(interpolation: Interpolation) -> CurveRegistry {
-        CurveRegistry::build(&[LevelCurve {
-            name: Name::from_static("damage"),
+        CurveRegistry::build(&[CurveData {
+            name: Key::from_static("damage"),
             interpolation,
             keys: vec![(1.0, 10.0), (10.0, 100.0), (20.0, 300.0)],
         }])
@@ -233,8 +232,8 @@ mod tests {
 
     #[test]
     fn a_single_key_is_its_value_everywhere() {
-        let table = CurveRegistry::build(&[LevelCurve {
-            name: Name::from_static("flat"),
+        let table = CurveRegistry::build(&[CurveData {
+            name: Key::from_static("flat"),
             interpolation: Interpolation::Linear,
             keys: vec![(1.0, 7.0)],
         }])
@@ -242,9 +241,9 @@ mod tests {
         assert_eq!(table.at(table.id("flat").unwrap(), 50.0), Some(7.0));
     }
 
-    fn curve(name: &'static str) -> LevelCurve {
-        LevelCurve {
-            name: Name::from_static(name),
+    fn curve(name: &'static str) -> CurveData {
+        CurveData {
+            name: Key::from_static(name),
             interpolation: Interpolation::Linear,
             keys: vec![(1.0, 1.0)],
         }
@@ -264,15 +263,15 @@ mod tests {
 
     #[test]
     fn a_curve_table_checks_its_keys() {
-        let mut def = LevelCurve {
-            name: Name::from_static("damage"),
+        let mut def = CurveData {
+            name: Key::from_static("damage"),
             interpolation: Interpolation::Linear,
             keys: vec![(10.0, 100.0), (1.0, 10.0)],
         };
         let errors = CurveRegistry::build(&[def.clone()])
             .unwrap_err()
             .to_string();
-        assert_eq!(errors, "a curve whose levels don't rise (in `damage`)");
+        assert_eq!(errors, "a curve whose keys don't rise (in `damage`)");
         def.keys.clear();
         assert!(CurveRegistry::build(&[def]).is_err());
     }

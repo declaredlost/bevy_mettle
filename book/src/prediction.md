@@ -126,7 +126,7 @@ what a client shows.
 
 On a client, `activate_ability` predicts:
 
-1. The fireball activates at once, under a new activation number. Its
+1. The fireball activates at once, under a new [`Activation`]. Its
    behaviour runs, and its cost and cooldown are applied as predictions.
 2. An [`AbilityRequest`] is written, as a message, for your transport to send
    to the server: the actor, the ability by its number, and the activation.
@@ -200,12 +200,12 @@ running activation is checked as it comes: if it doesn't hold, the server
 cancels the ability and replies once more, rejecting the activation, and
 the client cancels it too.
 
-Activation numbers count up in each world. The server's own have the top
-bit set, so they never clash with its clients'. A request under an
-activation with the top bit set is rejected, with a warning: a client can't
-pass its activation off as the server's. Two clients' activations may share a
-number. They're told apart by the actor they're for, the source of what they
-apply.
+Each world counts its own activations: `Activation::client(n)` on a client
+or a standalone world, `Activation::server(n)` on the server. The server's
+own never clash with its clients'. A request under the server's activation,
+or a derived one, is rejected, with a warning: a client can't pass its
+activation off as the server's. Two clients' activations may be the same.
+They're told apart by the actor they're for, the source of what they apply.
 
 ## The client resolves
 
@@ -251,7 +251,7 @@ Here's a client predicting the fireball, and the server saying no:
 #         EffectData::instant("fireball.cost").modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
 #         EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
 #     ],
-#     abilities: vec![AbilityData::new("fireball", "cast_fireball").cost("fireball.cost").cooldown("fireball.cooldown")],
+#     abilities: vec![AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>()).cost("fireball.cost").cooldown("fireball.cooldown")],
 #     ..default()
 # });
 # client.update();
@@ -297,6 +297,16 @@ assert!(client.world().get::<ActiveEffects>(mage).is_none_or(|effects| effects.i
 [`confirm_prediction`] and [`reject_prediction`] on the world are what the
 client does with a reply. Abilities call them for you as replies arrive. Call
 them yourself only for effects you predict under an activation of your own.
+
+### Unanswered
+
+A reply can go missing with the connection. A prediction still waiting after
+[`PredictionTimeout`] (5 seconds by default) is taken back as a rejection is,
+with what it triggered, and [`AbilityFailed`] says `Failure::Unanswered`. A
+reply that comes after that is ignored: the server's state still arrives, as
+it would anyway. [`abandon_pending`] takes back every prediction waiting at
+once, for a transport that knows its connection is gone. Over lightyear, a
+disconnect does that for you.
 
 ## Endings, both ways
 
@@ -361,11 +371,14 @@ Ability requests, replies and replicas are handled in [`AbilitySystems`], in
 
 [`EffectId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.EffectId.html
 [`AbilityId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.AbilityId.html
+[`Activation`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.Activation.html
 [`TagId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.TagId.html
 [`AbilityOf`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/active/struct.AbilityOf.html
 [`AbilityFailed`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityFailed.html
 [`AbilityReplica`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityReplica.html
 [`AbilityReply`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityReply.html
+[`PredictionTimeout`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.PredictionTimeout.html
+[`abandon_pending`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/fn.abandon_pending.html
 [`AbilityEnd`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityEnd.html
 [`AbilityCancelRequest`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityCancelRequest.html
 [`AbilityRequest`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityRequest.html

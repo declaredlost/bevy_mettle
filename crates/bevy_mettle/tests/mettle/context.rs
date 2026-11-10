@@ -6,36 +6,22 @@ use std::sync::{Arc, Mutex};
 use bevy::ecs::entity::MapEntities;
 use bevy::prelude::*;
 use bevy_harness::TestApp;
-use bevy_mettle::core::registry::{AbilityId, Name};
+use bevy_mettle::core::registry::AbilityId;
 use bevy_mettle::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::common::{Life, actor, attributes, close, get, id};
+use crate::common::{Life, actor, attributes, close, get};
 
 /// The game's own: whether a shot was a headshot.
-#[derive(
-    ContextData,
-    Clone,
-    Debug,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    MapEntities
-)]
+#[derive(Reflect, Clone, Debug, PartialEq, Serialize, Deserialize, MapEntities)]
+#[reflect(ContextData)]
 struct Shot {
     headshot: bool,
 }
 
 /// The game's own: who a tracer marked.
-#[derive(
-    ContextData,
-    Clone,
-    Debug,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    MapEntities
-)]
+#[derive(Reflect, Clone, Debug, PartialEq, Serialize, Deserialize, MapEntities)]
+#[reflect(ContextData)]
 struct Tracer {
     #[entities]
     marked: Entity,
@@ -53,17 +39,78 @@ struct Graze;
 #[derive(Effect)]
 struct Fuse;
 
-/// 10 damage, twice that for a headshot; what it saw, noted.
+/// 10 damage, twice that for a headshot; what it saw, noted. Or, in its
+/// place, what each part of the context reads, noted, and no damage.
 #[derive(Execution)]
-struct ShotDamage;
+enum ShotDamage {
+    Noted(Seen),
+    Reads(Arc<Mutex<Option<Parts>>>),
+}
+
+impl ExecutionFn for ShotDamage {
+    fn execute(&self, cx: &ExecutionContext) -> Vec<BaseChange> {
+        match self {
+            Self::Noted(seen) => {
+                seen.note("strike", cx);
+                let headshot = cx.get::<Shot>().is_some_and(|shot| shot.headshot);
+                let damage = if headshot { 20.0 } else { 10.0 };
+                vec![BaseChange::of::<Life>(Operation::Flat, -damage)]
+            }
+            Self::Reads(read) => {
+                *read.lock().unwrap() = Some((
+                    cx.source(),
+                    cx.context().causer,
+                    cx.context().object,
+                    cx.context().ability,
+                    cx.context().hit,
+                    cx.context().origin,
+                    cx.get::<Shot>().cloned(),
+                    cx.get::<Tracer>().cloned(),
+                ));
+                Vec::new()
+            }
+        }
+    }
+}
+
+/// What each part of a context reads: the source, causer, object, ability,
+/// hit, origin, shot and tracer.
+type Parts = (
+    Option<Entity>,
+    Option<Entity>,
+    Option<Entity>,
+    Option<AbilityRef>,
+    Option<Hit>,
+    Option<Vec3>,
+    Option<Shot>,
+    Option<Tracer>,
+);
 
 /// Notes what it saw.
 #[derive(Execution)]
-struct Witness;
+struct Witness {
+    seen: Seen,
+}
+
+impl ExecutionFn for Witness {
+    fn execute(&self, cx: &ExecutionContext) -> Vec<BaseChange> {
+        self.seen.note("echo", cx);
+        Vec::new()
+    }
+}
 
 /// As much damage as the hit is far from where it came from.
 #[derive(Calculation)]
 struct Falloff;
+
+impl CalculationFn for Falloff {
+    fn calculate(&self, cx: &ExecutionContext) -> f32 {
+        match (cx.context().hit, cx.context().origin) {
+            (Some(hit), Some(origin)) => -hit.point.distance(origin),
+            _ => 0.0,
+        }
+    }
+}
 
 /// What executions saw, by effect, as they ran.
 #[derive(Clone, Default)]
@@ -84,14 +131,14 @@ const TAGS: &[&str] = &["cue", "cue.hit"];
 
 fn effects() -> Vec<EffectData> {
     vec![
-        EffectData::instant("strike")
-            .execution("shot_damage")
+        EffectData::instant(Key::of::<Strike>())
+            .execution(Key::of::<ShotDamage>())
             .cue("cue.hit"),
-        EffectData::instant("graze").modifier(EffectModifier::new::<Life>(
+        EffectData::instant(Key::of::<Graze>()).modifier(EffectModifier::new::<Life>(
             Operation::Flat,
-            Magnitude::Custom(Name::from_static("falloff")),
+            Magnitude::Custom(Key::of::<Falloff>()),
         )),
-        EffectData::lasting("fuse", 0.5)
+        EffectData::lasting(Key::of::<Fuse>(), 0.5)
             .on_apply("echo")
             .on_remove("echo")
             .on_expire("echo")
@@ -101,45 +148,32 @@ fn effects() -> Vec<EffectData> {
                 reapply: Reapply::Refresh,
                 reset_period: false,
                 expire: Expire::ClearAll,
-                overflow: vec![Name::from_static("echo")],
+                overflow: vec![Key::from_static("echo")],
             }),
-        EffectData::instant("echo").execution("witness"),
+        EffectData::instant("echo").execution(Key::of::<Witness>()),
     ]
 }
 
 /// An app with the effects, the game's types, and what executions see noted
 /// in `seen`; then what `code` adds.
 fn app(seen: &Seen, code: impl FnOnce(&mut App)) -> TestApp {
-    let (damage, witness) = (seen.clone(), seen.clone());
+    let seen = seen.clone();
     TestApp::builder()
         .with(attributes)
-        .plugins(EffectPlugin::default())
+        .plugins(EffectPlugin)
         .with(move |app| {
             app.insert_resource(
                 TagRegistry::build(TAGS.iter().map(|&name| TagKey::named(name))).unwrap(),
             )
             .init_resource::<CurveRegistry>()
-            .add_context_data::<Shot>()
-            .add_context_data::<Tracer>()
+            .register_type::<Shot>()
+            .register_type::<Tracer>()
             .add_effect::<Strike>()
             .add_effect::<Graze>()
             .add_effect::<Fuse>()
-            .add_execution::<ShotDamage>(move |cx: &ExecutionContext| {
-                damage.note("strike", cx);
-                let headshot = cx.get::<Shot>().is_some_and(|shot| shot.headshot);
-                let damage = if headshot { 20.0 } else { 10.0 };
-                vec![BaseChange::new(id::<Life>(), Operation::Flat, -damage)]
-            })
-            .add_execution::<Witness>(move |cx: &ExecutionContext| {
-                witness.note("echo", cx);
-                Vec::new()
-            })
-            .add_calculation::<Falloff>(|cx: &ExecutionContext| {
-                match (cx.context().hit, cx.context().origin) {
-                    (Some(hit), Some(origin)) => -hit.point.distance(origin),
-                    _ => 0.0,
-                }
-            });
+            .add_execution(ShotDamage::Noted(seen.clone()))
+            .add_execution(Witness { seen })
+            .add_calculation(Falloff);
             code(app);
             let world = app.world();
             let registry = world
@@ -234,22 +268,9 @@ fn an_execution_reads_the_context_it_was_applied_with() {
 #[test]
 fn an_execution_reads_each_part_of_the_context() {
     let read = Arc::new(Mutex::new(None));
-    let noted = read.clone();
     // In place of the strike's: what each part reads.
     let mut app = app(&Seen::default(), |app| {
-        app.add_execution::<ShotDamage>(move |cx: &ExecutionContext| {
-            *noted.lock().unwrap() = Some((
-                cx.source(),
-                cx.context().causer,
-                cx.context().object,
-                cx.context().ability,
-                cx.context().hit,
-                cx.context().origin,
-                cx.get::<Shot>().cloned(),
-                cx.get::<Tracer>().cloned(),
-            ));
-            Vec::new()
-        });
+        app.add_execution(ShotDamage::Reads(read.clone()));
     });
     let npc = actor(&mut app, []);
     let archer = app.spawn(());

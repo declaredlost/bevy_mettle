@@ -35,7 +35,7 @@ defaults.
 
 ## Naming abilities in code
 
-Content names abilities by string, an `Name<AnyAbility>`. Code names an ability by its type, as it
+Content names abilities by string, a `Key<AnyAbility>`. Code names an ability by its type, as it
 does an [effect](effects.md#naming-effects-in-code) or a
 [tag](tags.md#tags-in-code). Derive [`Ability`] on a unit struct, and add it
 to the app:
@@ -99,7 +99,7 @@ fact term never holds.
 A behaviour is a component with [`#[derive(Behaviour)]`][`Behaviour`], added
 to the app with
 [`add_behaviour`](https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/behaviour/trait.BehaviourApp.html#tymethod.add_behaviour).
-Data names it by its name, an `Name<AnyBehaviour>`: its type's in
+Data names it by its name, a `Key<AnyBehaviour>`: its type's in
 `snake_case`, unless it says. Adding it gives it its number in the
 [`BehaviourRegistry`], as attributes get theirs.
 
@@ -236,7 +236,7 @@ let effects = vec![
     EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
 ];
 
-let fireball = AbilityData::new("fireball", "cast_fireball")
+let fireball = AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>())
     .tag("ability.spell.fire")
     .cost("fireball.cost")
     .cooldown("fireball.cooldown")

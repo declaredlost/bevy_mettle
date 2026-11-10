@@ -30,7 +30,7 @@ per stack:
 # }
 fn effects() -> Vec<EffectData> {
     vec![
-        EffectData::lasting("burning", 4.0)
+        EffectData::lasting(Key::of::<Burning>(), 4.0)
             .tag("effect.affliction.burning")
             .period(0.5, false)
             .modifier(EffectModifier::new::<Life>(
@@ -128,8 +128,9 @@ once however many stacks there are.
 
 The active effect keeps the spec it was first applied with. A later
 application adds a stack, not its own level, params or source: a stronger
-second burn makes three stacks of the first burn's damage. An `Attribute`
-magnitude is likewise captured once, as the effect is first applied.
+second burn makes three stacks of the first burn's damage. Its
+[captures](effects.md#captures) are likewise taken once, as the effect is
+first applied, unless they're read live.
 
 [Effects in code](effect-code.md) see the count as `stacks` on their
 context, and scale by it themselves.

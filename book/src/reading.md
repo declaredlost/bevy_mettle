@@ -17,7 +17,7 @@ type:
 # #[derive(Attribute)] #[attribute(max = MaxResistance)] struct Resistance;
 # #[derive(Attribute)] #[attribute(base = 0.75)] struct MaxResistance;
 # let mut app = App::new();
-# app.add_plugins(MettlePlugins.set(AttributePlugin::new(Update)))
+# app.add_plugins((MinimalPlugins, MettlePlugins.set(MettleCorePlugin::new(Update))))
 #     .add_attribute::<Resistance>()
 #     .add_attribute::<MaxResistance>();
 # let mage = app
@@ -113,10 +113,10 @@ fn fireball_damage(
     }
 }
 # let mut app = App::new();
-# app.add_plugins(MettlePlugins.set(AttributePlugin::new(Update)))
+# app.add_plugins((MinimalPlugins, MettlePlugins.set(MettleCorePlugin::new(Update))))
 #     .add_attribute::<SpellPower>()
 #     .init_resource::<Dealt>()
-#     .add_systems(Update, fireball_damage.after(AttributeSystems));
+#     .add_systems(Update, fireball_damage.after(MettleSystems));
 # let power = app.world().attribute_id::<SpellPower>().unwrap();
 # app.world_mut().spawn((
 #     Mage,
@@ -155,7 +155,7 @@ anything:
 # #[derive(Attribute)] #[attribute(base = 100.0, min = 0.0, max = MaxLife)] struct Life;
 # #[derive(Attribute)] #[attribute(base = 100.0)] struct MaxLife;
 # let mut app = App::new();
-# app.add_plugins(MettlePlugins.set(AttributePlugin::new(Update)))
+# app.add_plugins((MinimalPlugins, MettlePlugins.set(MettleCorePlugin::new(Update))))
 #     .add_attribute::<Life>()
 #     .add_attribute::<MaxLife>();
 # let mage = app
@@ -192,7 +192,7 @@ into one hit:
 # use bevy_mettle::prelude::*;
 # #[derive(Attribute)] #[attribute(base = 10.0)] struct SpellPower;
 # let mut app = App::new();
-# app.add_plugins(MettlePlugins.set(AttributePlugin::new(Update)))
+# app.add_plugins((MinimalPlugins, MettlePlugins.set(MettleCorePlugin::new(Update))))
 #     .add_attribute::<SpellPower>();
 # let power = app.world().attribute_id::<SpellPower>().unwrap();
 # let mage = app
@@ -225,7 +225,7 @@ spells, not to every spell:
 # use bevy_mettle::prelude::*;
 # #[derive(Attribute)] #[attribute(base = 10.0)] struct SpellPower;
 # let mut app = App::new();
-# app.add_plugins(MettlePlugins.set(AttributePlugin::new(Update)))
+# app.add_plugins((MinimalPlugins, MettlePlugins.set(MettleCorePlugin::new(Update))))
 #     .add_attribute::<SpellPower>();
 # let mage = app.world_mut().spawn(Base::<SpellPower>::default()).id();
 let power = app.world().attribute_id::<SpellPower>().unwrap();
@@ -259,7 +259,7 @@ tags, `owns`, is in `bevy_mettle_core` ([Gameplay tags](tags.md)).
 # #[derive(Attribute)] #[attribute(base = 100.0, min = 0.0, max = MaxLife)] struct Life;
 # #[derive(Attribute)] #[attribute(base = 100.0)] struct MaxLife;
 # let mut app = App::new();
-# app.add_plugins(MettlePlugins.set(AttributePlugin::new(Update)))
+# app.add_plugins((MinimalPlugins, MettlePlugins.set(MettleCorePlugin::new(Update))))
 #     .add_attribute::<Life>()
 #     .add_attribute::<MaxLife>();
 # let mage = app

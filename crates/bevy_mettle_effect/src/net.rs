@@ -10,6 +10,7 @@ use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 use bevy_mettle_attribute::modifier::{Modifier, ModifierOf, Modifiers, Operation, Provisional};
 use bevy_mettle_attribute::read::AttributeWorld;
+use bevy_mettle_core::Activation;
 use bevy_mettle_core::net::NetRole;
 use bevy_mettle_core::registry::{AttributeId, EffectId, TagId};
 use bevy_mettle_core::tag::{TagCounts, TagRegistry};
@@ -25,7 +26,7 @@ use crate::{EffectRegistry, EffectSpec, engine};
 /// [`Provisional`] too: while it counts, its actor shows its own values, the
 /// prediction, not those the server serves.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct PredictedUnder(pub u64);
+pub struct PredictedUnder(pub Activation);
 
 /// On a client's active effect: the server's, shown from its replica.
 ///
@@ -52,7 +53,7 @@ pub struct EffectReplica {
     #[entities]
     pub context: ContextReplica,
     /// The activation it was applied under, if any.
-    pub activation: Option<u64>,
+    pub activation: Option<Activation>,
     /// How many stacks it has.
     pub stacks: u32,
     /// How long it lasts in full, if not forever.
@@ -191,15 +192,15 @@ const ANSWERED: usize = 1024;
 /// activations answered.
 #[derive(Resource, Debug, Default)]
 pub(crate) struct Predictions {
-    pending: HashMap<u64, Vec<Undo>>,
-    answered: HashSet<u64>,
+    pending: HashMap<Activation, Vec<Undo>>,
+    answered: HashSet<Activation>,
     /// The answered activations, oldest first, to forget the oldest.
-    order: VecDeque<u64>,
+    order: VecDeque<Activation>,
 }
 
 impl Predictions {
     /// Takes what was done under `activation`, and notes it answered.
-    fn answer(&mut self, activation: u64) -> Vec<Undo> {
+    fn answer(&mut self, activation: Activation) -> Vec<Undo> {
         if self.answered.insert(activation) {
             self.order.push_back(activation);
             if self.order.len() > ANSWERED
@@ -218,7 +219,7 @@ pub(crate) fn role(world: &World) -> NetRole {
 }
 
 /// The activation `spec` is predicted under, if this world predicts it.
-pub(crate) fn predicting(world: &World, spec: &EffectSpec) -> Option<u64> {
+pub(crate) fn predicting(world: &World, spec: &EffectSpec) -> Option<Activation> {
     (role(world) == NetRole::Client && !answered(world, spec))
         .then_some(spec.activation)
         .flatten()
@@ -235,7 +236,7 @@ pub(crate) fn answered(world: &World, spec: &EffectSpec) -> bool {
         })
 }
 
-fn log(world: &mut World, activation: u64, undo: Undo) {
+fn log(world: &mut World, activation: Activation, undo: Undo) {
     world
         .get_resource_or_init::<Predictions>()
         .pending
@@ -245,7 +246,7 @@ fn log(world: &mut World, activation: u64, undo: Undo) {
 }
 
 /// Notes `effect` spawned under `activation`, and marks it predicted.
-pub(crate) fn spawned(world: &mut World, activation: u64, effect: Entity) {
+pub(crate) fn spawned(world: &mut World, activation: Activation, effect: Entity) {
     world
         .entity_mut(effect)
         .insert((PredictedUnder(activation), Provisional));
@@ -253,12 +254,12 @@ pub(crate) fn spawned(world: &mut World, activation: u64, effect: Entity) {
 }
 
 /// Notes a stack added to `effect` under `activation`.
-pub(crate) fn stacked(world: &mut World, activation: u64, effect: Entity) {
+pub(crate) fn stacked(world: &mut World, activation: Activation, effect: Entity) {
     log(world, activation, Undo::Stack(effect));
 }
 
 /// The overlays predicted for `actor`, under any activation not yet answered.
-fn overlays(world: &World, actor: Entity) -> Vec<(u64, Entity)> {
+fn overlays(world: &World, actor: Entity) -> Vec<(Activation, Entity)> {
     world
         .get_resource::<Predictions>()
         .map(|predictions| {
@@ -279,7 +280,7 @@ fn overlays(world: &World, actor: Entity) -> Vec<(u64, Entity)> {
 }
 
 /// How much `overlays` add to `attribute`'s base.
-fn overlaid(world: &World, overlays: &[(u64, Entity)], attribute: AttributeId) -> f32 {
+fn overlaid(world: &World, overlays: &[(Activation, Entity)], attribute: AttributeId) -> f32 {
     overlays
         .iter()
         .filter_map(|(_, overlay)| world.get::<Modifiers>(*overlay))
@@ -300,7 +301,7 @@ fn overlaid(world: &World, overlays: &[(u64, Entity)], attribute: AttributeId) -
 /// How much it changed the base, as it's shown.
 pub(crate) fn change_base(
     world: &mut World,
-    activation: Option<u64>,
+    activation: Option<Activation>,
     actor: Entity,
     attribute: AttributeId,
     op: Operation,
@@ -353,7 +354,7 @@ pub(crate) fn change_base(
 /// The server confirmed `activation`: the effects predicted under it stay,
 /// until the server's own replace them; its instant changes and the stacks it
 /// added to the server's effects, shown until now, give way to the server's.
-pub(crate) fn confirm(world: &mut World, activation: u64) {
+pub(crate) fn confirm(world: &mut World, activation: Activation) {
     let undo = world
         .get_resource_or_init::<Predictions>()
         .answer(activation);
@@ -380,7 +381,7 @@ fn despawn(world: &mut World, entity: Entity) {
 
 /// The server rejected `activation`: everything predicted under it undone, last
 /// first.
-pub(crate) fn rollback(world: &mut World, activation: u64) {
+pub(crate) fn rollback(world: &mut World, activation: Activation) {
     if let Some(mut predicted) = world.get_resource_mut::<crate::cue::Predicted>() {
         predicted.forget_activation(activation);
     }

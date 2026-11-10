@@ -6,7 +6,10 @@ mod slots;
 mod sum;
 mod systems;
 
+use std::sync::OnceLock;
+
 use bevy::prelude::*;
+use bevy_mettle_core::condition::Condition;
 use bevy_mettle_core::tag::{OwnedTags, TagCounts};
 
 pub(crate) use self::fold::{Dirty, collect, fold};
@@ -94,11 +97,35 @@ pub struct AttributeState {
     previous: Slots<f32>,
     /// The values served by the authority, as synced from `Served`.
     served: Slots<f32>,
+    /// The attributes whose values can differ by read: a modifier of one, or
+    /// of what it's worked out through (what a modifier's per, a limit
+    /// that's another attribute), counts by the read's context. Any other is
+    /// read as cached, whatever the context. Worked out the first time a read
+    /// in context needs it, and again after modifiers are folded: a frame
+    /// with no such read works out nothing.
+    #[reflect(ignore)]
+    contextual: OnceLock<Slots<bool>>,
     /// Whether the authority is another world: its values are served.
     remote: bool,
     /// Whether a prediction counts for it: its values are its own.
     provisional: bool,
-    stale: bool,
+    /// What changed since values were last worked out.
+    #[reflect(ignore)]
+    stale: Stale,
+}
+
+/// What changed of an actor's attributes since its values were last worked
+/// out: what's worked out again.
+#[derive(Debug, Clone, Default, PartialEq)]
+enum Stale {
+    /// Nothing: its values are as worked out.
+    #[default]
+    Fresh,
+    /// These attributes: each worked out again, with what's worked out
+    /// through it.
+    These(Vec<AttributeId>),
+    /// Everything: every value worked out again.
+    All,
 }
 
 impl AttributeState {
@@ -111,13 +138,32 @@ impl AttributeState {
     /// Sets `attribute`'s value as served: synced from its `Served`.
     pub(crate) fn set_served(&mut self, attribute: AttributeId, value: f32) {
         self.served.insert(attribute, value);
-        self.stale = true;
+        self.mark(attribute);
     }
 
     /// Sets whether the actor's authority is another world.
     pub(crate) fn set_remote(&mut self, remote: bool) {
         self.remote = remote;
-        self.stale = true;
+        self.mark_all();
+    }
+
+    /// Notes `attribute` changed: worked out again, with what's worked out
+    /// through it, as values are next.
+    fn mark(&mut self, attribute: AttributeId) {
+        match &mut self.stale {
+            Stale::All => {}
+            Stale::These(changed) => {
+                if !changed.contains(&attribute) {
+                    changed.push(attribute);
+                }
+            }
+            Stale::Fresh => self.stale = Stale::These(vec![attribute]),
+        }
+    }
+
+    /// Notes everything changed: every value worked out again.
+    fn mark_all(&mut self) {
+        self.stale = Stale::All;
     }
 
     /// `attribute`'s value with nothing in play as served, if it's shown so:
@@ -137,14 +183,14 @@ impl AttributeState {
     /// it.
     pub(crate) fn set_base(&mut self, attribute: AttributeId, value: f32) {
         self.bases.insert(attribute, value);
-        self.stale = true;
+        self.mark(attribute);
     }
 
     /// Forgets `attribute`: its `Base` was taken off.
     pub(crate) fn remove(&mut self, attribute: AttributeId) {
         self.bases.remove(attribute);
         self.current.remove(attribute);
-        self.stale = true;
+        self.mark_all();
     }
 
     /// Folds `modifiers`, each with its source, in the order they were
@@ -159,7 +205,7 @@ impl AttributeState {
     ) {
         self.folded.clear();
         self.provisional = provisional;
-        self.stale = true;
+        self.mark_all();
         for (order, (source, modifier)) in (0u32..).zip(modifiers) {
             if let Err(error) = modifier.check_values(registry) {
                 warn!("a modifier from {source} is skipped: {error}");
@@ -178,6 +224,35 @@ impl AttributeState {
                 });
             }
         }
+        self.contextual = OnceLock::new();
+    }
+
+    /// Which attributes' values can differ by read: worked out the first time
+    /// it's asked after modifiers are folded.
+    fn contextual(&self, registry: &AttributeRegistry) -> &Slots<bool> {
+        self.contextual.get_or_init(|| {
+            let mut contextual = Slots::default();
+            // With nothing that counts only sometimes, nothing counts by a
+            // read.
+            if self
+                .folded
+                .iter()
+                .all(|(_, folded)| folded.scoped.is_empty())
+            {
+                return contextual;
+            }
+            let mut visiting = Vec::new();
+            for (attribute, _) in registry.iter() {
+                reads_context(
+                    &self.folded,
+                    registry,
+                    attribute,
+                    &mut contextual,
+                    &mut visiting,
+                );
+            }
+            contextual
+        })
     }
 
     /// `attribute`'s value in `context`, with the owner owning `owned`; with
@@ -191,13 +266,13 @@ impl AttributeState {
         attribute: AttributeId,
         context: &AttributeContext,
     ) -> f32 {
-        if context.is_empty()
-            && let Some(value) = self.shown_served(attribute)
-        {
+        // A context nothing of it counts by reads as no context: as cached.
+        let plain = context.is_empty() || self.contextual(registry).get(attribute) != Some(&true);
+        if plain && let Some(value) = self.shown_served(attribute) {
             return value;
         }
-        if context.is_empty()
-            && !self.stale
+        if plain
+            && self.stale == Stale::Fresh
             && !owned.is_pending()
             && let Some(value) = self.current.get(attribute)
         {
@@ -232,23 +307,126 @@ impl AttributeState {
 
     /// Works out every value the actor has with nothing in play, or takes it
     /// as served if it's shown so: whether any changed.
-    pub(crate) fn refresh(&mut self, registry: &AttributeRegistry, owned: &TagCounts) -> bool {
+    pub(crate) fn refresh(
+        &mut self,
+        registry: &AttributeRegistry,
+        owned: &TagCounts,
+        owned_changed: bool,
+    ) -> bool {
+        // What a condition counts by, the owner's tags, changed: what has a
+        // modifier that counts only sometimes is worked out again.
+        if owned_changed && self.stale != Stale::All {
+            let scoped: Vec<AttributeId> = self
+                .folded
+                .iter()
+                .filter(|(_, folded)| !folded.scoped.is_empty())
+                .map(|(attribute, _)| attribute)
+                .collect();
+            for attribute in scoped {
+                self.mark(attribute);
+            }
+        }
         let context = AttributeContext::new();
         let mut walk = Walk::default();
-        let current: Slots<f32> = self
-            .bases
-            .keys()
-            .map(|attribute| {
-                let value = self
-                    .shown_served(attribute)
-                    .unwrap_or_else(|| self.eval(registry, owned, attribute, &context, &mut walk));
-                (attribute, value)
-            })
-            .collect();
+        let work = |state: &Self, attribute: AttributeId, walk: &mut Walk| {
+            state
+                .shown_served(attribute)
+                .unwrap_or_else(|| state.eval(registry, owned, attribute, &context, walk))
+        };
+        let current: Slots<f32> = if self.stale == Stale::All {
+            self.bases
+                .keys()
+                .map(|attribute| (attribute, work(self, attribute, &mut walk)))
+                .collect()
+        } else {
+            let mut current = self.current.clone();
+            for attribute in self.through(registry) {
+                if self.has(attribute) {
+                    current.insert(attribute, work(self, attribute, &mut walk));
+                }
+            }
+            current
+        };
         let changed = current != self.current;
         self.previous = std::mem::replace(&mut self.current, current);
-        self.stale = false;
+        self.stale = Stale::Fresh;
         changed
+    }
+
+    /// What keeping `attribute` within its limits reads: each limit that's
+    /// another attribute, and what that's worked out through, in turn.
+    pub(crate) fn limits_read(
+        &self,
+        registry: &AttributeRegistry,
+        attribute: AttributeId,
+    ) -> Vec<AttributeId> {
+        let mut read: Vec<AttributeId> = Vec::new();
+        let mut next = 0;
+        let add = |read: &mut Vec<AttributeId>, other: AttributeId| {
+            if other != attribute && !read.contains(&other) {
+                read.push(other);
+            }
+        };
+        let limits = |of: AttributeId| {
+            registry.get(of).into_iter().flat_map(|info| {
+                [info.min.as_ref(), info.max.as_ref()]
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|bound| match bound {
+                        Bound::Attribute(other) => Some(*other),
+                        Bound::Value(_) => None,
+                    })
+            })
+        };
+        for other in limits(attribute) {
+            add(&mut read, other);
+        }
+        while let Some(&of) = read.get(next) {
+            next += 1;
+            let per = self
+                .folded
+                .get(of)
+                .into_iter()
+                .flat_map(|folded| folded.scoped.iter().filter_map(|scoped| scoped.per))
+                .map(|(per, _)| per);
+            for other in limits(of).chain(per).collect::<Vec<_>>() {
+                add(&mut read, other);
+            }
+        }
+        read
+    }
+
+    /// What's changed, and every attribute worked out through it: what a
+    /// limit is, what a modifier's per.
+    fn through(&self, registry: &AttributeRegistry) -> Vec<AttributeId> {
+        let mut affected = match &self.stale {
+            Stale::These(changed) => changed.clone(),
+            Stale::Fresh | Stale::All => Vec::new(),
+        };
+        let mut next = 0;
+        while let Some(&changed) = affected.get(next) {
+            next += 1;
+            let limited = registry.iter().filter_map(|(attribute, info)| {
+                [info.min.as_ref(), info.max.as_ref()]
+                    .into_iter()
+                    .flatten()
+                    .any(|bound| matches!(bound, Bound::Attribute(other) if *other == changed))
+                    .then_some(attribute)
+            });
+            let per = self.folded.iter().filter_map(|(attribute, folded)| {
+                folded
+                    .scoped
+                    .iter()
+                    .any(|scoped| scoped.per.is_some_and(|(per, _)| per == changed))
+                    .then_some(attribute)
+            });
+            for attribute in limited.chain(per).collect::<Vec<_>>() {
+                if !affected.contains(&attribute) {
+                    affected.push(attribute);
+                }
+            }
+        }
+        affected
     }
 
     /// What `attribute`'s value with nothing in play moved from and to, the
@@ -267,7 +445,7 @@ impl AttributeState {
 
     /// Whether something changed since values were last worked out.
     pub(crate) fn is_stale(&self) -> bool {
-        self.stale
+        self.stale != Stale::Fresh
     }
 
     /// `attribute`'s value with nothing in play, as last worked out.
@@ -409,4 +587,53 @@ impl AttributeState {
         walk.cut |= outer;
         value
     }
+}
+
+/// Whether `attribute`'s value can differ by read: a modifier of it counts by
+/// the read's context (its tags, the target's, the source's, a fact; or it's
+/// local to a source), or what it's worked out through does. Each answer is
+/// kept in `known`; `visiting` holds what's being worked out, so a cycle ends.
+fn reads_context(
+    folded: &Slots<Folded>,
+    registry: &AttributeRegistry,
+    attribute: AttributeId,
+    known: &mut Slots<bool>,
+    visiting: &mut Vec<AttributeId>,
+) -> bool {
+    if let Some(&reads) = known.get(attribute) {
+        return reads;
+    }
+    if visiting.contains(&attribute) {
+        return false;
+    }
+    visiting.push(attribute);
+    let mut reads = false;
+    if let Some(folded_here) = folded.get(attribute) {
+        for scoped in &folded_here.scoped {
+            reads = scoped.counts.local
+                || scoped
+                    .counts
+                    .condition
+                    .as_ref()
+                    .is_some_and(Condition::reads_context)
+                || scoped
+                    .per
+                    .is_some_and(|(per, _)| reads_context(folded, registry, per, known, visiting));
+            if reads {
+                break;
+            }
+        }
+    }
+    if !reads && let Some(info) = registry.get(attribute) {
+        reads = [info.min.as_ref(), info.max.as_ref()]
+            .into_iter()
+            .flatten()
+            .any(|bound| match bound {
+                Bound::Attribute(other) => reads_context(folded, registry, *other, known, visiting),
+                Bound::Value(_) => false,
+            });
+    }
+    visiting.pop();
+    known.insert(attribute, reads);
+    reads
 }

@@ -27,7 +27,7 @@ pub use crate::net::AbilityReplica;
 #[doc(no_inline)]
 pub use crate::net::{AbilityCancelRequest, AbilityEnd};
 #[doc(no_inline)]
-pub use crate::net::{AbilityReply, AbilityRequest, AbilityRequestWith};
+pub use crate::net::{AbilityReply, AbilityRequest, AbilityRequestWith, PredictionTimeout};
 #[doc(no_inline)]
 pub use crate::{
     Ability, AbilityApp, AbilityChecks, AbilityCommands, AbilityPlugin, AbilityReader,

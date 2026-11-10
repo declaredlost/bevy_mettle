@@ -217,24 +217,26 @@ impl Modifier {
     /// Checks its attributes and numbers, its condition's too, not its tags:
     /// what folding needs, without the tag tree.
     pub(crate) fn check_values(&self, attributes: &AttributeRegistry) -> Result<(), Error> {
-        let invalid = |what: String| Error::Invalid { what, within: None };
         let name = |attribute: AttributeId| {
             attributes
                 .get(attribute)
                 .map(|info| info.name)
                 .ok_or_else(|| {
-                    invalid(format!(
-                        "a modifier of attribute {}, which there isn't",
-                        attribute.index()
-                    ))
+                    Error::invalid(
+                        format!(
+                            "a modifier of attribute {}, which there isn't",
+                            attribute.index()
+                        ),
+                        None,
+                    )
                 })
         };
         let changed = name(self.attribute)?;
         if !self.value.is_finite() {
-            return Err(invalid(format!(
-                "a modifier of `{changed}` by {}",
-                self.value
-            )));
+            return Err(Error::invalid(
+                format!("a modifier of `{changed}` by {}", self.value),
+                None,
+            ));
         }
         if let Some(condition) = &self.condition {
             condition.check_values(None)?;
@@ -242,16 +244,19 @@ impl Modifier {
         if let Some(per) = &self.per {
             let of = name(per.attribute)?;
             if self.op.whole() {
-                return Err(invalid(format!(
-                    "a {:?} of `{changed}` per `{of}`: only an amount can count per something",
-                    self.op
-                )));
+                return Err(Error::invalid(
+                    format!(
+                        "a {:?} of `{changed}` per `{of}`: only an amount can count per something",
+                        self.op
+                    ),
+                    None,
+                ));
             }
             if !(per.every.is_finite() && per.every > 0.0) {
-                return Err(invalid(format!(
-                    "a modifier of `{changed}` per {} `{of}`",
-                    per.every
-                )));
+                return Err(Error::invalid(
+                    format!("a modifier of `{changed}` per {} `{of}`", per.every),
+                    None,
+                ));
             }
         }
         Ok(())

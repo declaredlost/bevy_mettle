@@ -33,6 +33,7 @@ impl Plugin for AbilityPlugin {
             .init_resource::<engine::Activations>()
             .init_resource::<NetRole>()
             .init_resource::<net::Pending>()
+            .init_resource::<net::PredictionTimeout>()
             .init_resource::<net::EarlyCancels>()
             .init_resource::<engine::Interrupting>()
             .add_message::<AbilityRequest>()
@@ -48,6 +49,8 @@ impl Plugin for AbilityPlugin {
                         .in_set(net::Serving)
                         .run_if(resource_equals(NetRole::Server)),
                     net::resolve.run_if(resource_equals(NetRole::Client)),
+                    // After what's answered: only what's still waiting expires.
+                    net::expire.run_if(resource_equals(NetRole::Client)),
                     net::hear_cancels
                         .after(net::Serving)
                         .run_if(resource_equals(NetRole::Server)),

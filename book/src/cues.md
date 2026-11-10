@@ -115,7 +115,7 @@ app.add_plugins((MinimalPlugins, MettlePlugins))
             .into_iter()
             .map(TagKey::named)
             .collect(),
-        effects: vec![EffectData::instant("fireball.hit")
+        effects: vec![EffectData::instant(Key::of::<FireballHit>())
             .modifier(EffectModifier::new::<Life>(Operation::Flat, -15.0))
             .cue("cue.hit.fire")],
         ..default()

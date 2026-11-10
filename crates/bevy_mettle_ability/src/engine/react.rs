@@ -46,7 +46,7 @@ pub(crate) fn send(world: &mut World, event: GameplayEvent) {
             continue;
         }
         let parent = event.activation.filter(|_| net == NetExecution::Predicted);
-        let activation = parent.map(|parent| crate::net::derived(parent, id));
+        let activation = parent.map(|parent| parent.derived(id));
         match role {
             // A client predicts only what's triggered under its own prediction:
             // under the server's activation, the server decides.
@@ -54,21 +54,21 @@ pub(crate) fn send(world: &mut World, event: GameplayEvent) {
                 let (Some(parent), Some(activation)) = (parent, activation) else {
                     continue;
                 };
-                if parent & crate::net::SERVERS != 0 {
+                if parent.is_servers() {
                     continue;
                 }
-                if activate(world, ability, Some(event.clone()), Some(activation)).is_ok() {
+                if activate(world, ability, Some(event.clone()), Some(activation)).is_ok()
+                    && let Some(asked) = crate::net::Asked::of(world, ability)
+                {
                     world
                         .get_resource_or_init::<crate::net::Pending>()
-                        .insert_derived(parent, activation, ability);
+                        .insert_derived(parent, activation, asked);
                 }
             }
             NetRole::Server => {
                 let result = activate(world, ability, Some(event.clone()), activation);
                 // Derived from a client's: answered, as the client predicts it.
-                if let Some(activation) =
-                    activation.filter(|activation| activation & crate::net::SERVERS == 0)
-                {
+                if let Some(activation) = activation.filter(|activation| !activation.is_servers()) {
                     crate::net::answer(world, actor, id, activation, result.err());
                 }
             }

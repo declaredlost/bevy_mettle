@@ -3,6 +3,7 @@
 #![cfg(all(feature = "attribute", feature = "effect", feature = "ability"))]
 
 mod abilities;
+mod captures;
 mod common;
 mod conditions;
 mod content;

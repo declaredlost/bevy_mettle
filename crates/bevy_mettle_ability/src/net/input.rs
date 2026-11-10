@@ -4,6 +4,7 @@
 
 use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::prelude::*;
+use bevy_mettle_core::Activation;
 use bevy_mettle_core::net::NetRole;
 use serde::{Deserialize, Serialize};
 
@@ -20,7 +21,7 @@ pub struct AbilityInput<I> {
     /// The actor.
     pub actor: Entity,
     /// The activation it's running under.
-    pub activation: u64,
+    pub activation: Activation,
     /// The input.
     pub input: I,
 }
@@ -36,7 +37,7 @@ impl<I: MapEntities> MapEntities for AbilityInput<I> {
 pub(crate) fn send_input<I: Component + Clone>(
     world: &mut World,
     actor: Entity,
-    activation: u64,
+    activation: Activation,
     input: I,
 ) {
     world.write_message(AbilityInput {

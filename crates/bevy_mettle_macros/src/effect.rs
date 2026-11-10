@@ -7,7 +7,14 @@ use crate::shared::{named, path};
 
 pub(crate) fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let krate = path("bevy_mettle_effect", "effect");
-    named(input, "effect", "an effect", &quote::quote!(#krate::Effect))
+    named(
+        input,
+        "effect",
+        "an effect",
+        &quote::quote!(#krate::Effect),
+        &krate,
+        &quote::quote!(#krate::__core::registry::AnyEffect),
+    )
 }
 
 #[cfg(test)]
@@ -33,5 +40,20 @@ mod tests {
         };
         let expanded = expand(&input).unwrap().to_string();
         assert!(expanded.contains("NAME"), "{expanded}");
+    }
+
+    #[test]
+    fn it_is_keyed_as_an_effect() {
+        let input = parse_quote! {
+            #[effect(name = "fire.burning")]
+            struct Burning;
+        };
+        let expanded = expand(&input).unwrap().to_string();
+        assert!(expanded.contains("Keyed < "), "{expanded}");
+        assert!(expanded.contains("AnyEffect"), "{expanded}");
+        assert!(
+            expanded.contains("const KEY : & 'static str = \"fire.burning\""),
+            "{expanded}"
+        );
     }
 }

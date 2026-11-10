@@ -223,8 +223,8 @@ or globally:
 struct Told(Vec<String>);
 
 let mut app = App::new();
-// Attributes are kept in `Update` here, so one update tells them.
-app.add_plugins(MettlePlugins.set(AttributePlugin::new(Update)))
+// Mettle runs in `Update` here, so one update tells them.
+app.add_plugins((MinimalPlugins, MettlePlugins.set(MettleCorePlugin::new(Update))))
     .init_resource::<Told>()
     .add_observer(|added: On<TagAdded>, mut told: ResMut<Told>| {
         told.0.push(format!("+{}", added.tag));
@@ -243,8 +243,8 @@ app.update();
 assert_eq!(app.world().resource::<Told>().0, ["+state.burning", "+state"]);
 ```
 
-They're told as the [`publish_tags`] system runs, in the attribute plugin's
-[`AttributeSystems`], before values are worked out. Changes are settled
+They're told as the [`publish_tags`] system runs, as attributes are folded
+([`AttributeFold`]), before values are worked out. Changes are settled
 first: a tag added and taken away again before then isn't told at all.
 
 ### Asking from a behavior tree
@@ -275,7 +275,7 @@ mettle compares them for you as a client connects:
 - **A tag can't be under itself.** `#[tag(parent = ..)]` loops compile, but
   panic with both names the first time either tag is used.
 - **No events without the attribute plugin.** `publish_tags` runs in
-  `AttributeSystems`. Without `AttributePlugin`, owned tags still count, but
+  `AttributeFold`. Without `AttributePlugin`, owned tags still count, but
   nothing is told.
 
 [`Tag`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/trait.Tag.html
@@ -292,4 +292,4 @@ mettle compares them for you as a client connects:
 [`TagRemoved`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagRemoved.html
 [`publish_tags`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/fn.publish_tags.html
 [`owns`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/fn.owns.html
-[`AttributeSystems`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/struct.AttributeSystems.html
+[`AttributeFold`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/struct.AttributeFold.html

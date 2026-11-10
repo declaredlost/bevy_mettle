@@ -3,7 +3,7 @@
 mod def;
 
 use bevy_mettle_core::condition::Condition;
-use bevy_mettle_core::registry::{AnyAbility, AnyEffect, Name};
+use bevy_mettle_core::registry::{AnyAbility, AnyEffect, Key};
 use bevy_mettle_core::tag::{TagKey, Tags};
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +12,7 @@ use crate::behaviour::AnyBehaviour;
 
 /// An ability, as data: what runs it, what it costs, and what activates it.
 ///
-/// Unreal's `GameplayAbility`, its properties. Named by an `Name<AnyAbility>`,
+/// Unreal's `GameplayAbility`, its properties. Named by a `Key<AnyAbility>`,
 /// its `id`.
 ///
 /// Written by a game's content, in whatever format it loads with serde, or
@@ -35,20 +35,20 @@ use crate::behaviour::AnyBehaviour;
 #[serde(deny_unknown_fields)]
 pub struct AbilityData {
     /// Its name.
-    pub name: Name<AnyAbility>,
+    pub name: Key<AnyAbility>,
     /// What it is: what blocking, cancelling and activating by tag match on.
     #[serde(default, skip_serializing_if = "Tags::is_empty")]
     pub tags: Tags,
     /// The behaviour that runs it, registered in code.
-    pub behaviour: Name<AnyBehaviour>,
+    pub behaviour: Key<AnyBehaviour>,
     /// An instant effect it costs, applied to its owner as it commits: it can't
     /// activate if paying would take an attribute below 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cost: Option<Name<AnyEffect>>,
+    pub cost: Option<Key<AnyEffect>>,
     /// A lasting effect applied to its owner as it commits: it can't activate
     /// while its owner owns what that effect grants.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cooldown: Option<Name<AnyEffect>>,
+    pub cooldown: Option<Key<AnyEffect>>,
     /// What has to hold for it to activate: weighed in its own tags
     /// (`ReadTagged`) and its owner's (`OwnerHas`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -156,7 +156,7 @@ impl AbilityData {
     /// An ability called `id`, run by `behaviour`, costing nothing yet: for
     /// abilities defined in code.
     #[must_use]
-    pub fn new(id: impl Into<Name<AnyAbility>>, behaviour: impl Into<Name<AnyBehaviour>>) -> Self {
+    pub fn new(id: impl Into<Key<AnyAbility>>, behaviour: impl Into<Key<AnyBehaviour>>) -> Self {
         Self {
             name: id.into(),
             tags: Tags::new(),
@@ -185,14 +185,14 @@ impl AbilityData {
 
     /// Costing `effect`.
     #[must_use]
-    pub fn cost(mut self, effect: impl Into<Name<AnyEffect>>) -> Self {
+    pub fn cost(mut self, effect: impl Into<Key<AnyEffect>>) -> Self {
         self.cost = Some(effect.into());
         self
     }
 
     /// Cooling down by `effect`.
     #[must_use]
-    pub fn cooldown(mut self, effect: impl Into<Name<AnyEffect>>) -> Self {
+    pub fn cooldown(mut self, effect: impl Into<Key<AnyEffect>>) -> Self {
         self.cooldown = Some(effect.into());
         self
     }
@@ -283,16 +283,16 @@ impl AbilityData {
 #[serde(deny_unknown_fields)]
 pub struct Grant {
     /// The effect: a lasting one.
-    pub effect: Name<AnyEffect>,
+    pub effect: Key<AnyEffect>,
     /// The abilities its target is granted while it lasts.
-    pub abilities: Vec<Name<AnyAbility>>,
+    pub abilities: Vec<Key<AnyAbility>>,
 }
 
 impl Grant {
     /// `effect` granting `abilities`.
     #[must_use]
-    pub fn new<A: Into<Name<AnyAbility>>>(
-        effect: impl Into<Name<AnyEffect>>,
+    pub fn new<A: Into<Key<AnyAbility>>>(
+        effect: impl Into<Key<AnyEffect>>,
         abilities: impl IntoIterator<Item = A>,
     ) -> Self {
         Self {

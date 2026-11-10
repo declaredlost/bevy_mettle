@@ -41,9 +41,10 @@ and the server decides, with an adapter for
   reads.
 - **Reads in context**: one attribute per kind of value, a resistance read
   tagged with a hit's damage type, with a breakdown of where it came from.
-- **Effects**: instant, timed, infinite or periodic, scaled by curves and
-  levels; stacking, granting tags, immunity, requirements to apply and to
-  count, executions in code, and chained effects.
+- **Effects**: instant, timed, infinite or periodic, their numbers small
+  expressions of levels, curves, params and attributes captured as the spec
+  is made or read live; stacking, granting tags, immunity, requirements to
+  apply and to count, executions in code, and chained effects.
 - **Abilities**: granted, activated, paid for, cooled down and ended, by
   hand or by triggers; what blocks and cancels what is data, what one does
   is your component and systems.

@@ -10,13 +10,14 @@
 | `lightyear` | No | Prediction over lightyear: `bevy_mettle_lightyear` as `bevy_mettle::lightyear`. Adds `MettleNetPlugin` to `MettlePlugins`, which then goes after lightyear's plugins. Turns on `ability`. |
 
 `bevy_mettle_core` is always there, as `bevy_mettle::core`: gameplay tags,
-curves and conditions. `MettleSystemsPlugin` and `MettleContentPlugin` are
-always in `MettlePlugins`, and `MettleContent` holds what the enabled parts
+curves and conditions, and the `Mettle` schedule. `MettleCorePlugin` and
+`MettleContentPlugin` are always in `MettlePlugins`, and `MettleContent` holds what the enabled parts
 define: tags and curves always, effects with `effect`, abilities and grants
 with `ability`.
 
 The prelude brings in every enabled part's prelude, with `MettlePlugins`,
-`MettleSystems`, `MettleContent`, `ContentLoaded` and `ContentRejected`.
+`MettleContent`, `ContentLoaded` and `ContentRejected`. Core's brings the
+schedule: `Mettle`, `MettleSet`, `MettleSystems` and `MettleCorePlugin`.
 That's the derives and the app traits (`AttributeApp`, `TagApp`,
 `EffectApp`, `BehaviourApp`, `AbilityApp`); the specs (`EffectSpec`,
 `AbilitySpec`, `IntoAbilityId`); every registry and its numbers

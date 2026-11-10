@@ -47,6 +47,15 @@ pub enum Error {
 }
 
 impl Error {
+    /// That `what` can't be, named within `within` if in a definition.
+    #[must_use]
+    pub fn invalid(what: impl Into<String>, within: Option<&str>) -> Self {
+        Self::Invalid {
+            what: what.into(),
+            within: within.map(ToOwned::to_owned),
+        }
+    }
+
     /// That there's no `K` called `name`, named within `within` if in a
     /// definition.
     #[must_use]

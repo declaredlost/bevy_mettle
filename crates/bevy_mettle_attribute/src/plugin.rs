@@ -1,17 +1,25 @@
-use bevy::ecs::schedule::{InternedScheduleLabel, ScheduleLabel};
+use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
 use bevy_mettle_core::net::NetRole;
 use bevy_mettle_core::tag::{OwnedTags, publish_tags};
+use bevy_mettle_core::{Mettle, MettleCorePlugin, MettleSet};
 
 use crate::authority::{self, Remote};
 use crate::modifier::{ModifierOf, ModifierSources, Modifiers, ModifiersReplica, Provisional};
 use crate::registry::{AttributeRegistry, AttributeState, state};
 
-/// The system set attributes are kept in, `FixedPreUpdate` by default.
-#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct AttributeSystems;
+/// The schedule attributes are folded in, from bases synced to limits.
+///
+/// Bases synced, modifiers folded, values worked out, bases following their
+/// limits.
+///
+/// Run in [`MettleSet::Attributes`], and again as what follows other actors'
+/// values settles ([`MettleSet::Settle`]), so what that changed is folded
+/// before values are published.
+#[derive(ScheduleLabel, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AttributeFold;
 
-/// The steps attributes are kept in, in order.
+/// The steps of [`AttributeFold`], in order.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Phase {
     /// Changed bases synced in.
@@ -22,48 +30,21 @@ pub(crate) enum Phase {
     Refresh,
     /// Bases moved as their limits did, and their values worked out again.
     Follow,
-    /// `Current`s written, changes told.
-    Publish,
 }
-
-/// The schedule attributes are kept in.
-#[derive(Resource)]
-pub(crate) struct AttributeSchedule(pub(crate) InternedScheduleLabel);
 
 /// Keeps actors' attributes: bases synced, modifiers folded, values computed.
 ///
-/// What changed is told, and its components registered for reflection. Added by
+/// Folded in [`AttributeFold`], run in [`MettleSet::Attributes`]; published
+/// in [`MettleSet::Publish`]. What changed is told, and its components
+/// registered for reflection. Added by
 /// [`add_attribute`](crate::registry::AttributeApp::add_attribute) if it isn't
-/// yet; add it first to choose the schedule.
-pub struct AttributePlugin {
-    schedule: InternedScheduleLabel,
-}
-
-impl AttributePlugin {
-    /// Keeps attributes in `schedule`.
-    pub fn new(schedule: impl ScheduleLabel) -> Self {
-        Self {
-            schedule: schedule.intern(),
-        }
-    }
-
-    /// The schedule it keeps attributes in.
-    #[must_use]
-    pub fn schedule(&self) -> InternedScheduleLabel {
-        self.schedule
-    }
-}
-
-impl Default for AttributePlugin {
-    /// Keeps attributes in `FixedPreUpdate`, so the fixed step reads them
-    /// current.
-    fn default() -> Self {
-        Self::new(FixedPreUpdate)
-    }
-}
+/// yet.
+#[derive(Default)]
+pub struct AttributePlugin;
 
 impl Plugin for AttributePlugin {
     fn build(&self, app: &mut App) {
+        MettleCorePlugin::ensure(app);
         app.register_type::<Modifiers>()
             .register_type::<ModifierOf>()
             .register_type::<ModifiersReplica>()
@@ -75,21 +56,13 @@ impl Plugin for AttributePlugin {
             .init_resource::<AttributeRegistry>()
             .init_resource::<NetRole>()
             .init_resource::<state::Dirty>()
-            .insert_resource(AttributeSchedule(self.schedule))
+            .init_schedule(AttributeFold)
             .configure_sets(
-                self.schedule,
-                (
-                    Phase::Sync,
-                    Phase::Fold,
-                    Phase::Refresh,
-                    Phase::Follow,
-                    Phase::Publish,
-                )
-                    .chain()
-                    .in_set(AttributeSystems),
+                AttributeFold,
+                (Phase::Sync, Phase::Fold, Phase::Refresh, Phase::Follow).chain(),
             )
             .add_systems(
-                self.schedule,
+                AttributeFold,
                 (
                     (
                         authority::sync_remote,
@@ -102,8 +75,14 @@ impl Plugin for AttributePlugin {
                         .chain()
                         .in_set(Phase::Refresh),
                     // After every attribute's bases followed their limits.
-                    state::rework.after(Phase::Follow).before(Phase::Publish),
+                    state::rework.after(Phase::Follow),
                 ),
-            );
+            )
+            .add_systems(Mettle, fold.in_set(MettleSet::Attributes));
     }
+}
+
+/// Runs [`AttributeFold`].
+fn fold(world: &mut World) {
+    world.run_schedule(AttributeFold);
 }

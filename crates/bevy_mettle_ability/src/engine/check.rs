@@ -130,7 +130,7 @@ pub(super) fn affords(world: &World, actor: Entity, granted: &GrantedAbility) ->
         // `Current` is.
         // Routes are routed in a preview already: what's left changes
         // attributes.
-        let Changes::Attribute(attribute) = change.changes else {
+        let Some(Changes::Attribute(attribute)) = change.changes() else {
             continue;
         };
         let now = after.get(&attribute).copied().unwrap_or_else(|| {

@@ -118,19 +118,22 @@ fn health_bars(lives: Query<&Current<Life>, Changed<Current<Life>>>) {
 
 fn main() {
     App::new()
-        .add_plugins((MinimalPlugins, AttributePlugin::default()))
+        .add_plugins((MinimalPlugins, AttributePlugin))
         .add_attribute::<Life>()
         .add_attribute::<MaxLife>()
         .add_attribute::<Resistance>()
         .add_attribute::<MaxResistance>()
         .add_systems(Startup, spawn)
-        .add_systems(FixedUpdate, (resist, health_bars))
+        .add_systems(FixedUpdate, resist)
+        .add_systems(FixedPostUpdate, health_bars.after(MettleSystems))
         .run();
 }
 ```
 
-Attributes are kept in [`AttributeSystems`], in `FixedPreUpdate` unless
-[`AttributePlugin::new`] says otherwise.
+Attributes are folded in mettle's schedule, [`Mettle`], in
+[`MettleSet::Attributes`], and published in [`MettleSet::Publish`]. It runs
+each fixed step, in `FixedPostUpdate` unless [`MettleCorePlugin::new`] says
+otherwise. Order systems that read `Current` after [`MettleSystems`].
 
 ## Learn more
 
@@ -161,5 +164,8 @@ or [MIT license](https://github.com/declaredlost/bevy_mettle/blob/main/LICENSE-M
 [`ModifierOf`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/struct.ModifierOf.html
 [`AttributeReader`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/read/struct.AttributeReader.html
 [`Served`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/authority/struct.Served.html
-[`AttributeSystems`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/struct.AttributeSystems.html
-[`AttributePlugin::new`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/struct.AttributePlugin.html#method.new
+[`Mettle`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.Mettle.html
+[`MettleSet::Attributes`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/enum.MettleSet.html#variant.Attributes
+[`MettleSet::Publish`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/enum.MettleSet.html#variant.Publish
+[`MettleCorePlugin::new`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.MettleCorePlugin.html#method.new
+[`MettleSystems`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.MettleSystems.html

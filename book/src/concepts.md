@@ -11,7 +11,7 @@ Mettle splits a game's gameplay in two:
   `Life` and `Mana`, so a system asks for `Current<Life>`. What an ability
   does is a component of yours, run by your systems.
 - **Data** is content: gameplay tags, curves, effects and abilities. Each
-  is named by a [`Name`], such as `"burning"` or `"fireball"`, so a designer
+  is named by a [`Key`], such as `"burning"` or `"fireball"`, so a designer
   or a mod can add one without code.
 
 Code names things by type, never by string. A tag code uses is a
@@ -19,6 +19,25 @@ Code names things by type, never by string. A tag code uses is a
 ability it grants a `#[derive(Ability)]` type. A misspelled one doesn't
 compile. Each type carries its content's name, checked once, as content
 loads.
+
+Content built in code can name by type too. A [`Key`] comes from a string,
+or from a type with `Key::of::<Burning>()`, keyed by the name its derive
+gives it. Builders take either:
+
+```rust
+# use bevy_mettle::prelude::*;
+#[derive(Effect)]
+struct Burning;
+
+let named: Key<AnyEffect> = "burning".into();
+assert_eq!(Key::of::<Burning>(), named);
+let burning = EffectData::lasting(Key::of::<Burning>(), 4.0);
+# assert_eq!(burning.name, named);
+```
+
+One type can be keyed as more than one kind. A `Fireball` deriving both
+`Ability` and `Effect` gives `AbilityData::new` the ability's key and
+`EffectData::instant` the effect's, each by its own name.
 
 Code is added to the app: attributes with `add_attribute`, behaviours with
 `add_behaviour`, effect code with `add_execution`, `add_calculation` and
@@ -44,8 +63,9 @@ by.
 - **Code is numbered as it's added.** `add_attribute::<Life>()` gives `Life`
   the next [`AttributeId`]; behaviours, routes, executions and calculations
   get theirs the same way. Ask for one with `world.attribute_id::<Life>()`,
-  as Bevy has `world.component_id::<T>()`. Typed reads, such as
-  `value::<Life>()` and `Current<Life>`, find it for you.
+  as Bevy has `world.component_id::<T>()`. Typed reads and changes, such
+  as `value::<Life>()`, `Current<Life>` and `BaseChange::of::<Life>`, find
+  it for you.
 - **Content is numbered as it's checked.** Tags, curves, effects and
   abilities get a [`TagId`], a [`CurveId`], an [`EffectId`] and an
   [`AbilityId`], in order of name. A reload keeps the numbers things had,
@@ -98,40 +118,41 @@ For the mage, casting the fireball applies `fireball.cost` and
 `cooldown.fireball`, and attributes work out `Current<Mana>` from the new
 base.
 
-## One frame
+## One step
 
-Each part runs in its own set, in its own schedule by default:
+Mettle runs in its own schedule, [`Mettle`], once each fixed step, in
+`FixedPostUpdate`. Its steps, the [`MettleSet`]s, run in order:
 
-1. **Abilities**, in [`AbilitySystems`] in `PreUpdate`: new definitions
-   given out, and, over a network, requests served and replies resolved.
-2. **Attributes**, in [`AttributeSystems`] in `FixedPreUpdate`: changed
-   bases synced in, changed modifiers folded, owned tags told, and changed
-   values written to `Current<A>`.
-3. **Effects**, in [`EffectSystems`] in `FixedUpdate`: requirements
-   weighed, periods come round, time run out.
+1. **Effects**: requirements weighed, periods come round, time run out.
+2. **Attributes**: changed bases synced in, changed modifiers folded, owned
+   tags told, values worked out.
+3. **Settle**: effects whose live reads moved are worked out again, and
+   attributes folded again, until nothing moves.
+4. **Publish**: changed values written to `Current<A>`, and told.
 
-Attributes run before your fixed-step systems, so those read values as
-they stand. What effects change in a tick folds into `Current` at the
-start of the next.
+So what your systems do in a tick's `FixedUpdate` is ticked, folded and
+published before the tick ends. A rollback replays the tick, and mettle
+with it. Abilities stand apart: in [`AbilitySystems`], in `PreUpdate`, new
+definitions are given out and, over a network, requests served and replies
+resolved.
 
-[`MettleSystems`] holds all three, in each schedule they run in. Where
-two run in the same schedule, abilities go first, then effects, then
-attributes, so what changed folds the same tick. Order your systems
+The system running `Mettle` is in [`MettleSystems`]. Order your systems
 against it:
 
 ```rust
 # use bevy::prelude::*;
 # use bevy_mettle::prelude::*;
 # fn regenerate() {}
-# fn cast_fireball() {}
+# fn health_bars() {}
 # let mut app = App::new();
-app.add_systems(FixedUpdate, regenerate.before(MettleSystems))
-    .add_systems(FixedUpdate, cast_fireball.after(MettleSystems));
+app.add_systems(FixedUpdate, regenerate)
+    .add_systems(FixedPostUpdate, health_bars.after(MettleSystems));
 ```
 
 Applying an effect or activating an ability doesn't wait for a schedule.
 It happens as the command is applied, and what it changes is folded the
-next time attributes run.
+next time `Mettle` runs. [Installation](installation.md#where-mettle-runs)
+shows how to run it elsewhere.
 
 ## Owned tags
 
@@ -145,12 +166,12 @@ blocked by one. [Gameplay tags](tags.md) covers them.
 ## Pitfalls
 
 - **Ordering across schedules.** `.after(MettleSystems)` orders systems
-  only within one schedule. To read attributes the tick effects changed
-  them, keep effects and attributes in the same schedule.
-- **A change made after attributes ran.** A base changed after
-  `AttributeSystems` reaches `Current` the next time they run.
+  only within the schedule mettle runs in. A system in `Update` sees what
+  the frame's last fixed step published.
+- **A change made after mettle ran.** A base changed after `MettleSystems`
+  reaches `Current` the next time it runs.
 
-[`Name`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/struct.Name.html
+[`Key`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/struct.Key.html
 [`MettleContent`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleContent.html
 [`TagRegistry`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagRegistry.html
 [`CurveRegistry`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveRegistry.html
@@ -158,9 +179,9 @@ blocked by one. [Gameplay tags](tags.md) covers them.
 [`EffectRegistry`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectRegistry.html
 [`AbilityRegistry`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilityRegistry.html
 [`AbilitySystems`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilitySystems.html
-[`AttributeSystems`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/struct.AttributeSystems.html
-[`EffectSystems`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectSystems.html
-[`MettleSystems`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleSystems.html
+[`Mettle`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.Mettle.html
+[`MettleSet`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/enum.MettleSet.html
+[`MettleSystems`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.MettleSystems.html
 [`TagId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.TagId.html
 [`CurveId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.CurveId.html
 [`EffectId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.EffectId.html

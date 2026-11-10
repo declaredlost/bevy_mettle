@@ -151,9 +151,11 @@ assert_eq!(attributes.id("max_life"), attributes.id_of::<MaxLife>());
 `MettlePlugins` (or `AttributePlugin` itself) before the first
 `add_attribute`. Adding the plugin twice panics, as with any Bevy plugin.
 
-Attributes are kept in `FixedPreUpdate` by default, so systems in
-`FixedUpdate` read them up to date. To keep them somewhere else, set the
-plugin: `MettlePlugins.set(AttributePlugin::new(Update))`.
+Attributes are folded in the [`Mettle`] schedule, run in `FixedPostUpdate`
+by default, so what your systems change in a tick's `FixedUpdate` is folded
+before the tick ends. To run it somewhere else, set the core plugin:
+`MettlePlugins.set(MettleCorePlugin::new(Update))`.
+[Installation](installation.md#where-mettle-runs) has more.
 
 ## Base and Current
 
@@ -177,7 +179,7 @@ fn spawn_mage(mut commands: Commands) {
     ));
 }
 # let mut app = App::new();
-# app.add_plugins(MettlePlugins.set(AttributePlugin::new(Update)))
+# app.add_plugins((MinimalPlugins, MettlePlugins.set(MettleCorePlugin::new(Update))))
 #     .add_attribute::<Life>()
 #     .add_attribute::<MaxLife>()
 #     .add_attribute::<Mana>()
@@ -210,10 +212,10 @@ fn health_bars(mut mages: Query<(&Current<Life>, &mut HealthBar), Changed<Curren
     }
 }
 # let mut app = App::new();
-# app.add_plugins(MettlePlugins.set(AttributePlugin::new(Update)))
+# app.add_plugins((MinimalPlugins, MettlePlugins.set(MettleCorePlugin::new(Update))))
 #     .add_attribute::<Life>()
 #     .add_attribute::<MaxLife>()
-#     .add_systems(Update, health_bars.after(AttributeSystems));
+#     .add_systems(Update, health_bars.after(MettleSystems));
 # let mage = app.world_mut().spawn((Base::<Life>::default(), Base::<MaxLife>::default(), HealthBar(0.0))).id();
 # app.update();
 # app.world_mut().get_mut::<Base<Life>>(mage).unwrap().set(40.0);
@@ -222,7 +224,8 @@ fn health_bars(mut mages: Query<(&Current<Life>, &mut HealthBar), Changed<Curren
 ```
 
 Changing a base doesn't change `Current` at once. It's worked out the next
-time [`AttributeSystems`] runs. Put systems that read `Current` after it.
+time [`Mettle`] runs, and written in its last step. Put systems that read
+`Current` after [`MettleSystems`].
 
 Taking `Base<Life>` off the mage takes the attribute away, and its
 `Current<Life>` with it.
@@ -245,7 +248,7 @@ fn hurt(changed: On<AttributeChanged<Life>>, mut hurt: ResMut<Hurt>) {
     }
 }
 # let mut app = App::new();
-# app.add_plugins(MettlePlugins.set(AttributePlugin::new(Update)))
+# app.add_plugins((MinimalPlugins, MettlePlugins.set(MettleCorePlugin::new(Update))))
 #     .add_attribute::<Life>()
 #     .add_attribute::<MaxLife>()
 #     .init_resource::<Hurt>()
@@ -275,8 +278,7 @@ predictions show until the server answers.
 - **Writing `Current`.** Set the base, or add a modifier. `Current` is
   overwritten the next time attributes are kept.
 - **Reading too early.** A base set this tick shows in `Current` once
-  `AttributeSystems` has run. Order your systems after it, or after
-  [`MettleSystems`].
+  `Mettle` has run. Order your systems after [`MettleSystems`].
 - **The same name twice.** Two attribute types named alike (by the
   `name` setting or by their type names) panic when the second is added.
 
@@ -284,7 +286,6 @@ predictions show until the server answers.
 [`Attribute`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/trait.Attribute.html
 [`add_attribute`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/registry/trait.AttributeApp.html#tymethod.add_attribute
 [`AttributePlugin`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/struct.AttributePlugin.html
-[`AttributeSystems`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/struct.AttributeSystems.html
 [`Base`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/struct.Base.html
 [`Base::get`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/struct.Base.html#method.get
 [`Base::set`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/struct.Base.html#method.set
@@ -292,4 +293,5 @@ predictions show until the server answers.
 [`Current`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/struct.Current.html
 [`AttributeChanged<A>`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/registry/struct.AttributeChanged.html
 [`Remote`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/authority/struct.Remote.html
-[`MettleSystems`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleSystems.html
+[`Mettle`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.Mettle.html
+[`MettleSystems`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.MettleSystems.html

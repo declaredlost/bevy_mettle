@@ -30,11 +30,18 @@ pub(crate) fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         || quote!(#krate::behaviour::NoInput),
         |input| quote!(#input),
     );
+    let keyed = crate::shared::keyed(
+        ident,
+        &krate,
+        &quote!(#krate::behaviour::AnyBehaviour),
+        &name,
+    );
     Ok(quote! {
         impl #krate::behaviour::Behaviour for #ident {
             const NAME: &'static str = #name;
             type Input = #input;
         }
+        #keyed
     })
 }
 

@@ -1,8 +1,8 @@
 //! Registries: entries of each kind by number, and numbers by name and type.
 //!
 //! What an app has of each kind, by number, and its numbers by name and by
-//! type; and content's kinds, with their ids: what content is numbered by,
-//! shared over a network.
+//! type; and content's kinds, with their keys, the names content writes, and
+//! their ids, what content is numbered by, shared over a network.
 
 use std::any::TypeId;
 use std::fmt;
@@ -13,20 +13,17 @@ use bevy_platform::collections::HashMap;
 use fnv::FnvHasher;
 use smol_str::SmolStr;
 
-pub use self::id::{
-    AbilityId, AnyAbility, AnyAttribute, AnyCurve, AnyEffect, AnyTag, AttributeId, CurveId,
-    EffectId, TagId,
-};
+pub use self::id::{AbilityId, AttributeId, CurveId, EffectId, Id, TagId};
 pub use self::key::Key;
-pub use self::name::{Kind, Name};
+pub use self::kind::{AnyAbility, AnyAttribute, AnyCurve, AnyEffect, AnyTag, Keyed, Kind};
 use self::numbering::Numbering;
 
 mod id;
 mod key;
-mod name;
+mod kind;
 mod numbering;
 
-/// Entries of kind `K` by [`Key<K>`](Key), and their numbers by name and type.
+/// Entries of kind `K` by [`Id<K>`](Id), and their numbers by name and type.
 ///
 /// What every registry keeps, as Bevy's `Components` keeps each component's
 /// info by `ComponentId`.
@@ -49,7 +46,7 @@ pub struct Registry<K: Kind, T> {
     entries: Arc<Vec<Option<T>>>,
     /// The types code names, with their names.
     named: Arc<Vec<(TypeId, &'static str)>>,
-    by_type: Arc<HashMap<TypeId, Key<K>>>,
+    by_type: Arc<HashMap<TypeId, Id<K>>>,
     /// The name of the type that added each entry, for an error.
     added_by: Arc<HashMap<TypeId, &'static str>>,
 }
@@ -90,31 +87,31 @@ impl<K: Kind, T> fmt::Debug for Registry<K, T> {
 impl<K: Kind, T: Clone> Registry<K, T> {
     /// The entry numbered `id`, if there is one.
     #[must_use]
-    pub fn get(&self, id: Key<K>) -> Option<&T> {
+    pub fn get(&self, id: Id<K>) -> Option<&T> {
         self.entries.get(id.index())?.as_ref()
     }
 
     /// The number of what's called `name`, if anything is.
     #[must_use]
-    pub fn id(&self, name: &str) -> Option<Key<K>> {
-        self.numbering.number(name).map(Key::new)
+    pub fn id(&self, name: &str) -> Option<Id<K>> {
+        self.numbering.number(name).map(Id::new)
     }
 
     /// The number of what the type `N` names or adds, if it's in.
     #[must_use]
-    pub fn id_of<N: 'static>(&self) -> Option<Key<K>> {
+    pub fn id_of<N: 'static>(&self) -> Option<Id<K>> {
         self.id_of_type(TypeId::of::<N>())
     }
 
     /// The number of what the type `type_id` names or adds, if it's in.
     #[must_use]
-    pub fn id_of_type(&self, type_id: TypeId) -> Option<Key<K>> {
+    pub fn id_of_type(&self, type_id: TypeId) -> Option<Id<K>> {
         self.by_type.get(&type_id).copied()
     }
 
     /// The name of what's numbered `id`, if anything is.
     #[must_use]
-    pub fn name(&self, id: Key<K>) -> Option<&str> {
+    pub fn name(&self, id: Id<K>) -> Option<&str> {
         u32::try_from(id.index())
             .ok()
             .and_then(|number| self.numbering.name(number))
@@ -122,17 +119,17 @@ impl<K: Kind, T: Clone> Registry<K, T> {
     }
 
     /// Every entry with its number, in order of number.
-    pub fn iter(&self) -> impl Iterator<Item = (Key<K>, &T)> {
+    pub fn iter(&self) -> impl Iterator<Item = (Id<K>, &T)> {
         (0u32..)
             .zip(self.entries.iter())
-            .filter_map(|(number, entry)| Some((Key::new(number), entry.as_ref()?)))
+            .filter_map(|(number, entry)| Some((Id::new(number), entry.as_ref()?)))
     }
 
     /// Every entry with its number, in order of number, to change.
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (Key<K>, &mut T)> {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (Id<K>, &mut T)> {
         (0u32..)
             .zip(Arc::make_mut(&mut self.entries).iter_mut())
-            .filter_map(|(number, entry)| Some((Key::new(number), entry.as_mut()?)))
+            .filter_map(|(number, entry)| Some((Id::new(number), entry.as_mut()?)))
     }
 
     /// A hash of the names and their numbers, the same wherever they're
@@ -173,8 +170,24 @@ impl<K: Kind, T: Clone> Registry<K, T> {
     ///
     /// If another type added something called `name`: data couldn't tell them
     /// apart.
-    pub fn add<N: 'static>(&mut self, name: &'static str, entry: T) -> Key<K> {
-        let type_id = TypeId::of::<N>();
+    pub fn add<N: 'static>(&mut self, name: &'static str, entry: T) -> Id<K> {
+        self.add_type(TypeId::of::<N>(), std::any::type_name::<N>(), name, entry)
+    }
+
+    /// Adds `entry`, by the type `type_id` (its Rust name `type_name`) called
+    /// `name`, numbered after the last; or replaces what that type added: its
+    /// number. For a type known only at runtime, as reflection knows it.
+    ///
+    /// # Panics
+    ///
+    /// If another type added something called `name`.
+    pub fn add_type(
+        &mut self,
+        type_id: TypeId,
+        type_name: &'static str,
+        name: &'static str,
+        entry: T,
+    ) -> Id<K> {
         if let Some(known) = self.id_of_type(type_id) {
             Arc::make_mut(&mut self.entries)[known.index()] = Some(entry);
             return known;
@@ -187,19 +200,16 @@ impl<K: Kind, T: Clone> Registry<K, T> {
                 .and_then(|(other, _)| self.added_by.get(other))
                 .copied()
                 .unwrap_or("another type");
-            panic!(
-                "`{other}` and `{}` are both named `{name}`",
-                std::any::type_name::<N>()
-            );
+            panic!("`{other}` and `{type_name}` are both named `{name}`");
         }
-        let id = Key::new(Arc::make_mut(&mut self.numbering).push(SmolStr::new_static(name)));
+        let id = Id::new(Arc::make_mut(&mut self.numbering).push(SmolStr::new_static(name)));
         let entries = Arc::make_mut(&mut self.entries);
         if entries.len() <= id.index() {
             entries.resize(id.index() + 1, None);
         }
         entries[id.index()] = Some(entry);
         Arc::make_mut(&mut self.by_type).insert(type_id, id);
-        Arc::make_mut(&mut self.added_by).insert(type_id, std::any::type_name::<N>());
+        Arc::make_mut(&mut self.added_by).insert(type_id, type_name);
         id
     }
 
@@ -228,7 +238,7 @@ impl<K: Kind, T: Clone> Registry<K, T> {
             .iter()
             .filter_map(|(&type_id, &id)| {
                 let name = self.name(id)?;
-                Some((type_id, Key::new(numbering.number(name)?)))
+                Some((type_id, Id::new(numbering.number(name)?)))
             })
             .collect();
         Self {
@@ -264,7 +274,7 @@ impl<K: Kind, T: Clone> Registry<K, T> {
         let by_type = self
             .named
             .iter()
-            .filter_map(|&(type_id, name)| Some((type_id, Key::new(numbering.number(name)?))))
+            .filter_map(|&(type_id, name)| Some((type_id, Id::new(numbering.number(name)?))))
             .collect();
         Self {
             entries: Arc::new(vec![None; numbering.len()]),
@@ -280,7 +290,7 @@ impl<K: Kind, T: Clone> Registry<K, T> {
     /// # Panics
     ///
     /// If nothing's numbered `id`.
-    pub fn set(&mut self, id: Key<K>, entry: T) {
+    pub fn set(&mut self, id: Id<K>, entry: T) {
         Arc::make_mut(&mut self.entries)[id.index()] = Some(entry);
     }
 
@@ -301,7 +311,7 @@ mod tests {
     #[derive(crate::registry::Kind)]
     enum AnyThing {}
 
-    type ThingId = Key<AnyThing>;
+    type ThingId = Id<AnyThing>;
 
     struct Sword;
     struct Shield;

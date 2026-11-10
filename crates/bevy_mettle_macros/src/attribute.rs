@@ -69,6 +69,12 @@ pub(crate) fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
             const ON_LIMIT: #krate::registry::OnLimit = #krate::registry::OnLimit::#on_limit;
         }
     });
+    let keyed = crate::shared::keyed(
+        ident,
+        &krate,
+        &quote!(#krate::__core::registry::AnyAttribute),
+        &name,
+    );
     Ok(quote! {
         impl #krate::Attribute for #ident {
             const NAME: &'static str = #name;
@@ -78,6 +84,7 @@ pub(crate) fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
             #rounding
             #on_limit
         }
+        #keyed
     })
 }
 

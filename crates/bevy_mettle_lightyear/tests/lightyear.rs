@@ -8,6 +8,7 @@ use core::time::Duration;
 use bevy::app::Plugins;
 use bevy::ecs::entity::MapEntities;
 use bevy::prelude::*;
+use bevy::reflect::TypeRegistry;
 use bevy::state::app::StatesPlugin;
 use bevy_harness::{TestApp, TestWorld};
 use bevy_mettle_ability::data::NetExecution;
@@ -19,7 +20,6 @@ use bevy_mettle_effect::prelude::*;
 use bevy_mettle_lightyear::prelude::*;
 use bevy_replicon::shared::server_entity_map::ServerEntityMap;
 use lightyear::crossbeam::CrossbeamIo;
-use lightyear::netcode::Key;
 use lightyear::netcode::auth::Authentication;
 use lightyear::prelude::client::{ClientPlugins, NetcodeClient};
 use lightyear::prelude::server::{NetcodeServer, ServerPlugins, Start};
@@ -139,15 +139,8 @@ fn in_reach(In(check): In<InputCheck<Aim>>, reach: Res<Reach>) -> bool {
 
 /// The game's own on an effect's context: what a shot marked, and whether
 /// it was a headshot. Added on both sides.
-#[derive(
-    ContextData,
-    Clone,
-    Debug,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    MapEntities
-)]
+#[derive(Reflect, Clone, Debug, PartialEq, Serialize, Deserialize, MapEntities)]
+#[reflect(ContextData)]
 struct Impact {
     #[entities]
     marked: Entity,
@@ -155,15 +148,8 @@ struct Impact {
 }
 
 /// The game's own too, added after [`Impact`].
-#[derive(
-    ContextData,
-    Clone,
-    Debug,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    MapEntities
-)]
+#[derive(Reflect, Clone, Debug, PartialEq, Serialize, Deserialize, MapEntities)]
+#[reflect(ContextData)]
 struct Wound {
     deep: bool,
 }
@@ -172,7 +158,7 @@ struct Wound {
 fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
     app.insert_resource(role)
         .add_attribute::<Mana>()
-        .add_plugins((EffectPlugin::default(), AbilityPlugin))
+        .add_plugins((EffectPlugin, AbilityPlugin))
         .add_behaviour::<Cast>()
         .add_behaviour::<Shoot>()
         .add_behaviour::<Smiting>()
@@ -194,8 +180,8 @@ fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
         .add_ability::<Scope>()
         .add_effect::<FireballCost>()
         .add_effect::<FireballCooldown>()
-        .add_context_data::<Impact>()
-        .add_context_data::<Wound>()
+        .register_type::<Impact>()
+        .register_type::<Wound>()
         .insert_resource(Reach(if role == NetRole::Server { 10.0 } else { 100.0 }))
         .add_plugins(MettleNetPlugin { replicas })
         .replicate_attribute::<Mana>()
@@ -225,10 +211,10 @@ fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
         .resource::<EffectRegistry>()
         .recheck(
             &[
-                EffectData::instant("fireball.cost")
+                EffectData::instant(Key::of::<FireballCost>())
                     .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0))
                     .cue("cue.hit"),
-                EffectData::lasting("fireball.cooldown", 1.0)
+                EffectData::lasting(Key::of::<FireballCooldown>(), 1.0)
                     .grant("cooldown.fireball")
                     .cue("cue.cooling"),
             ],
@@ -261,33 +247,35 @@ fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
 
 /// Every ability both sides have, as data.
 fn abilities() -> [AbilityData; 10] {
-    let fireball = AbilityData::new("fireball", "cast")
+    let fireball = AbilityData::new(Key::of::<Fireball>(), Key::of::<Cast>())
         .tag("ability")
-        .cost("fireball.cost")
-        .cooldown("fireball.cooldown")
+        .cost(Key::of::<FireballCost>())
+        .cooldown(Key::of::<FireballCooldown>())
         .blocked_by("state.stunned")
         .cancel_if(Condition::owner_has("state.stunned"));
-    let shot = AbilityData::new("shot", "shoot").cost("fireball.cost");
-    let smite = AbilityData::new("smite", "smiting")
-        .cost("fireball.cost")
+    let shot =
+        AbilityData::new(Key::of::<Shot>(), Key::of::<Shoot>()).cost(Key::of::<FireballCost>());
+    let smite = AbilityData::new(Key::of::<Smite>(), Key::of::<Smiting>())
+        .cost(Key::of::<FireballCost>())
         .net(NetExecution::ServerOnly);
-    let ward = AbilityData::new("ward", "warding")
-        .cost("fireball.cost")
+    let ward = AbilityData::new(Key::of::<Ward>(), Key::of::<Warding>())
+        .cost(Key::of::<FireballCost>())
         .trigger(Trigger::Event(TagKey::named("event.ward")))
         .net(NetExecution::ServerInitiated);
-    let zoom = AbilityData::new("zoom", "zooming").net(NetExecution::LocalOnly);
-    let flare = AbilityData::new("flare", "flaring")
-        .cost("fireball.cost")
+    let zoom =
+        AbilityData::new(Key::of::<Zoom>(), Key::of::<Zooming>()).net(NetExecution::LocalOnly);
+    let flare = AbilityData::new(Key::of::<Flare>(), Key::of::<Flaring>())
+        .cost(Key::of::<FireballCost>())
         .blocked_by("state.stunned");
-    let spark =
-        AbilityData::new("spark", "sparking").trigger(Trigger::Event(TagKey::named("event.spark")));
-    let beacon = AbilityData::new("beacon", "flaring")
+    let spark = AbilityData::new(Key::of::<Spark>(), Key::of::<Sparking>())
+        .trigger(Trigger::Event(TagKey::named("event.spark")));
+    let beacon = AbilityData::new(Key::of::<Beacon>(), Key::of::<Flaring>())
         .trigger(Trigger::Event(TagKey::named("event.beacon")))
         .net(NetExecution::ServerInitiated);
-    let lens = AbilityData::new("lens", "zooming")
+    let lens = AbilityData::new(Key::of::<Lens>(), Key::of::<Zooming>())
         .trigger(Trigger::Event(TagKey::named("event.lens")))
         .net(NetExecution::LocalOnly);
-    let scope = AbilityData::new("scope", "zooming")
+    let scope = AbilityData::new(Key::of::<Scope>(), Key::of::<Zooming>())
         .trigger(Trigger::TagAdded(TagKey::named("state.aiming")))
         .net(NetExecution::LocalOnly);
     [
@@ -354,7 +342,7 @@ fn net_with(replicas: Replicas) -> TestWorld {
             Authentication::Manual {
                 server_addr: SERVER,
                 protocol_id: 0,
-                private_key: Key::default(),
+                private_key: lightyear::netcode::Key::default(),
                 client_id: 0,
             },
             lightyear::netcode::client_plugin::NetcodeConfig::default(),
@@ -699,8 +687,11 @@ fn a_client_shows_the_servers_override_whatever_order_its_sources_came_in() {
     world["client"].entity_mut(first).insert(ModifierOf(here));
     world.ticks(2);
     let client = &world["client"];
-    let read = AttributeContext::new().tag("state");
-    let local = client.world().value_at(here, id, &read).unwrap();
+    let local = client
+        .world()
+        .breakdown_at(here, id, &AttributeContext::new())
+        .unwrap()
+        .total();
     assert!(same(local, 5.0), "its own fold would say {local}");
     assert!(same(mana(client, here), 15.0), "but it shows the server's");
     assert!(same(current(client, here), 15.0));
@@ -1130,10 +1121,10 @@ fn watch_mismatches(app: &mut TestApp) {
 /// numbers effects had kept, new ones after.
 fn reload_with(world: &mut World, effects: &[EffectData]) {
     let mut all = vec![
-        EffectData::instant("fireball.cost")
+        EffectData::instant(Key::of::<FireballCost>())
             .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0))
             .cue("cue.hit"),
-        EffectData::lasting("fireball.cooldown", 1.0)
+        EffectData::lasting(Key::of::<FireballCooldown>(), 1.0)
             .grant("cooldown.fireball")
             .cue("cue.cooling"),
     ];
@@ -1221,11 +1212,10 @@ fn context_data_is_numbered_by_name_whatever_order_its_added_in() {
     world.ticks(20);
     assert_eq!(world["client"].resource::<Mismatches>().0, [], "alike");
     // The client adds the same types, the other way round: numbered alike.
-    let mut reversed = App::new();
-    reversed
-        .add_context_data::<Wound>()
-        .add_context_data::<Impact>();
-    let reversed = reversed.world().resource::<ContextDataRegistry>().clone();
+    let mut reversed = TypeRegistry::empty();
+    reversed.register::<Wound>();
+    reversed.register::<Impact>();
+    let reversed = ContextDataRegistry::of(&reversed);
     world["client"].insert_resource(reversed);
     world.ticks(20);
     assert_eq!(
@@ -1234,9 +1224,9 @@ fn context_data_is_numbered_by_name_whatever_order_its_added_in() {
         "the same types, numbered alike"
     );
     // The client lacks one the server adds: told.
-    let mut fewer = App::new();
-    fewer.add_context_data::<Impact>();
-    let fewer = fewer.world().resource::<ContextDataRegistry>().clone();
+    let mut fewer = TypeRegistry::empty();
+    fewer.register::<Impact>();
+    let fewer = ContextDataRegistry::of(&fewer);
     world["client"].insert_resource(fewer);
     world.ticks(20);
     let seen = world["client"].resource::<Mismatches>().0.clone();
@@ -1338,6 +1328,90 @@ fn a_replicated_effects_context_names_the_clients_entities() {
 }
 
 #[test]
+fn context_data_registered_by_reflection_is_numbered_alike_on_both_sides() {
+    let world = net();
+    let server = world["server"].resource::<ContextDataRegistry>().clone();
+    let client = world["client"].resource::<ContextDataRegistry>().clone();
+    for (impact, wound) in [
+        (server.id_of::<Impact>(), server.id_of::<Wound>()),
+        (client.id_of::<Impact>(), client.id_of::<Wound>()),
+    ] {
+        assert!(
+            impact.is_some() && wound.is_some(),
+            "registered as context data"
+        );
+        assert_ne!(impact, wound);
+    }
+    assert_eq!(server.id_of::<Impact>(), client.id_of::<Impact>());
+    assert_eq!(server.id_of::<Wound>(), client.id_of::<Wound>());
+}
+
+#[test]
+fn a_snapshot_replicates_and_the_client_shows_the_servers() {
+    let mut world = net();
+    // Half the caster's mana, snapshotted.
+    let siphon = EffectData::infinite("siphon").modifier(EffectModifier::new::<Mana>(
+        Operation::Flat,
+        Magnitude::source::<Mana>().times(0.5),
+    ));
+    reload_with(world["server"].world_mut(), std::slice::from_ref(&siphon));
+    reload_with(world["client"].world_mut(), &[siphon]);
+    let (there, here) = mage(&mut world, true);
+    let caster = world["server"].spawn((
+        Base::<Mana>::new(40.0),
+        Replicate::to_clients(NetworkTarget::All),
+    ));
+    world.ticks(2);
+    let siphon = world["server"]
+        .resource::<EffectRegistry>()
+        .id("siphon")
+        .expect("reloaded");
+    // Snapshotted as it's made, then the caster drained before it's applied.
+    let made = world["server"]
+        .world()
+        .snapshot(EffectSpec::from_id(siphon).source(caster));
+    world["server"]
+        .entity_mut(caster)
+        .get_mut::<Base<Mana>>()
+        .unwrap()
+        .set(10.0);
+    world["server"].world_mut().apply_effect(there, made);
+    world
+        .until(|world| {
+            world["client"]
+                .entity(here)
+                .try_get::<ActiveEffects>()
+                .is_some_and(|effects| effects.iter().count() == 1)
+        })
+        .describe("the siphon replicates")
+        .within_ticks(20);
+    world.ticks(10);
+    let caster_here = mapped(&world["client"], caster).expect("the caster replicated");
+    let client = &world["client"];
+    assert!(
+        same(mana(client, caster_here), 10.0),
+        "the client has the caster as it is now"
+    );
+    let shown = client
+        .entity(here)
+        .get::<ActiveEffects>()
+        .iter()
+        .next()
+        .unwrap();
+    assert_eq!(
+        client.entity(shown).get::<EffectReplica>().captured,
+        [Some(40.0)],
+        "what the server captured, sent"
+    );
+    assert!(same(mana(&world["server"], there), 50.0), "30 and 20");
+    assert!(
+        same(mana(client, here), 50.0),
+        "the server's capture shown, not the caster read here: {}",
+        mana(client, here)
+    );
+}
+
+#[test]
 fn a_one_shot_the_server_plays_is_told_its_context_on_the_client() {
     let mut world = net();
     let there = world["server"].spawn((
@@ -1372,12 +1446,6 @@ fn a_one_shot_the_server_plays_is_told_its_context_on_the_client() {
         })
     );
 }
-
-/// The bit a server's own activations have set.
-const SERVERS: u64 = 1 << 63;
-
-/// The bit an activation derived from another's has set.
-const DERIVED: u64 = 1 << 62;
 
 /// An actor on the server, controlled by the client, given what `grant`
 /// grants it: it, and its actor on the client, once every ability it has
@@ -1434,7 +1502,7 @@ fn ability<A: Ability>(app: &TestApp, actor: Entity) -> Entity {
 }
 
 /// The activation `actor`'s `A` runs under in `app`, if it's active.
-fn running<A: Ability>(app: &TestApp, actor: Entity) -> Option<u64> {
+fn running<A: Ability>(app: &TestApp, actor: Entity) -> Option<Activation> {
     app.entity(ability::<A>(app, actor))
         .try_get::<ActiveAbility>()
         .map(|active| active.activation)
@@ -1594,7 +1662,7 @@ fn a_server_initiated_ability_the_server_triggers_runs_on_the_client() {
         GameplayEvent::new(there, TagKey::named("event.ward")),
     );
     let activation = running::<Ward>(&world["server"], there).expect("triggered");
-    assert_ne!(activation & SERVERS, 0, "the server's own");
+    assert!(activation.is_servers(), "the server's own");
     world
         .until(|world| running::<Ward>(&world["client"], here) == Some(activation))
         .describe("the client runs what the server triggered")
@@ -1679,7 +1747,7 @@ fn a_client_asking_for_a_local_only_ability_is_rejected() {
     world["client"].world_mut().write_message(AbilityRequest {
         actor: here,
         ability: zoom,
-        activation: 1,
+        activation: Activation::client(1),
     });
     world.ticks(20);
     assert_eq!(running::<Zoom>(&world["server"], there), None);
@@ -1703,8 +1771,8 @@ fn a_predicted_trigger_runs_at_once_under_the_activation_the_server_runs_it_unde
     let flare = running::<Flare>(client, here).expect("predicted");
     let spark = running::<Spark>(client, here).expect("triggered, predicted at once");
     assert_ne!(spark, flare);
-    assert_ne!(spark & DERIVED, 0, "derived");
-    assert_eq!(spark & SERVERS, 0, "from the client's");
+    assert!(spark.is_derived(), "derived");
+    assert!(!spark.is_servers(), "from the client's");
     client
         .entity(ability::<Spark>(client, here))
         .assert_has::<Sparking>();
@@ -1867,10 +1935,10 @@ fn a_predicted_trigger_under_the_servers_activation_runs_on_the_server_alone() {
     );
     let server = &world["server"];
     let beacon = running::<Beacon>(server, there).expect("triggered");
-    assert_ne!(beacon & SERVERS, 0, "the server's own");
+    assert!(beacon.is_servers(), "the server's own");
     let spark = running::<Spark>(server, there).expect("sparked under the beacon");
-    assert_ne!(spark & SERVERS, 0, "the server's, derived");
-    assert_ne!(spark & DERIVED, 0, "derived");
+    assert!(spark.is_servers(), "the server's, derived");
+    assert!(spark.is_derived(), "derived");
     world
         .until(|world| running::<Beacon>(&world["client"], here) == Some(beacon))
         .describe("the client mirrors the beacon")
@@ -2013,4 +2081,75 @@ fn a_client_cant_cancel_a_server_only_ability() {
     server
         .entity(ability::<Smite>(server, there))
         .assert_has::<Smiting>();
+}
+
+/// The client's fireball on `here` predicted and asked for, the server not
+/// yet run since: what's left waiting on its answer.
+fn awaiting(world: &mut TestWorld, here: Entity) {
+    let client = &mut world["client"];
+    client.watch_triggered::<AbilityFailed>();
+    // Never on its own, within the test.
+    client
+        .world_mut()
+        .insert_resource(PredictionTimeout(Duration::from_secs(60)));
+    client.world_mut().activate_ability(here, Fireball).unwrap();
+    client.tick();
+    assert!(same(mana(client, here), 10.0), "predicted");
+    assert!(running::<Fireball>(client, here).is_some());
+}
+
+/// The client, disconnected.
+fn disconnect(world: &mut TestWorld) {
+    let client = &mut world["client"];
+    let peer = client.query::<Entity, With<Client>>().single();
+    client.entity_mut(peer).insert(Disconnected::default());
+}
+
+/// The one failure the client heard of: its fireball's, unanswered.
+fn unanswered(client: &mut TestApp, here: Entity) {
+    let fireball = client
+        .resource::<AbilityRegistry>()
+        .id_of::<Fireball>()
+        .unwrap();
+    assert_eq!(
+        client.read_triggered::<AbilityFailed>(),
+        [AbilityFailed {
+            entity: here,
+            id: fireball,
+            reason: Failure::Unanswered,
+        }],
+        "failed unanswered, at once"
+    );
+}
+
+#[test]
+fn a_client_disconnecting_takes_back_what_awaits_its_answer_at_once() {
+    let mut world = net();
+    // What was replicated stays as the client disconnects.
+    let peer = world["client"].query::<Entity, With<Client>>().single();
+    world["client"].entity_mut(peer).insert(Persistent);
+    let (_, here) = mage(&mut world, true);
+    awaiting(&mut world, here);
+    disconnect(&mut world);
+    let client = &mut world["client"];
+    unanswered(client, here);
+    client.tick();
+    assert_eq!(running::<Fireball>(client, here), None, "taken back");
+    assert!(same(mana(client, here), 30.0), "mana back");
+    assert_eq!(effects(client, here), [], "the cooldown taken off");
+    client.ticks(5);
+    assert_eq!(client.read_triggered::<AbilityFailed>(), [], "once");
+}
+
+#[test]
+fn a_client_disconnecting_tells_of_what_it_predicted_as_its_replicas_go() {
+    let mut world = net();
+    let (_, here) = mage(&mut world, true);
+    awaiting(&mut world, here);
+    disconnect(&mut world);
+    let client = &mut world["client"];
+    unanswered(client, here);
+    client.ticks(5);
+    assert!(client.world().get_entity(here).is_err(), "despawned");
+    assert_eq!(client.read_triggered::<AbilityFailed>(), [], "once");
 }

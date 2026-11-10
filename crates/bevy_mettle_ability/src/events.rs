@@ -1,6 +1,7 @@
 //! Gameplay events, and what's told as abilities activate and end.
 
 use bevy::prelude::*;
+use bevy_mettle_core::Activation;
 use bevy_mettle_core::registry::AbilityId;
 use bevy_mettle_core::tag::TagKey;
 
@@ -23,7 +24,7 @@ pub struct GameplayEvent {
     pub magnitude: f32,
     /// The activation it was sent under, if an ability running sent it:
     /// what a predicted ability it triggers is predicted under.
-    pub activation: Option<u64>,
+    pub activation: Option<Activation>,
 }
 
 impl GameplayEvent {
@@ -44,7 +45,7 @@ impl GameplayEvent {
     /// it. A predicted ability it triggers is then predicted too, on the
     /// client and the server alike, its activation derived from this one.
     #[must_use]
-    pub fn under(mut self, activation: u64) -> Self {
+    pub fn under(mut self, activation: Activation) -> Self {
         self.activation = Some(activation);
         self
     }
@@ -60,7 +61,7 @@ pub struct AbilityActivated {
     /// Which ability.
     pub id: AbilityId,
     /// The activation.
-    pub activation: u64,
+    pub activation: Activation,
 }
 
 /// Triggered on an actor as an ability it was asked for didn't activate.
@@ -139,6 +140,10 @@ pub enum Failure {
     /// Its input wasn't given, or isn't what its behaviour takes, or doesn't
     /// pass its check: at activation, or given while it was active.
     Input,
+    /// The server didn't answer it in time: taken back, as the connection
+    /// went, or the answer did
+    /// ([`PredictionTimeout`](crate::net::PredictionTimeout)).
+    Unanswered,
 }
 
 /// Triggered on an actor as one of its abilities ends, or is cancelled.

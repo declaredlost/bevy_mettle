@@ -1,6 +1,6 @@
 //! How applying an effect again stacks.
 
-use bevy_mettle_core::registry::{AnyEffect, Name};
+use bevy_mettle_core::registry::{AnyEffect, Key};
 use serde::{Deserialize, Serialize};
 
 /// How an effect applied again onto its target stacks, up to a limit.
@@ -15,12 +15,12 @@ use serde::{Deserialize, Serialize};
 /// apart. At the limit, applying again applies `overflow` instead of the
 /// effect's own `on_apply`.
 ///
-/// Its overflow effects are named (`E`, an `Name<AnyEffect>`) in data, and
+/// Its overflow effects are named (`E`, a `Key<AnyEffect>`) in data, and
 /// numbered (an [`EffectId`](bevy_mettle_core::registry::EffectId)) once
 /// checked.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Stacking<E = Name<AnyEffect>> {
+pub struct Stacking<E = Key<AnyEffect>> {
     /// Whose stacks are one: everyone's on the target, unless it says.
     #[serde(default)]
     pub by: StackBy,

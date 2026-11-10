@@ -63,7 +63,7 @@ defaults. [Loading data](loading-data.md) says more.
 
 ## Naming effects in code
 
-Content names effects by string, since it's data: an `Name<AnyEffect>`. Code names an effect by
+Content names effects by string, since it's data: a `Key<AnyEffect>`. Code names an effect by
 its type, as it does a [tag](tags.md#tags-in-code). Derive [`Effect`] on a
 unit struct, and add it to the app:
 
@@ -194,28 +194,190 @@ by: see [Names and numbers](concepts.md#names-and-numbers).
 ## Magnitudes
 
 A [`Magnitude`] is how much: a modifier's value, a duration, or a period.
+It's a small expression. Its terms are:
 
-| Magnitude | How much |
+| Term | How much |
 |---|---|
 | `Value(f32)` | That number. A plain `f32` converts to it. |
-| `Scaled { base, curve }` | `base` times the [curve](curves.md) at the spec's level |
+| `Level` | The spec's level |
 | `Param(tag)` | What the code applying it set, by a tag such as `param.damage` |
-| `Attribute { attribute, from, coefficient }` | The source's or the target's attribute, times the coefficient |
+| `Attribute(read)` | An attribute of the source's or the target's, an [`AttributeRead`]: see [Captures](#captures) |
 | `Custom(name)` | A calculation in code, by name, such as `"burn_time"`: see [Effects in code](effect-code.md) |
+| `Curve { curve, at }` | The [curve](curves.md)'s value at `at`, any magnitude: the spec's level unless it says |
 
-In code, the same come from `4.0.into()`, [`Magnitude::scaled`],
-[`Magnitude::param`], [`Magnitude::source`] or [`Magnitude::target`], and
-`Magnitude::Custom("burn_time".into())`.
+And it combines them:
+
+| Combination | How much |
+|---|---|
+| `Sum(terms)` | The terms added up |
+| `Product(terms)` | The terms multiplied together |
+| `Clamp { value, min, max }` | `value`, kept within `min` and `max`, either of them left out |
+
+In code, the builders keep the common cases short: `4.0.into()`,
+[`Magnitude::param`], [`Magnitude::curve`] (at the level),
+[`Magnitude::curve_at`], [`Magnitude::scaled`] (a value times a curve at the
+level), [`Magnitude::source`] and [`Magnitude::target`] (an attribute's
+current value), and `Magnitude::Custom("burn_time".into())`. Then
+[`times`], [`plus`] and [`clamp`] combine them. In data, each is its variant.
 
 `Param` is Unreal's `SetByCaller`. The applying code knows something the
 data doesn't, such as how hard the fireball hit, and passes it on the spec.
 A spec that doesn't set the param gets 0, with a warning.
 
-`Attribute` reads the source's attribute (`from` is `Capture::Source`, the
-default) or the target's (`Capture::Target`), with nothing in play, times
-`coefficient` (1 unless it says). A modifier's `Attribute` magnitude is captured as the effect
-applies, and kept. New stacks and periods use the value captured, not the
-source's spell power now. With no source, it's 0.
+### Unreal's magnitudes
+
+Unreal has four kinds of magnitude, each with its own extras: a coefficient
+here, a curve there. In mettle, each is a composition of the terms:
+
+| Unreal | Mettle |
+|---|---|
+| Scalable float | `Product[Value, Curve]`: `Magnitude::scaled(10.0, "fireball.damage")` |
+| Attribute based, `coef × (attr + pre) + post` | `Sum` and `Product` of an `Attribute`, each part any magnitude, a curve too |
+| Attribute based, by an attribute curve | `Curve { at: Attribute }` |
+| Custom calculation class, its coefficient | `Product[Custom, Value]` |
+| Source and target tag filters | The read's `tagged` tags |
+
+```rust
+# use bevy_mettle::prelude::*;
+# #[derive(Attribute)] #[attribute(base = 10.0)] struct SpellPower;
+# #[derive(Attribute)] struct Armour;
+// A scalable float: 10 times the curve at the spec's level.
+assert_eq!(
+    Magnitude::scaled(10.0, "fireball.damage"),
+    Magnitude::Product(vec![10.0.into(), Magnitude::curve("fireball.damage")]),
+);
+
+// Attribute based: half of (the caster's bonus spell power plus 4), plus 10.
+let ward = Magnitude::source::<SpellPower>().bonus().plus(4.0).times(0.5).plus(10.0);
+
+// Its coefficient scaling with level, as Unreal's scalable coefficient.
+let scaling = Magnitude::source::<SpellPower>().times(Magnitude::scaled(0.1, "ward.scaling"));
+
+// An attribute curve: the target's armour, looked up on a falloff curve.
+let falloff = Magnitude::curve_at("armour.falloff", Magnitude::target::<Armour>());
+
+// A calculation, times 1.5.
+let burn = Magnitude::Custom("burn_time".into()).times(1.5);
+
+// Read in a tag: the target's armour as fire hits see it, at least 0.
+let armour = Magnitude::from(Magnitude::target::<Armour>().tagged("damage.fire"))
+    .clamp(Some(0.0), None);
+```
+
+It's deliberately limited to sums, products and clamps: no division, no
+conditions, no variables. Anything more is a `Custom` calculation, in code.
+
+Checking the content turns each magnitude into a [`MagnitudeDef`]: its names
+resolved to numbers, so no string reaches the game as it runs, and its
+constants folded, so `Product[2, 3]` is 6.
+
+## Captures
+
+An `Attribute` magnitude reads an [`AttributeRead`]. Unreal calls it an
+attribute capture:
+
+| Field | What it is |
+|---|---|
+| `attribute` | The attribute, by name |
+| `from` | Whose: `Source` unless it says, or `Target` |
+| `value` | Which of its values: `Current` unless it says, `Base`, or `Bonus` (its current value less its base) |
+| `snapshot` | Captured and kept, unless it says `false`: then it's read live |
+| `tags` | What it's read in: which conditional [modifiers](modifiers.md) count |
+
+In code, [`Magnitude::source`] and [`Magnitude::target`] start one, and
+`.base()`, `.bonus()`, `.live()` and `.tagged(tag)` set the rest; it's a
+magnitude wherever one's taken.
+
+A capture is read as the hit it's part of is: in the effect's tags and its
+own, with the effect's target and source and what each owns, as any [read in
+context](reading.md) is. So a caster's +20% damage with fire hits counts for
+a fireball tagged `damage.fire`, and +10% against burning targets counts on
+a burning target, with nothing more said. `.tagged(tag)` reads in more. With
+no source, a source's attribute is 0.
+
+### Snapshot or live
+
+A capture is a snapshot unless it says, as Unreal's `bSnapshot`. A snapshot
+is taken at the earliest moment, and kept:
+
+- **The source's** as the spec is made, if the code making it [takes its
+  snapshot](applying-effects.md#snapshots); if not, as it's applied.
+- **The target's** as it's applied.
+
+New stacks and periods use what was captured, not the caster's spell power
+now.
+
+`.live()` reads it as it is. An effect that executes reads it each time it
+does. A lasting effect follows it: when the attribute changes, the effect's
+modifiers are worked out again in the same step, before values are
+published. Only the effects reading the actor that changed are, and nothing
+polls. An aura that grows with its
+caster reads the caster's spell power live:
+
+```rust
+# use bevy::prelude::*;
+# use bevy::time::TimeUpdateStrategy;
+# use bevy_mettle::prelude::*;
+#[derive(Attribute)]
+struct SpellPower;
+
+#[derive(Attribute)]
+struct Armour;
+
+#[derive(Effect)]
+struct Aura;
+
+#[derive(Effect)]
+struct Blessing;
+
+fn effects() -> Vec<EffectData> {
+    vec![
+        // Follows the caster's spell power.
+        EffectData::infinite(Key::of::<Aura>()).modifier(EffectModifier::new::<Armour>(
+            Operation::Flat,
+            Magnitude::source::<SpellPower>().live().times(0.5),
+        )),
+        // Keeps what it was as it applied.
+        EffectData::infinite(Key::of::<Blessing>()).modifier(EffectModifier::new::<Armour>(
+            Operation::Flat,
+            Magnitude::source::<SpellPower>().times(0.5),
+        )),
+    ]
+}
+
+let mut app = App::new();
+app.add_plugins((MinimalPlugins, MettlePlugins))
+#   // One fixed step, where mettle runs, each update.
+#   .insert_resource(TimeUpdateStrategy::FixedTimesteps(1))
+    .add_attribute::<SpellPower>()
+    .add_attribute::<Armour>()
+    .add_effect::<Aura>()
+    .add_effect::<Blessing>()
+    .insert_resource(MettleContent { effects: effects(), ..default() });
+app.update();
+
+let caster = app.world_mut().spawn(Base::<SpellPower>::new(20.0)).id();
+let (warded, blessed) = (
+    app.world_mut().spawn(Base::<Armour>::default()).id(),
+    app.world_mut().spawn(Base::<Armour>::default()).id(),
+);
+app.update();
+app.world_mut().apply_effect(warded, Aura.source(caster));
+app.world_mut().apply_effect(blessed, Blessing.source(caster));
+let armour = |app: &App, actor| app.world().get::<Current<Armour>>(actor).unwrap().get();
+app.update();
+assert_eq!((armour(&app, warded), armour(&app, blessed)), (10.0, 10.0));
+
+// The caster grows stronger: the aura follows, the blessing doesn't.
+app.world_mut().get_mut::<Base<SpellPower>>(caster).unwrap().set(40.0);
+app.update();
+assert_eq!((armour(&app, warded), armour(&app, blessed)), (20.0, 10.0));
+```
+
+An effect can't follow itself. A lasting effect reading live what it changes
+of the target's would change it, read the change, and change it again, so
+content with one is rejected: "a live read of the target's `armour`, which it
+changes: it would follow itself".
 
 ## Requirements
 
@@ -275,6 +437,9 @@ the [effect code](effect-code.md), and turns them into the
   that don't exist;
 - numbers that can't be: not finite, a duration or period of 0 or less, a
   `per` of 0 or less, a stacking limit of 0;
+- magnitudes that can't be: a sum or product of nothing, a clamp whose
+  least is above its most;
+- a lasting effect reading live what it changes of the target's;
 - instant effects with parts that need them to last;
 - executions on a lasting effect with no period, which never executes.
 
@@ -379,7 +544,7 @@ app.add_plugins((MinimalPlugins, MettlePlugins))
     .insert_resource(MettleContent {
         tags: ["cooldown", "cooldown.fireball"].map(TagKey::named).to_vec(),
         effects: vec![
-            EffectData::lasting("burning", 4.0),
+            EffectData::lasting(Key::of::<Burning>(), 4.0),
             EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
         ],
         ..default()
@@ -411,8 +576,8 @@ Change [`MettleContent`], and it's checked and loaded again, as a whole.
 Effects keep the numbers they had, and new ones are numbered after them, so
 what holds a number still names the same effect. Every active effect takes
 its new definition on the next tick. Its
-modifiers and granted tags are worked out again, and its `Attribute`
-magnitudes are captured again. Its time left is kept. An active effect
+modifiers and granted tags are worked out again, and its captures are taken
+again: the source's from the spec's snapshot, if it has one. Its time left is kept. An active effect
 whose definition is gone comes off, as if removed.
 
 That's a hot reload, or a mod adding its effects: change the content, and
@@ -442,6 +607,15 @@ everything is checked against everything again.
 [`Magnitude`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/enum.Magnitude.html
 [`Magnitude::scaled`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/enum.Magnitude.html#method.scaled
 [`Magnitude::param`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/enum.Magnitude.html#method.param
+[`Magnitude::source`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/enum.Magnitude.html#method.source
+[`Magnitude::target`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/enum.Magnitude.html#method.target
+[`Magnitude::curve`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/enum.Magnitude.html#method.curve
+[`Magnitude::curve_at`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/enum.Magnitude.html#method.curve_at
+[`times`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/enum.Magnitude.html#method.times
+[`plus`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/enum.Magnitude.html#method.plus
+[`clamp`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/enum.Magnitude.html#method.clamp
+[`MagnitudeDef`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/enum.MagnitudeDef.html
+[`AttributeRead`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/struct.AttributeRead.html
 [`Magnitude::source`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/enum.Magnitude.html#method.source
 [`Magnitude::target`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/enum.Magnitude.html#method.target
 [`Operation`]: https://docs.rs/bevy_mettle_attribute/latest/bevy_mettle_attribute/modifier/enum.Operation.html

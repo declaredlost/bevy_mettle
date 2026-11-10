@@ -2,7 +2,7 @@
 //! numbers.
 
 use bevy_mettle_core::condition::Condition;
-use bevy_mettle_core::registry::{AbilityId, AnyAbility, EffectId, Name};
+use bevy_mettle_core::registry::{AbilityId, AnyAbility, EffectId, Key};
 use bevy_mettle_core::tag::Tags;
 
 use super::{Commit, NetExecution, Trigger};
@@ -20,7 +20,7 @@ pub struct AbilityDef {
     /// Its number.
     pub id: AbilityId,
     /// Its name.
-    pub name: Name<AnyAbility>,
+    pub name: Key<AnyAbility>,
     /// What it's labelled.
     pub tags: Tags,
     /// The behaviour that runs it.

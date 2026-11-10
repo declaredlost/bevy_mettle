@@ -50,6 +50,13 @@ impl AttributeReader<'_, '_> {
             .then(|| state.value(&self.registry, owned, attribute, context))
     }
 
+    /// `actor`'s base of `attribute`, if it has it.
+    #[must_use]
+    pub fn base_at(&self, actor: Entity, attribute: AttributeId) -> Option<f32> {
+        let (state, _) = self.actors.get(actor).ok()?;
+        state.cached_base(attribute)
+    }
+
     /// `actor`'s `A`'s modifiers in `context`, summed but not applied: for an
     /// attacker's and a target's to be combined, or a tooltip.
     #[must_use]
@@ -211,7 +218,7 @@ impl AttributeWorld for World {
     ) -> Option<f32> {
         let registry = self.get_resource::<AttributeRegistry>()?.clone();
         registry.get(attribute)?;
-        sync_bases(self, &registry, actor);
+        sync_bases(self, &registry, actor, attribute);
         let changed = op.apply(base, value);
         Some(
             match (
@@ -227,16 +234,23 @@ impl AttributeWorld for World {
     }
 }
 
-/// Syncs `actor`'s cached bases from its `Base`s as they are now, so limits
-/// read them though they changed since attributes were last kept.
-fn sync_bases(world: &mut World, registry: &AttributeRegistry, actor: Entity) {
+/// Syncs `actor`'s cached bases of what keeping `attribute` within its
+/// limits reads from its `Base`s as they are now: they may have changed since
+/// attributes were last kept.
+fn sync_bases(
+    world: &mut World,
+    registry: &AttributeRegistry,
+    actor: Entity,
+    attribute: AttributeId,
+) {
     let Some(state) = world.get::<AttributeState>(actor) else {
         return;
     };
-    let changed: Vec<(AttributeId, f32)> = registry
-        .iter()
-        .filter_map(|(id, info)| {
-            let base = (info.get_base)(world, actor)?;
+    let changed: Vec<(AttributeId, f32)> = state
+        .limits_read(registry, attribute)
+        .into_iter()
+        .filter_map(|id| {
+            let base = (registry.get(id)?.get_base)(world, actor)?;
             (state.cached_base(id) != Some(base)).then_some((id, base))
         })
         .collect();

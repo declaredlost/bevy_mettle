@@ -10,8 +10,14 @@ pub mod read;
 pub mod registry;
 mod values;
 
+/// Core, as the derives reach it wherever this crate's used.
+#[doc(hidden)]
+pub mod __core {
+    pub use bevy_mettle_core::*;
+}
+
 pub use bevy_mettle_macros::Attribute;
 
 pub use self::attribute::Attribute;
-pub use self::plugin::{AttributePlugin, AttributeSystems};
+pub use self::plugin::{AttributeFold, AttributePlugin};
 pub use self::values::{Base, Current};

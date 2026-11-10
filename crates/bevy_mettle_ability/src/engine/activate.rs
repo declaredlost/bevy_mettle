@@ -4,6 +4,7 @@
 use std::any::TypeId;
 
 use bevy::prelude::*;
+use bevy_mettle_core::Activation;
 use bevy_mettle_core::registry::AbilityId;
 use bevy_mettle_core::tag::OwnedTags;
 use bevy_mettle_effect::cue::{Cue, CueWorld};
@@ -23,7 +24,7 @@ pub(crate) fn activate_id(
     world: &mut World,
     actor: Entity,
     id: AbilityId,
-    activation: Option<u64>,
+    activation: Option<Activation>,
 ) -> Result<Entity, Failure> {
     activate_id_with::<NoInput>(world, actor, id, activation, None, None)
 }
@@ -35,7 +36,7 @@ pub(crate) fn activate_id_with<I: Component + Clone>(
     world: &mut World,
     actor: Entity,
     id: AbilityId,
-    activation: Option<u64>,
+    activation: Option<Activation>,
     behaviour: Option<BehaviourId>,
     input: Option<I>,
 ) -> Result<Entity, Failure> {
@@ -88,7 +89,7 @@ pub(crate) fn activate(
     world: &mut World,
     ability: Entity,
     event: Option<GameplayEvent>,
-    activation: Option<u64>,
+    activation: Option<Activation>,
 ) -> Result<(), Failure> {
     activate_with::<NoInput>(world, ability, event, activation, None)
 }
@@ -99,7 +100,7 @@ pub(crate) fn activate_with<I: Component + Clone>(
     world: &mut World,
     ability: Entity,
     event: Option<GameplayEvent>,
-    activation: Option<u64>,
+    activation: Option<Activation>,
     input: Option<I>,
 ) -> Result<(), Failure> {
     let checked =
@@ -150,7 +151,7 @@ pub(crate) fn activate_with<I: Component + Clone>(
 pub(crate) fn mirror<I: Component + Clone>(
     world: &mut World,
     ability: Entity,
-    activation: u64,
+    activation: Activation,
     input: Option<I>,
 ) {
     let Some(actor) = world.get::<AbilityOf>(ability).map(|of| of.0) else {
@@ -180,7 +181,7 @@ fn start<I: Component + Clone>(
     def: &AbilityDef,
     level: f32,
     event: Option<GameplayEvent>,
-    activation: u64,
+    activation: Activation,
     input: Option<I>,
 ) {
     let cancelled: Vec<Entity> = abilities_of(world, actor)

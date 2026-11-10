@@ -24,6 +24,7 @@ use bevy::ecs::query::SpawnDetails;
 use bevy::ecs::system::SystemId;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
+use bevy_mettle_core::Activation;
 use bevy_mettle_core::net::NetRole;
 use bevy_mettle_core::registry::{AttributeId, EffectId, TagId};
 use bevy_mettle_core::tag::{TagKey, TagRegistry};
@@ -215,7 +216,7 @@ pub struct Burst {
     /// What played it carried: who caused it, what struck, where.
     pub context: ContextReplica,
     /// What it was played under, if an activation.
-    pub activation: Option<u64>,
+    pub activation: Option<Activation>,
     /// The effect that played it, if one did.
     pub effect: Option<EffectId>,
 }
@@ -256,17 +257,17 @@ pub(crate) struct Played(u64);
 /// server's copies aren't played again; each as often as it was played, with
 /// the client's seconds it was played at.
 #[derive(Resource, Debug, Default)]
-pub(crate) struct Predicted(HashMap<(Entity, u64, TagKey), Vec<f64>>);
+pub(crate) struct Predicted(HashMap<(Entity, Activation, TagKey), Vec<f64>>);
 
 impl Predicted {
     /// Notes `tag` played on `actor` under `activation` at `at`.
-    fn note(&mut self, actor: Entity, activation: u64, tag: TagKey, at: f64) {
+    fn note(&mut self, actor: Entity, activation: Activation, tag: TagKey, at: f64) {
         self.0.entry((actor, activation, tag)).or_default().push(at);
     }
 
     /// Takes one play of `tag` on `actor` under `activation`: whether there
     /// was one, the server's copy of it.
-    fn take(&mut self, actor: Entity, activation: u64, tag: TagKey) -> bool {
+    fn take(&mut self, actor: Entity, activation: Activation, tag: TagKey) -> bool {
         let key = (actor, activation, tag);
         let Some(plays) = self.0.get_mut(&key) else {
             return false;
@@ -288,7 +289,7 @@ impl Predicted {
 
     /// Forgets what was played under `activation`: the server rejected it,
     /// and plays none of it.
-    pub(crate) fn forget_activation(&mut self, activation: u64) {
+    pub(crate) fn forget_activation(&mut self, activation: Activation) {
         self.0.retain(|(_, under, _), _| *under != activation);
     }
 }
@@ -336,7 +337,7 @@ pub struct CueExecuted {
     /// What played it carried: who caused it, what struck, where.
     pub context: EffectContext,
     /// What it was played under, if an activation.
-    pub activation: Option<u64>,
+    pub activation: Option<Activation>,
     /// The effect that played it, if one did.
     pub effect: Option<EffectId>,
 }
@@ -507,7 +508,7 @@ pub(crate) fn execute(
     world: &mut World,
     actor: Entity,
     cue: &Cue,
-    activation: Option<u64>,
+    activation: Option<Activation>,
     effect: Option<EffectId>,
 ) {
     if world.get_entity(actor).is_err() {
@@ -555,13 +556,14 @@ fn burst(
     world: &mut World,
     actor: Entity,
     cue: &Cue,
-    activation: Option<u64>,
+    activation: Option<Activation>,
     effect: Option<EffectId>,
 ) {
-    let Some(tag) = world
-        .get_resource::<TagRegistry>()
-        .and_then(|tags| tags.id(cue.tag))
-    else {
+    let Some(tags) = world.get_resource::<TagRegistry>() else {
+        no_tag_tree();
+        return;
+    };
+    let Some(tag) = tags.id(cue.tag) else {
         warn!("cue `{}` isn't in the tag tree: not replicated", cue.tag);
         return;
     };
@@ -616,8 +618,11 @@ pub(crate) fn show(
     handlers: Res<CueHandlers>,
     mut commands: Commands,
 ) {
-    let tree = tree.as_deref().cloned().unwrap_or_default();
     let serving = *role == NetRole::Server;
+    if serving && tree.is_none() && !actors.is_empty() {
+        no_tag_tree();
+    }
+    let tree = tree.as_deref().cloned().unwrap_or_default();
     for (actor, sources, mut served, shown, spawned) in &mut actors {
         // A client just come to see the actor joins the cues it's served.
         let joining = spawned.is_spawned() && !serving;
@@ -693,7 +698,12 @@ pub(crate) fn play(
     time: Res<Time>,
     mut commands: Commands,
 ) {
-    let tree = tree.as_deref().cloned().unwrap_or_default();
+    let Some(tree) = tree.as_deref().cloned() else {
+        if !actors.is_empty() {
+            no_tag_tree();
+        }
+        return;
+    };
     let data = data.as_deref().cloned().unwrap_or_default();
     predicted.forget(time.elapsed_secs_f64() - REMEMBERED);
     for (actor, bursts, played) in &mut actors {
@@ -763,5 +773,16 @@ fn route(world: &mut World, event: CueEvent) {
     };
     if let Err(error) = world.run_system_with(handler, event) {
         warn!("a cue handler failed to run: {error}");
+    }
+}
+
+/// Warns, once, that there's no tag tree: cues go by its numbers, so without
+/// it none is replicated, served or played.
+fn no_tag_tree() {
+    if crate::context::first_warning("no tag tree".to_owned()) {
+        warn!(
+            "there's no `TagRegistry`: cues go over the network by its numbers, so none is \
+             replicated, served or played (loading content inserts it)"
+        );
     }
 }

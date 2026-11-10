@@ -41,7 +41,7 @@ fn content() -> MettleContent {
             EffectData::lasting("fireball.cooldown", 2.0).grant("cooldown.fireball"),
         ],
         abilities: vec![
-            AbilityData::new("fireball", "cast_fireball")
+            AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>())
                 .cost("fireball.cost")
                 .cooldown("fireball.cooldown"),
         ],
@@ -113,7 +113,7 @@ and its behaviour's component is on it while it's active.
   failure, so `assert_triggered` can say why a cast didn't happen. The same
   works for `AttributeChanged<A>`, `EffectApplied` and the rest.
 - **Tick before reading.** A cost lowers `Base<Mana>` as it's paid;
-  `Current<Mana>` follows the next time attributes are kept. Tick once
+  `Current<Mana>` follows the next time `Mettle` runs. Tick once
   before asserting on `Current`.
 - **Seconds, not ticks.** `app.secs(2.0)` runs as many ticks as two seconds
   take, so a test doesn't depend on the tick rate.

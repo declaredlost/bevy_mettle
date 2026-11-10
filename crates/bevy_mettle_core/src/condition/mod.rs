@@ -1,6 +1,5 @@
 //! The condition language: expressions over tags and facts, weighed 0 to 1.
 
-mod check;
 mod context;
 #[cfg(test)]
 mod tests;
@@ -11,7 +10,8 @@ use bevy_reflect::prelude::*;
 use serde::{Deserialize, Serialize};
 
 pub use self::context::Context;
-use crate::tag::TagKey;
+use crate::error::Error;
+use crate::tag::{TagKey, TagRegistry};
 
 /// When something counts, and how much: from 0 (not at all) to 1 (in full).
 ///
@@ -35,7 +35,7 @@ use crate::tag::TagKey;
 ///
 /// A condition over [`TagKey`]s, as this process knows its tags: what every
 /// condition is but on the wire, where its tags are their numbers in the
-/// [`TagRegistry`](crate::tag::TagRegistry), a `ConditionOver<TagId>`
+/// [`TagRegistry`], a `ConditionOver<TagId>`
 /// ([`map_tags`](ConditionOver::map_tags)).
 pub type Condition = ConditionOver<TagKey>;
 
@@ -107,6 +107,26 @@ impl<T> ops::Not for ConditionOver<T> {
 }
 
 impl<T: Copy> ConditionOver<T> {
+    /// Whether what it weighs can differ by read: it names the read's tags,
+    /// the target's, the source's, or a fact. One only of the owner's tags
+    /// weighs the same for every read of it.
+    #[must_use]
+    pub fn reads_context(&self) -> bool {
+        match self {
+            Self::All(terms) | Self::Any(terms) => terms.iter().any(Self::reads_context),
+            Self::Not(term) => term.reads_context(),
+            Self::OwnerHas(_) => false,
+            Self::ReadTagged(_)
+            | Self::TargetHas(_)
+            | Self::SourceHas(_)
+            | Self::FactSet(_)
+            | Self::FactAbove { .. }
+            | Self::FactBelow { .. }
+            | Self::FactRamp { .. }
+            | Self::FactEvery { .. } => true,
+        }
+    }
+
     /// The same condition, each of its tags mapped by `map`: `None` if one
     /// doesn't map. What sends it by number, and reads it back.
     pub fn map_tags<U>(&self, mut map: impl FnMut(T) -> Option<U>) -> Option<ConditionOver<U>> {
@@ -294,5 +314,71 @@ impl Condition {
     /// requirement asks.
     pub fn holds(&self, context: &(impl Context + ?Sized)) -> bool {
         self.weight(context) >= 1.0
+    }
+
+    /// Checks every tag in it is defined in `tags`, and its numbers can be:
+    /// named within `within` (what holds it) if it's in something.
+    ///
+    /// # Errors
+    ///
+    /// The first tag that isn't defined, or number that can't be.
+    pub fn check(&self, tags: &TagRegistry, within: Option<&str>) -> Result<(), Error> {
+        self.walk(Some(tags), within)
+    }
+
+    /// Checks its numbers can be, not its tags: what can be checked without
+    /// the tag tree.
+    ///
+    /// # Errors
+    ///
+    /// The first number that can't be.
+    pub fn check_values(&self, within: Option<&str>) -> Result<(), Error> {
+        self.walk(None, within)
+    }
+
+    /// Checks its numbers, and its tags against `tags` if they're given.
+    fn walk(&self, tags: Option<&TagRegistry>, within: Option<&str>) -> Result<(), Error> {
+        let known = |tag: &TagKey| tags.map_or(Ok(()), |tags| tags.known(*tag, within));
+        match self {
+            Self::All(terms) | Self::Any(terms) => {
+                terms.iter().try_for_each(|term| term.walk(tags, within))
+            }
+            Self::Not(term) => term.walk(tags, within),
+            Self::ReadTagged(tag)
+            | Self::OwnerHas(tag)
+            | Self::TargetHas(tag)
+            | Self::SourceHas(tag)
+            | Self::FactSet(tag) => known(tag),
+            Self::FactAbove { fact, value } | Self::FactBelow { fact, value } => {
+                known(fact)?;
+                if value.is_finite() {
+                    Ok(())
+                } else {
+                    Err(Error::invalid(
+                        format!("a comparison of `{fact}` with {value}"),
+                        within,
+                    ))
+                }
+            }
+            Self::FactRamp { fact, full, none } => {
+                known(fact)?;
+                if full.is_finite() && none.is_finite() && (none - full).abs() > 0.0 {
+                    Ok(())
+                } else {
+                    Err(Error::invalid(
+                        format!("a ramp of `{fact}` from {full} to {none}: they have to differ"),
+                        within,
+                    ))
+                }
+            }
+            Self::FactEvery { fact, n } => {
+                known(fact)?;
+                if *n > 0 {
+                    Ok(())
+                } else {
+                    Err(Error::invalid(format!("every 0 of `{fact}`"), within))
+                }
+            }
+        }
     }
 }

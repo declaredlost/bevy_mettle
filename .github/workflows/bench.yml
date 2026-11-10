@@ -1,0 +1,103 @@
+name: Bench
+
+# Benchmarks a pull request labelled `bench` against its base, both in the
+# same job on the same runner, so a shared runner's noise mostly cancels.
+# A `bench-base: <ref>` line in the pull request's description compares
+# against that ref instead of the base branch.
+
+on:
+  pull_request:
+    branches: [main, release]
+    types: [labeled, synchronize, reopened]
+
+env:
+  CARGO_TERM_COLOR: never
+  RUST_TOOLCHAIN: "1.99.1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  bench:
+    name: Bench
+    if: contains(github.event.pull_request.labels.*.name, 'bench')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: bench
+
+      - name: Pick the base
+        id: base
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          named=$(printf '%s\n' "$BODY" | sed -n 's/^bench-base:[[:space:]]*\([^[:space:]]*\).*/\1/p' | head -1)
+          base=${named:-$BASE_SHA}
+          git rev-parse --verify "$base^{commit}" > /dev/null
+          echo "sha=$(git rev-parse "$base")" >> "$GITHUB_OUTPUT"
+          echo "Base: $base ($(git rev-parse --short "$base"))"
+
+      - name: Bench the base
+        run: |
+          git worktree add ../base "${{ steps.base.outputs.sha }}"
+          cd ../base
+          cargo bench -p bevy_mettle --bench mettle -- --save-baseline base
+
+      - name: Bench the head
+        run: |
+          cargo bench -p bevy_mettle --bench mettle -- --baseline-lenient base | tee head.txt
+
+      - name: Report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ steps.base.outputs.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 - <<'EOF' > report.md
+          import os, re
+
+          # Each bench: its time, and its change if the base had it too.
+          rows, name = {}, None
+          for line in open("head.txt"):
+              match = re.match(r"^([a-z_]+/[a-z_0-9]+)", line)
+              if match:
+                  name = match.group(1)
+                  rows.setdefault(name, ["?", "new"])
+              found = re.search(r"time:\s+\[\S+ \S+ (\S+ \S+)", line)
+              if found and name:
+                  rows[name][0] = found.group(1)
+              change = re.search(r"change:\s+\[\S+ (\S+) \S+\]", line)
+              if change and name:
+                  rows[name][1] = change.group(1)
+          rows = [(bench, time, change) for bench, (time, change) in rows.items()]
+          base, head = os.environ["BASE"][:7], os.environ["HEAD"][:7]
+          print(f"### Bench: `{head}` against `{base}`\n")
+          print("| Bench | Time | Change |")
+          print("|---|---|---|")
+          for bench, time, change in rows:
+              print(f"| `{bench}` | {time} | {change} |")
+          print("\nSame runner, back to back: changes within about 5% are noise.")
+          EOF
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+          gh pr comment "${{ github.event.pull_request.number }}" --body-file report.md

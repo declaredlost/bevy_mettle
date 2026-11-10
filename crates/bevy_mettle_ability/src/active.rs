@@ -5,6 +5,7 @@ use std::sync::Arc;
 use bevy::ecs::lifecycle::HookContext;
 use bevy::ecs::world::DeferredWorld;
 use bevy::prelude::*;
+use bevy_mettle_core::Activation;
 use bevy_mettle_core::registry::AbilityId;
 use bevy_mettle_core::tag::{OwnedTags, Tags};
 use bevy_mettle_effect::context::AbilityRef;
@@ -150,7 +151,7 @@ pub struct ActiveAbility {
     pub actor: Entity,
     /// This activation: what its cost and cooldown are applied under, and what
     /// a rejected prediction takes back.
-    pub activation: u64,
+    pub activation: Activation,
     /// Its level.
     pub level: f32,
     /// The gameplay event that activated it, if one did.
@@ -187,7 +188,7 @@ pub(crate) fn outgoing(
     actor: Entity,
     ability: AbilityId,
     level: f32,
-    activation: Option<u64>,
+    activation: Option<Activation>,
 ) -> EffectSpec {
     let spec = spec
         .level(level)

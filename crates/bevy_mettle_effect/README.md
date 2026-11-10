@@ -28,8 +28,16 @@ often.
   routes: every error at once. Each effect is numbered, an `EffectId`, and a
   reload keeps the numbers. Insert a new one and active effects take their
   new definitions.
+- A [`Magnitude`] is a small expression: values, the level, params, curves,
+  attributes and calculations in code, summed, multiplied and clamped.
+  Checked, its names are numbers and its constants folded.
+- An attribute it reads is captured as the spec is made (a projectile
+  carries its caster's spell power, [`Snapshots`]) or as it's applied, or
+  read live, a lasting effect following it as it changes. Executions and
+  calculations declare theirs on their derive.
 - Code names an effect by an [`Effect`] type, which is its spec: its level,
-  its params and its source (`Burning.level(3.0)`), an [`EffectSpec`].
+  its params and its source (`Burning.level(3.0)`), an [`EffectSpec`], and
+  its context: what struck, where, and a game's own reflected types.
   `apply_effect` checks it, then executes it, stacks it, or spawns it as an
   entity [`EffectOf`] its target.
 - While it counts, a lasting effect's modifiers count for its target and
@@ -129,7 +137,7 @@ fn ignite(mages: Query<Entity, Added<Mage>>, mut commands: Commands) {
 
 fn main() {
     App::new()
-        .add_plugins((MinimalPlugins, EffectPlugin::default()))
+        .add_plugins((MinimalPlugins, EffectPlugin))
         .add_attribute::<Life>()
         .add_effect::<Burning>()
         .add_systems(Startup, (load, spawn))
@@ -138,8 +146,10 @@ fn main() {
 }
 ```
 
-Effects tick in [`EffectSystems`], in `FixedUpdate` unless
-[`EffectPlugin::new`] says otherwise.
+Effects tick in mettle's schedule, [`Mettle`], in [`MettleSet::Effects`],
+before attributes fold what they changed in the same step. It runs each
+fixed step, in `FixedPostUpdate` unless [`MettleCorePlugin::new`] says
+otherwise. Cues play in `PostUpdate`.
 
 ## Learn more
 
@@ -147,7 +157,7 @@ Effects tick in [`EffectSystems`], in `FixedUpdate` unless
   [Applying effects](https://declaredlost.github.io/bevy_mettle/applying-effects.html),
   [Stacking](https://declaredlost.github.io/bevy_mettle/stacking.html) and
   [Effects in code](https://declaredlost.github.io/bevy_mettle/effect-code.html)
-  pages, [Cues](https://declaredlost.github.io/bevy_mettle/cues.html),, and [Prediction](https://declaredlost.github.io/bevy_mettle/prediction.html)
+  pages, [Cues](https://declaredlost.github.io/bevy_mettle/cues.html), and [Prediction](https://declaredlost.github.io/bevy_mettle/prediction.html)
   for the network
 - The [API documentation](https://docs.rs/bevy_mettle_effect)
 
@@ -164,6 +174,8 @@ or [MIT license](https://github.com/declaredlost/bevy_mettle/blob/main/LICENSE-M
 [`Effect`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/trait.Effect.html
 [`EffectRegistry`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectRegistry.html
 [`EffectData`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/struct.EffectData.html
+[`Magnitude`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/data/enum.Magnitude.html
+[`Snapshots`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.Snapshots.html
 [`EffectSpec`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectSpec.html
 [`EffectOf`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/active/struct.EffectOf.html
 [`EffectApplied`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/events/struct.EffectApplied.html
@@ -171,5 +183,6 @@ or [MIT license](https://github.com/declaredlost/bevy_mettle/blob/main/LICENSE-M
 [`EffectBlocked`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/events/struct.EffectBlocked.html
 [`EffectExecuted`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/events/struct.EffectExecuted.html
 [`EffectRemoved`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/events/struct.EffectRemoved.html
-[`EffectSystems`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectSystems.html
-[`EffectPlugin::new`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/struct.EffectPlugin.html#method.new
+[`Mettle`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.Mettle.html
+[`MettleSet::Effects`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/enum.MettleSet.html#variant.Effects
+[`MettleCorePlugin::new`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/struct.MettleCorePlugin.html#method.new

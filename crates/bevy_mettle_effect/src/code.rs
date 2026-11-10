@@ -2,18 +2,20 @@
 //!
 //! Each numbered as it's added.
 
+use std::any::TypeId;
 use std::sync::Arc;
 
 use bevy::prelude::*;
 use bevy_mettle_attribute::Attribute;
 use bevy_mettle_attribute::modifier::Operation;
 use bevy_mettle_attribute::read::{AttributeContext, AttributeWorld, Breakdown};
+use bevy_mettle_attribute::registry::AttributeRegistry;
 use bevy_mettle_core::Error;
-use bevy_mettle_core::registry::{AttributeId, EffectId, Key, Kind, Name, Registry};
+use bevy_mettle_core::registry::{AttributeId, EffectId, Id, Key, Kind, Registry};
 use bevy_mettle_core::tag::{OwnedTags, TagKey};
 
-use crate::context::{ContextData, ContextDataRegistry, EffectContext};
-use crate::data::EffectDef;
+use crate::context::{ContextData, EffectContext};
+use crate::data::{AttributeRead, Capture, EffectDef};
 use crate::{Effect, EffectRegistry, EffectSpec};
 
 /// What an execution or a calculation sees: the world, target, effect and spec.
@@ -30,6 +32,12 @@ pub struct ExecutionContext<'a> {
     pub spec: &'a EffectSpec,
     /// How many stacks of it there are: 1 unless it stacks.
     pub stacks: u32,
+    /// What it captured, by its [`captures`](EffectDef::captures)' slots:
+    /// none for one read live, or not taken yet.
+    pub captured: &'a [Option<f32>],
+    /// The slots of what the execution or calculation running declared it
+    /// captures: none for anything else.
+    pub reads: &'a [usize],
 }
 
 impl ExecutionContext<'_> {
@@ -61,6 +69,40 @@ impl ExecutionContext<'_> {
     #[must_use]
     pub fn source(&self) -> Option<Entity> {
         self.spec.context.source
+    }
+
+    /// `A` of `from`'s, as the execution or calculation running declared it
+    /// captures it: captured, or read live.
+    ///
+    /// `None` if it didn't declare it, warned of once: what isn't declared
+    /// can't be captured.
+    #[must_use]
+    pub fn captured<A: Attribute>(&self, from: Capture) -> Option<f32> {
+        let attribute = self.attribute_id::<A>()?;
+        let slot = self.reads.iter().copied().find(|&slot| {
+            self.def
+                .captures
+                .get(slot)
+                .is_some_and(|capture| capture.attribute == attribute && capture.from == from)
+        });
+        let Some(slot) = slot else {
+            if crate::context::first_warning(format!(
+                "undeclared {} {from:?} {}",
+                self.def.name,
+                A::NAME
+            )) {
+                warn!(
+                    "effect `{}`'s code reads the {from:?}'s `{}`, which it doesn't declare it \
+                     captures (`source({})` or `target({})` on its derive): none",
+                    self.def.name,
+                    A::NAME,
+                    A::NAME,
+                    A::NAME
+                );
+            }
+            return None;
+        };
+        Some(crate::engine::captured(self, slot))
     }
 
     /// What the game added of type `C`, if it did.
@@ -152,10 +194,11 @@ pub enum Changes {
 /// A change an execution or a router makes, as an instant modifier.
 ///
 /// To an attribute's base, or dealt a route; its target's, unless it says.
+/// Named by type, `BaseChange::of::<Life>(..)`, it's numbered as it's applied.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BaseChange {
-    /// What it changes.
-    pub changes: Changes,
+    /// What it changes: by number, or by type until it's applied.
+    names: Names,
     /// How: only `Flat` is dealt a route.
     pub op: Operation,
     /// By how much.
@@ -164,28 +207,68 @@ pub struct BaseChange {
     pub on: Whose,
 }
 
+/// What a change changes, as it was named: by number, or by type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Names {
+    /// By number.
+    Numbered(Changes),
+    /// An attribute's base, by its type.
+    Attribute(Typed),
+    /// What's dealt a route, by its type.
+    Route(Typed),
+}
+
+/// A type a change names, and its name, to warn of it by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Typed {
+    type_id: TypeId,
+    name: &'static str,
+}
+
 impl BaseChange {
-    /// `op` of `value` to `attribute`'s base.
+    /// `op` of `value` to `A`'s base.
     #[must_use]
-    pub fn new(attribute: AttributeId, op: Operation, value: f32) -> Self {
-        Self {
-            changes: Changes::Attribute(attribute),
+    pub fn of<A: Attribute>(op: Operation, value: f32) -> Self {
+        Self::named(
+            Names::Attribute(Typed {
+                type_id: TypeId::of::<A>(),
+                name: A::NAME,
+            }),
             op,
             value,
-            on: Whose::Target,
-        }
+        )
     }
 
-    /// `value` dealt `route`, for its router: what a hit deals, before shields
-    /// and resistances.
+    /// `value` dealt `R`, for its router: what a hit deals, before shields and
+    /// resistances.
+    #[must_use]
+    pub fn dealt<R: Route>(value: f32) -> Self {
+        Self::named(
+            Names::Route(Typed {
+                type_id: TypeId::of::<R>(),
+                name: R::NAME,
+            }),
+            Operation::Flat,
+            value,
+        )
+    }
+
+    /// `op` of `value` to `attribute`'s base, by its number.
+    #[must_use]
+    pub fn new(attribute: AttributeId, op: Operation, value: f32) -> Self {
+        Self::changing(Changes::Attribute(attribute), op, value)
+    }
+
+    /// `value` dealt `route`, by its number, for its router.
     #[must_use]
     pub fn route(route: RouteId, value: f32) -> Self {
-        Self {
-            changes: Changes::Route(route),
-            op: Operation::Flat,
-            value,
-            on: Whose::Target,
-        }
+        Self::changing(Changes::Route(route), Operation::Flat, value)
+    }
+
+    /// `op` of `value` to what `changes` names, by number.
+    #[must_use]
+    pub fn changing(changes: Changes, op: Operation, value: f32) -> Self {
+        Self::named(Names::Numbered(changes), op, value)
     }
 
     /// To the source's, not the target's.
@@ -194,6 +277,59 @@ impl BaseChange {
         self.on = Whose::Source;
         self
     }
+
+    /// What it changes, by number: `None` only if it's named by type and not
+    /// applied yet.
+    #[must_use]
+    pub fn changes(&self) -> Option<Changes> {
+        match self.names {
+            Names::Numbered(changes) => Some(changes),
+            Names::Attribute(_) | Names::Route(_) => None,
+        }
+    }
+
+    /// Numbered as `world` numbers its type, if it's named by one; `None`,
+    /// warned of once, if that type isn't added.
+    pub(crate) fn numbered(self, world: &World) -> Option<Self> {
+        let changes = match self.names {
+            Names::Numbered(_) => return Some(self),
+            Names::Attribute(typed) => world
+                .get_resource::<AttributeRegistry>()
+                .and_then(|attributes| attributes.id_of_type(typed.type_id))
+                .map(Changes::Attribute)
+                .ok_or(("attribute", typed)),
+            Names::Route(typed) => world
+                .get_resource::<RouteRegistry>()
+                .and_then(|routes| routes.0.id_of_type(typed.type_id))
+                .map(Changes::Route)
+                .ok_or(("route", typed)),
+        };
+        match changes {
+            Ok(changes) => Some(Self {
+                names: Names::Numbered(changes),
+                ..self
+            }),
+            Err((what, typed)) => {
+                if crate::context::first_warning(format!("unadded {what} {}", typed.name)) {
+                    warn!(
+                        "a change to the {what} `{}`, which isn't added: dropped",
+                        typed.name
+                    );
+                }
+                None
+            }
+        }
+    }
+
+    /// Named so.
+    fn named(names: Names, op: Operation, value: f32) -> Self {
+        Self {
+            names,
+            op,
+            value,
+            on: Whose::Target,
+        }
+    }
 }
 
 /// A route: an amount effects deal that no actor holds, routed into attributes.
@@ -201,14 +337,31 @@ impl BaseChange {
 /// Routed into the attributes actors do hold, as an effect executes.
 ///
 /// Incoming damage, say: dealt by every hit, then routed through armour and
-/// shields into life by one router, not each hit's own code. Derive it, and
-/// add it with its router:
+/// shields into life by one router, not each hit's own code. Derive it, route
+/// it with [`RouteFn`], and add it:
 ///
-/// ```ignore
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_mettle_attribute::prelude::*;
+/// # use bevy_mettle_effect::prelude::*;
+/// # #[derive(Attribute)] #[attribute(min = 0.0)] struct Shield;
+/// # #[derive(Attribute)] #[attribute(base = 100.0, min = 0.0)] struct Life;
 /// #[derive(Route)]
 /// pub struct IncomingDamage;
 ///
-/// app.add_route::<IncomingDamage>(route_damage);
+/// impl RouteFn for IncomingDamage {
+///     fn route(&self, cx: &ExecutionContext, amount: f32) -> Vec<BaseChange> {
+///         // The shield takes what it can, and life the rest.
+///         let held = cx.value::<Shield>(cx.target, &AttributeContext::new()).unwrap_or_default();
+///         let absorbed = amount.min(held);
+///         vec![
+///             BaseChange::of::<Shield>(Operation::Flat, -absorbed),
+///             BaseChange::of::<Life>(Operation::Flat, absorbed - amount),
+///         ]
+///     }
+/// }
+///
+/// App::new().add_route(IncomingDamage);
 /// ```
 ///
 /// Data names it by name, `route: "incoming_damage"`, in the modifiers of an
@@ -229,25 +382,44 @@ pub use bevy_mettle_macros::Route;
 
 /// The route kind: what data names and deals, and a [`RouteId`] numbers.
 ///
-/// A route's name in data is a `Name<AnyRoute>`, until it's resolved to a
+/// A route's name in data is a `Key<AnyRoute>`, until it's resolved to a
 /// [`RouteId`].
 #[derive(Kind)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnyRoute {}
 
 /// A route's number in an app, given as it's added: what executions deal by.
-pub type RouteId = Key<AnyRoute>;
+pub type RouteId = Id<AnyRoute>;
 
 /// An execution: a formula in code run as an effect executes, such as damage.
 ///
-/// Run as an instant or periodic effect executes. Derive it, and add it with
-/// what it runs:
+/// Run as an instant or periodic effect executes. Derive it, run it with
+/// [`ExecutionFn`], and add it:
 ///
-/// ```ignore
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_mettle_attribute::prelude::*;
+/// # use bevy_mettle_effect::prelude::*;
+/// # #[derive(Attribute)] #[attribute(base = 100.0, min = 0.0)] struct Life;
+/// # #[derive(Attribute)] struct SpellPower;
+/// # #[derive(Attribute)] struct Resistance;
+/// /// The spec's damage, more with the caster's spell power, less with the
+/// /// target's fire resistance.
 /// #[derive(Execution)]
+/// #[execution(source(SpellPower), target(Resistance, tagged("damage.fire")))]
 /// pub struct FireDamage;
 ///
-/// app.add_execution::<FireDamage>(fire_damage);
+/// impl ExecutionFn for FireDamage {
+///     fn execute(&self, cx: &ExecutionContext) -> Vec<BaseChange> {
+///         let damage = cx.param("param.damage").unwrap_or_default();
+///         let power = cx.captured::<SpellPower>(Capture::Source).unwrap_or_default();
+///         let resisted = cx.captured::<Resistance>(Capture::Target).unwrap_or_default();
+///         let dealt = damage * (1.0 + power / 100.0) * (1.0 - resisted);
+///         vec![BaseChange::of::<Life>(Operation::Flat, -dealt)]
+///     }
+/// }
+///
+/// App::new().add_execution(FireDamage);
 /// ```
 ///
 /// Data names it by name, `executions: ["fire_damage"]`; an app knows it by an
@@ -260,30 +432,55 @@ pub type RouteId = Key<AnyRoute>;
 pub trait Execution: Send + Sync + 'static {
     /// The name data names it by: `"fire_damage"`.
     const NAME: &'static str;
+
+    /// The attributes it captures, read with
+    /// [`captured`](ExecutionContext::captured): its derive's
+    /// `#[execution(source(A, ..), target(B, ..))]`.
+    #[must_use]
+    fn captures() -> Vec<AttributeRead> {
+        Vec::new()
+    }
 }
 
 pub use bevy_mettle_macros::Execution;
 
 /// The execution kind: what data names, and an [`ExecutionId`] numbers.
 ///
-/// An execution's name in data is a `Name<AnyExecution>`, until it's resolved
+/// An execution's name in data is a `Key<AnyExecution>`, until it's resolved
 /// to an [`ExecutionId`].
 #[derive(Kind)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnyExecution {}
 
 /// An execution's number in an app, given as it's added, as effects know it.
-pub type ExecutionId = Key<AnyExecution>;
+pub type ExecutionId = Id<AnyExecution>;
 
 /// A calculation: a magnitude worked out in code, such as a burn's duration.
 ///
-/// Derive it, and add it with what it works out:
+/// Derive it, work it out with [`CalculationFn`], and add it:
 ///
-/// ```ignore
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_mettle_attribute::prelude::*;
+/// # use bevy_mettle_effect::prelude::*;
+/// # #[derive(Attribute)] struct SpellPower;
+/// /// Two seconds, and one more for every `per` spell power.
 /// #[derive(Calculation)]
-/// pub struct BurnTime;
+/// #[calculation(source(SpellPower))]
+/// pub struct BurnTime {
+///     per: f32,
+/// }
 ///
-/// app.add_calculation::<BurnTime>(burn_time);
+/// impl CalculationFn for BurnTime {
+///     fn calculate(&self, cx: &ExecutionContext) -> f32 {
+///         let power = cx
+///             .captured::<SpellPower>(Capture::Source)
+///             .unwrap_or_default();
+///         2.0 + power / self.per
+///     }
+/// }
+///
+/// App::new().add_calculation(BurnTime { per: 25.0 });
 /// ```
 ///
 /// Data names it by name, `Custom("burn_time")`; an app knows it by a
@@ -296,32 +493,93 @@ pub type ExecutionId = Key<AnyExecution>;
 pub trait Calculation: Send + Sync + 'static {
     /// The name data names it by: `"burn_time"`.
     const NAME: &'static str;
+
+    /// The attributes it captures, read with
+    /// [`captured`](ExecutionContext::captured): its derive's
+    /// `#[calculation(source(A, ..), target(B, ..))]`.
+    #[must_use]
+    fn captures() -> Vec<AttributeRead> {
+        Vec::new()
+    }
 }
 
 pub use bevy_mettle_macros::Calculation;
 
 /// The calculation kind: what data names, and a [`CalculationId`] numbers.
 ///
-/// A calculation's name in data is a `Name<AnyCalculation>`, until it's
+/// A calculation's name in data is a `Key<AnyCalculation>`, until it's
 /// resolved to a [`CalculationId`].
 #[derive(Kind)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnyCalculation {}
 
 /// A calculation's number in an app, given as it's added, as effects know it.
-pub type CalculationId = Key<AnyCalculation>;
+pub type CalculationId = Id<AnyCalculation>;
 
-/// The function an execution runs: what it changes, worked out from context.
-pub type ExecutionFn = Arc<dyn Fn(&ExecutionContext) -> Vec<BaseChange> + Send + Sync>;
-
-/// The function a calculation runs: a magnitude, worked out from its context.
-pub type CalculationFn = Arc<dyn Fn(&ExecutionContext) -> f32 + Send + Sync>;
-
-/// The function a router runs: what a route's amount changes in attributes.
+/// What an [`Execution`] runs: what it changes, worked out from its context.
 ///
-/// The amount is all an execution dealt the route; the changes, to attributes
-/// actors have.
-pub type RouterFn = Arc<dyn Fn(&ExecutionContext, f32) -> Vec<BaseChange> + Send + Sync>;
+/// Unreal's `Execute`. On the execution's type, with what it's set up with
+/// (`&self`); it reads the world, never changes it: what it changes, it
+/// returns, so a client's prediction of it can be undone.
+pub trait ExecutionFn: Send + Sync + 'static {
+    /// What it changes, worked out from `cx`.
+    fn execute(&self, cx: &ExecutionContext) -> Vec<BaseChange>;
+}
+
+/// What a [`Calculation`] works out: a magnitude, from its context.
+///
+/// Unreal's `CalculateBaseMagnitude`. On the calculation's type, with what
+/// it's set up with (`&self`).
+pub trait CalculationFn: Send + Sync + 'static {
+    /// The magnitude, worked out from `cx`.
+    fn calculate(&self, cx: &ExecutionContext) -> f32;
+}
+
+/// What a [`Route`] routes: all an execution dealt it, as attribute changes.
+///
+/// Changes to the attributes actors have.
+///
+/// On the route's type, with what it's set up with (`&self`).
+pub trait RouteFn: Send + Sync + 'static {
+    /// What `amount`, all `cx`'s execution dealt the route, changes.
+    fn route(&self, cx: &ExecutionContext, amount: f32) -> Vec<BaseChange>;
+}
+
+/// Code an effect runs, as a registry holds it, and what it captures.
+pub struct Code<F: ?Sized> {
+    run: Arc<F>,
+    captures: Arc<[AttributeRead]>,
+}
+
+impl<F: ?Sized> Code<F> {
+    fn new(run: Arc<F>, captures: Vec<AttributeRead>) -> Self {
+        Self {
+            run,
+            captures: captures.into(),
+        }
+    }
+
+    /// What it runs.
+    #[must_use]
+    pub fn run(&self) -> &F {
+        &self.run
+    }
+
+    /// What it captures.
+    #[must_use]
+    pub fn captures(&self) -> &[AttributeRead] {
+        &self.captures
+    }
+}
+
+impl<F: ?Sized> Clone for Code<F> {
+    fn clone(&self) -> Self {
+        Self {
+            run: Arc::clone(&self.run),
+            captures: Arc::clone(&self.captures),
+        }
+    }
+}
 
 /// The executions an app has: named by data, and run by number.
 ///
@@ -330,23 +588,20 @@ pub type RouterFn = Arc<dyn Fn(&ExecutionContext, f32) -> Vec<BaseChange> + Send
 /// Added to with [`add_execution`](EffectApp::add_execution). Read as a
 /// [`Registry`]: `get(id)`, `id(name)`, `id_of::<E>()`, `name(id)`, `iter()`.
 #[derive(Resource, Deref, Clone, Default, Debug)]
-pub struct ExecutionRegistry(Registry<AnyExecution, ExecutionFn>);
+pub struct ExecutionRegistry(Registry<AnyExecution, Code<dyn ExecutionFn>>);
 
 impl ExecutionRegistry {
-    /// With the execution `E` running `execution`: for a registry built by
-    /// hand.
+    /// With `execution`: for a registry built by hand.
     #[must_use]
-    pub fn with<E: Execution>(
-        mut self,
-        execution: impl Fn(&ExecutionContext) -> Vec<BaseChange> + Send + Sync + 'static,
-    ) -> Self {
-        self.add::<E>(Arc::new(execution));
+    pub fn with<E: Execution + ExecutionFn>(mut self, execution: E) -> Self {
+        self.add(execution);
         self
     }
 
-    /// Adds `E`, running `execution`, or replaces what it ran: its number.
-    pub fn add<E: Execution>(&mut self, execution: ExecutionFn) -> ExecutionId {
-        self.0.add::<E>(E::NAME, execution)
+    /// Adds `execution`, or replaces what its type added: its number.
+    pub fn add<E: Execution + ExecutionFn>(&mut self, execution: E) -> ExecutionId {
+        self.0
+            .add::<E>(E::NAME, Code::new(Arc::new(execution), E::captures()))
     }
 
     /// The number of the execution data names `name`, named within `within`.
@@ -356,7 +611,7 @@ impl ExecutionRegistry {
     /// If there's no such execution.
     pub fn resolve(
         &self,
-        name: &Name<AnyExecution>,
+        name: &Key<AnyExecution>,
         within: Option<&str>,
     ) -> Result<ExecutionId, Error> {
         self.id(name.as_str())
@@ -371,24 +626,20 @@ impl ExecutionRegistry {
 /// Added to with [`add_calculation`](EffectApp::add_calculation). Read as a
 /// [`Registry`].
 #[derive(Resource, Deref, Clone, Default, Debug)]
-pub struct CalculationRegistry(Registry<AnyCalculation, CalculationFn>);
+pub struct CalculationRegistry(Registry<AnyCalculation, Code<dyn CalculationFn>>);
 
 impl CalculationRegistry {
-    /// With the calculation `C` working out `calculation`: for a registry
-    /// built by hand.
+    /// With `calculation`: for a registry built by hand.
     #[must_use]
-    pub fn with<C: Calculation>(
-        mut self,
-        calculation: impl Fn(&ExecutionContext) -> f32 + Send + Sync + 'static,
-    ) -> Self {
-        self.add::<C>(Arc::new(calculation));
+    pub fn with<C: Calculation + CalculationFn>(mut self, calculation: C) -> Self {
+        self.add(calculation);
         self
     }
 
-    /// Adds `C`, working out `calculation`, or replaces what it worked out:
-    /// its number.
-    pub fn add<C: Calculation>(&mut self, calculation: CalculationFn) -> CalculationId {
-        self.0.add::<C>(C::NAME, calculation)
+    /// Adds `calculation`, or replaces what its type added: its number.
+    pub fn add<C: Calculation + CalculationFn>(&mut self, calculation: C) -> CalculationId {
+        self.0
+            .add::<C>(C::NAME, Code::new(Arc::new(calculation), C::captures()))
     }
 
     /// The number of the calculation data names `name`, named within `within`.
@@ -398,7 +649,7 @@ impl CalculationRegistry {
     /// If there's no such calculation.
     pub fn resolve(
         &self,
-        name: &Name<AnyCalculation>,
+        name: &Key<AnyCalculation>,
         within: Option<&str>,
     ) -> Result<CalculationId, Error> {
         self.id(name.as_str())
@@ -413,22 +664,19 @@ impl CalculationRegistry {
 ///
 /// Added to with [`add_route`](EffectApp::add_route). Read as a [`Registry`].
 #[derive(Resource, Deref, Clone, Default, Debug)]
-pub struct RouteRegistry(Registry<AnyRoute, RouterFn>);
+pub struct RouteRegistry(Registry<AnyRoute, Arc<dyn RouteFn>>);
 
 impl RouteRegistry {
-    /// With the route `R`, routed by `router`: for a registry built by hand.
+    /// With `route`: for a registry built by hand.
     #[must_use]
-    pub fn with<R: Route>(
-        mut self,
-        router: impl Fn(&ExecutionContext, f32) -> Vec<BaseChange> + Send + Sync + 'static,
-    ) -> Self {
-        self.add::<R>(Arc::new(router));
+    pub fn with<R: Route + RouteFn>(mut self, route: R) -> Self {
+        self.add(route);
         self
     }
 
-    /// Adds `R`, routed by `router`, or replaces its router: its number.
-    pub fn add<R: Route>(&mut self, router: RouterFn) -> RouteId {
-        self.0.add::<R>(R::NAME, router)
+    /// Adds `route`, or replaces what its type added: its number.
+    pub fn add<R: Route + RouteFn>(&mut self, route: R) -> RouteId {
+        self.0.add::<R>(R::NAME, Arc::new(route))
     }
 
     /// The number of the route data names `name`, named within `within`.
@@ -436,7 +684,7 @@ impl RouteRegistry {
     /// # Errors
     ///
     /// If there's no such route.
-    pub fn resolve(&self, name: &Name<AnyRoute>, within: Option<&str>) -> Result<RouteId, Error> {
+    pub fn resolve(&self, name: &Key<AnyRoute>, within: Option<&str>) -> Result<RouteId, Error> {
         self.id(name.as_str())
             .ok_or_else(|| Error::unknown::<AnyRoute>(name.as_str(), within))
     }
@@ -447,64 +695,41 @@ impl RouteRegistry {
 /// Executions, calculations and routes, each numbered as it's added, and the
 /// effects code names.
 pub trait EffectApp {
-    /// Adds the execution `E`, running `execution`: a formula run as an effect
-    /// naming it executes, such as damage.
-    fn add_execution<E: Execution>(
-        &mut self,
-        execution: impl Fn(&ExecutionContext) -> Vec<BaseChange> + Send + Sync + 'static,
-    ) -> &mut Self;
+    /// Adds `execution`: a formula run as an effect naming it executes, such
+    /// as damage.
+    fn add_execution<E: Execution + ExecutionFn>(&mut self, execution: E) -> &mut Self;
 
-    /// Adds the calculation `C`, working out `calculation`: a magnitude an
-    /// effect naming it works out in code.
-    fn add_calculation<C: Calculation>(
-        &mut self,
-        calculation: impl Fn(&ExecutionContext) -> f32 + Send + Sync + 'static,
-    ) -> &mut Self;
+    /// Adds `calculation`: a magnitude an effect naming it works out in code.
+    fn add_calculation<C: Calculation + CalculationFn>(&mut self, calculation: C) -> &mut Self;
 
-    /// Adds the route `R`, routed by `router`: all an execution dealt it, into
-    /// changes to attributes actors have.
-    fn add_route<R: Route>(
-        &mut self,
-        router: impl Fn(&ExecutionContext, f32) -> Vec<BaseChange> + Send + Sync + 'static,
-    ) -> &mut Self;
+    /// Adds `route`: all an execution dealt it, routed into changes to
+    /// attributes actors have.
+    fn add_route<R: Route + RouteFn>(&mut self, route: R) -> &mut Self;
 
     /// Adds the effect `E` code names: content has to define it, or it's
     /// rejected.
     fn add_effect<E: Effect>(&mut self) -> &mut Self;
-
-    /// Adds `C`, what the game puts on effects' contexts: replicated with
-    /// them, numbered by its name.
-    fn add_context_data<C: ContextData>(&mut self) -> &mut Self;
 }
 
 impl EffectApp for App {
-    fn add_execution<E: Execution>(
-        &mut self,
-        execution: impl Fn(&ExecutionContext) -> Vec<BaseChange> + Send + Sync + 'static,
-    ) -> &mut Self {
+    fn add_execution<E: Execution + ExecutionFn>(&mut self, execution: E) -> &mut Self {
         self.world_mut()
             .get_resource_or_init::<ExecutionRegistry>()
-            .add::<E>(Arc::new(execution));
+            .add(execution);
         self
     }
 
-    fn add_calculation<C: Calculation>(
-        &mut self,
-        calculation: impl Fn(&ExecutionContext) -> f32 + Send + Sync + 'static,
-    ) -> &mut Self {
+    fn add_calculation<C: Calculation + CalculationFn>(&mut self, calculation: C) -> &mut Self {
         self.world_mut()
             .get_resource_or_init::<CalculationRegistry>()
-            .add::<C>(Arc::new(calculation));
+            .add(calculation);
         self
     }
 
-    fn add_route<R: Route>(
-        &mut self,
-        router: impl Fn(&ExecutionContext, f32) -> Vec<BaseChange> + Send + Sync + 'static,
-    ) -> &mut Self {
+    fn add_route<R: Route + RouteFn>(&mut self, route: R) -> &mut Self {
         self.world_mut()
             .get_resource_or_init::<RouteRegistry>()
-            .add::<R>(Arc::new(router));
+            .add(route);
         self
     }
 
@@ -512,13 +737,6 @@ impl EffectApp for App {
         self.world_mut()
             .get_resource_or_init::<EffectRegistry>()
             .name_type::<E>();
-        self
-    }
-
-    fn add_context_data<C: ContextData>(&mut self) -> &mut Self {
-        self.world_mut()
-            .get_resource_or_init::<ContextDataRegistry>()
-            .add::<C>();
         self
     }
 }

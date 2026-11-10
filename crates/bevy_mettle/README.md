@@ -25,8 +25,10 @@ Gameplay Ability System: attributes, effects and abilities.
 - **Modifiers**: flat, increased, more, overrides and the rest, from items,
   effects or the actor itself, counting only in context where they say so:
   resistance against fire.
-- **Effects**: instant, timed, infinite or periodic; stacking, granting tags,
-  needing conditions to apply or to count, and chaining into each other.
+- **Effects**: instant, timed, infinite or periodic, their numbers small
+  expressions of levels, curves and attributes, captured or read live;
+  stacking, granting tags, needing conditions to apply or to count, and
+  chaining into each other.
 - **Abilities**: granted, activated, paid for, cooled down and ended; what
   one does is a component of yours, run by your systems, with input such as
   an aim or a target, checked on the server.
@@ -118,10 +120,11 @@ fn main() {
 
 Content inserted as the app is built is checked and loaded in `PreStartup`;
 changed later, it's loaded again in the next `PreUpdate`, or rejected with
-every error while the content before stays. Attributes are kept in
-`FixedPreUpdate`, effects tick in `FixedUpdate`, and abilities are kept in
-`PreUpdate`, each in `MettleSystems`. Systems that read attributes as they
-stand go after it.
+every error while the content before stays. Effects and attributes run in
+mettle's own schedule, `Mettle`, each fixed step in `FixedPostUpdate`:
+effects ticked, attributes folded, live reads settled, values published.
+Abilities handle network messages in `PreUpdate`. Systems that read
+attributes as they stand go after `MettleSystems`.
 
 ## Learn more
 

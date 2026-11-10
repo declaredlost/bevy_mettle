@@ -228,6 +228,10 @@ reply whose actor never changed has nothing to wait for, so it's held for 30
 frames at most. A rejecting reply is handed over at once, since nothing
 changed on the server.
 
+A client that disconnects drops the replies it holds and takes back every
+prediction still waiting at once, each failing `Failure::Unanswered`, without
+waiting out [`PredictionTimeout`].
+
 Replies and requests are heard in `PreUpdate`, after lightyear receives its
 messages and replication, and before [`AbilitySystems`].
 
@@ -281,6 +285,7 @@ tells every client it no longer matches; reloaded alike, they match again.
 [`AbilityReply`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityReply.html
 [`AbilityRequest`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.AbilityRequest.html
 [`AbilitySystems`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilitySystems.html
+[`PredictionTimeout`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/net/struct.PredictionTimeout.html
 [`ControlledBy`]: https://docs.rs/lightyear_replication/latest/lightyear_replication/control/struct.ControlledBy.html
 [`EffectOf`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/active/struct.EffectOf.html
 [`EffectReplica`]: https://docs.rs/bevy_mettle_effect/latest/bevy_mettle_effect/net/struct.EffectReplica.html
