@@ -16,37 +16,42 @@ mage's fireball, after the first few chapters:
 #[attribute(base = 100.0, min = 0.0)]
 struct Mana;
 
+#[derive(Tag)]
+struct State;
+
+#[derive(Tag)]
+#[tag(parent = State)]
+struct Stunned;
+
 /// What the fireball does while it's cast: a component of yours.
-#[derive(Component, Default)]
+#[derive(Component, Default, Behaviour)]
 struct CastFireball;
 
-/// The fireball, as code names it.
+/// The fireball: a type that defines itself.
 #[derive(Ability)]
+#[ability(behaviour::<CastFireball>, cost = Cost::of::<Mana>(20.0), cooldown = 2.0)]
+#[ability(require = !Condition::owner_has(Stunned))]
 struct Fireball;
-
-/// The fireball, as content defines it.
-fn fireball() -> AbilityData {
-    AbilityData::new(Key::of::<Fireball>(), "cast_fireball")
-        .tag("ability.spell.fire")
-        .cost("fireball.cost")
-        .cooldown("fireball.cooldown")
-        .require(!Condition::owner_has("state.stunned"))
-}
-
-fn effects() -> [EffectData; 2] {
-    [
-        EffectData::instant("fireball.cost")
-            .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-        EffectData::lasting("fireball.cooldown", 2.0).owner_tag("cooldown.fireball"),
-    ]
-}
+# let mut app = App::new();
+# app.add_plugins((MinimalPlugins, MettlePlugins))
+#     .add_attribute::<Mana>()
+#     .add_tag::<Stunned>()
+#     .add_behaviour::<CastFireball>()
+#     .add_ability::<Fireball>();
+# app.update();
+# let effects = app.world().resource::<EffectRegistry>();
+# assert!(effects.id("fireball.cost").is_some());
+# assert!(effects.id("fireball.cooldown").is_some());
+# assert!(app.world().resource::<AbilityRegistry>().id_of::<Fireball>().is_some());
 ```
 
-The mage casts it with `commands.entity(mage).activate_ability(Fireball)`.
-Content names things by string, so a designer can add them; code names them
-by type, so a typo doesn't compile.
-That pays 20 mana, starts a two-second cooldown, and puts `CastFireball`
-on the ability for your systems to run. While the mage is stunned, or the
+Each key on `#[ability(..)]` is a call to the builder of the same name, so
+the fireball is all in one place, checked by the compiler. The mage casts it
+with `commands.entity(mage).activate_ability(Fireball)`. That pays 20 mana,
+starts a two-second cooldown, and puts `CastFireball` on the ability for
+your systems to run. Mettle makes the cost and the cooldown into effects of
+their own, `fireball.cost` and `fireball.cooldown`, and tags the mage
+`cooldown.fireball` while it cools down. While the mage is stunned, or the
 cooldown lasts, or there isn't enough mana, it fails, and says why.
 
 ## What you get
@@ -61,13 +66,17 @@ cooldown lasts, or there isn't enough mana, it fails, and says why.
   owner, need conditions to apply or to count, block other effects,
   and chain into each other.
 - **Abilities.** Granted, activated, paid for, cooled down and ended. What one
-  costs and what blocks it is data; what it does is a component and systems
-  of yours.
+  costs and what blocks it are keys on its type; what it does is a component
+  and systems of yours.
 - **Gameplay tags.** A tree of labels, such as `damage.elemental.fire`,
   for what effects and abilities are and for what an actor is going through.
-- **Data first.** Tags, curves, effects and abilities are data, handed over
-  as one resource and checked as a whole, reloaded as it changes. Mettle
-  doesn't load files: your game reads them however it likes.
+- **Code first.** Effects, abilities and curves are types that define
+  themselves, where in GAS they're data assets. Data adds content, a mod's
+  effects or a server's abilities, and tunes curves, as GAS tunes curve
+  tables. What code defines and data adds is checked as a whole as the app
+  starts, again as the data changes, and, with the `hotpatching` feature, as
+  code is hot patched. Mettle doesn't load files: your game reads them
+  however it likes.
 - **Prediction.** A client predicts its own abilities and the server
   decides, with an adapter for [lightyear](https://github.com/cBournhonesque/lightyear).
 

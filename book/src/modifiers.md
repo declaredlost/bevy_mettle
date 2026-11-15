@@ -207,9 +207,9 @@ than 1 doesn't count at all. They can't be per anything.
 
 A modifier whose numbers can't be (a value that isn't finite, an attribute
 the app doesn't have, a `per` of 0, a `Base` per something) is skipped with
-a warning. Data is checked earlier: [`Modifier::check`] checks a modifier
-against the attributes the app added and the tag registry, and effects' are
-checked as content is loaded.
+a warning. Effects are checked earlier: [`Modifier::check`] checks a
+modifier against the attributes the app added and the tag registry, and
+effects' modifiers are checked as the registries are built.
 
 ## Owned tags
 
@@ -224,13 +224,13 @@ Mettle tells owned tags coming and going with [`TagAdded`] and
 are worked out.
 [Gameplay tags](tags.md) covers them.
 
-## In data
+## As an effect
 
-`Modifiers` are for sources made in code. What data writes, an item's stats
-say, is an infinite [effect](effects.md), whose modifiers name attributes by
-name: checking the content resolves them to numbers. Applied as the item is
-equipped and taken off as it's unequipped, it does what a source does, as GAS
-equips items.
+`Modifiers` are for sources made in code at run time. An item's stats can
+be an infinite [effect](effects.md) instead, a type of yours,
+`#[effect(infinite, flat::<SpellPower>(5.0))]`, or one a mod adds in
+content. Applied as the item is equipped and taken off as it's unequipped,
+it does what a source does, as GAS equips items.
 
 ## Over a network
 
@@ -271,8 +271,7 @@ fn app(role: NetRole) -> App {
     app.add_plugins((MinimalPlugins, MettlePlugins.set(MettleCorePlugin::new(Update))))
         .add_attribute::<SpellPower>()
         .add_tag::<Casting>()
-        .insert_resource(role)
-        .insert_resource(MettleContent::default());
+        .insert_resource(role);
     app
 }
 let mut server = app(NetRole::Server);

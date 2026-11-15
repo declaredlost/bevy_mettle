@@ -21,6 +21,11 @@ documentation = { workspace = true }
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[features]
+# Re-running each self-defining type's `define` through the hot patch's jump
+# table, so a patched definition is picked up as content is checked again
+hotpatching = ["bevy_app/hotpatching"]
+
 [dependencies]
 # The Id derive
 bevy_mettle_macros = { workspace = true, features = [] }

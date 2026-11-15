@@ -67,6 +67,12 @@ impl ActiveEffect {
         self.def.id
     }
 
+    /// Whether it's of the effect `E`.
+    #[must_use]
+    pub fn is<E: crate::Effect>(&self) -> bool {
+        self.def.name == bevy_mettle_core::registry::Key::of::<E>()
+    }
+
     /// How many stacks of it there are.
     #[must_use]
     pub fn stacks(&self) -> u32 {

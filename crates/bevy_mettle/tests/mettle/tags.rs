@@ -74,15 +74,21 @@ fn tags_code_adds_join_the_tree_content_is_checked_against() {
         // `element` with `element.fire`.
         tags: vec![TagKey::named("state")],
         effects: vec![
-            EffectData::lasting("stun", 1.0).owner_tag(Stunned),
-            EffectData::lasting("burn", 1.0).owner_tag("element.fire"),
+            EffectData::new("stun").lasting(1.0).owner_tag(Stunned),
+            EffectData::new("burn")
+                .lasting(1.0)
+                .owner_tag("element.fire"),
         ],
         ..default()
     };
     content.check(app.world()).unwrap();
 
     let misspelled = MettleContent {
-        effects: vec![EffectData::lasting("stun", 1.0).owner_tag("state.stunted")],
+        effects: vec![
+            EffectData::new("stun")
+                .lasting(1.0)
+                .owner_tag("state.stunted"),
+        ],
         ..default()
     };
     let errors = misspelled.check(app.world()).unwrap_err().to_string();

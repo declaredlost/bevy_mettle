@@ -1,57 +1,82 @@
 # How it fits together
 
 The parts of bevy_mettle meet on the actor. This chapter shows what is
-data and what is code, who writes what, and in which order.
+code and what is data, who writes what, and in which order.
 
-## Data and code
+## Code and data
 
-Mettle splits a game's gameplay in two:
+In GAS an effect is a data asset. In mettle it's code:
 
-- **Code** is what your systems read: attributes are types of yours,
-  `Life` and `Mana`, so a system asks for `Current<Life>`. What an ability
-  does is a component of yours, run by your systems.
-- **Data** is content: gameplay tags, curves, effects and abilities. Each
-  is named by a [`Key`], such as `"burning"` or `"fireball"`, so a designer
-  or a mod can add one without code.
-
-Code names things by type, never by string. A tag code uses is a
-`#[derive(Tag)]` type, an effect it applies a `#[derive(Effect)]` type, an
-ability it grants a `#[derive(Ability)]` type. A misspelled one doesn't
-compile. Each type carries its content's name, checked once, as content
-loads.
-
-Content built in code can name by type too. A [`Key`] comes from a string,
-or from a type with `Key::of::<Burning>()`, keyed by the name its derive
-gives it. Builders take either:
+- **Code defines.** Attributes, effects, abilities and curves are marker
+  types of yours, each defining itself with a derive: `Life` and `Mana`,
+  `Burning`, `Fireball`, `FireballDamage`. Each key on an effect's,
+  ability's or curve's derive is the builder method of the same name, so
+  what one is reads in one place and is checked by the compiler. What an
+  ability does is a component of yours, run by your systems, and formulas
+  are code too: executions, calculations and routes.
+- **Data adds and tunes.** [`MettleContent`] adds tags, curves, effects
+  and abilities by keys code doesn't define, for a mod or a server's
+  content, and tunes the curves code defines by their keys, as GAS tunes
+  curve tables.
+- **Context carries what changes.** What differs from one application to
+  the next, an amount of damage, who was struck before, goes on the effect's
+  spec as context data, `Burn.with(Hurt { amount: 5.0 })`, and a magnitude
+  reads it with `Magnitude::context::<Hurt>("amount")`. The effect itself
+  stays a marker.
 
 ```rust
+# use bevy::prelude::*;
+# use bevy::ecs::entity::MapEntities;
 # use bevy_mettle::prelude::*;
+# use serde::{Deserialize, Serialize};
+# #[derive(Attribute)] #[attribute(base = 100.0, min = 0.0)] struct Life;
+/// How much a burn hurts each time: set as it's applied.
+#[derive(Reflect, Clone, PartialEq, Serialize, Deserialize, MapEntities)]
+#[reflect(ContextData)]
+struct Hurt {
+    amount: f32,
+}
+
+/// Burning: four seconds, hurting every half second.
 #[derive(Effect)]
+#[effect(lasting = 4.0, period = 0.5)]
+#[effect(flat::<Life>(Magnitude::context::<Hurt>("amount").times(-1.0)))]
 struct Burning;
 
-let named: Key<AnyEffect> = "burning".into();
-assert_eq!(Key::of::<Burning>(), named);
-let burning = EffectData::lasting(Key::of::<Burning>(), 4.0);
-# assert_eq!(burning.name, named);
+let mut app = App::new();
+app.add_plugins((MinimalPlugins, MettlePlugins))
+    .add_attribute::<Life>()
+    .register_type::<Hurt>()
+    .add_effect::<Burning>();
+# // Context data is numbered as the app's finished, as `run` does.
+# app.finish();
+# app.update();
+# assert!(app.world().resource::<EffectRegistry>().id_of::<Burning>().is_some());
+// Applied as `commands.entity(mage).apply_effect(Burning.with(Hurt { amount: 5.0 }))`.
 ```
 
-A type is of one kind, its key's kind inferred from it: `Key::of::<Burning>()`
-is a `Key<AnyEffect>`, and `Burning::KEY` its name. An ability and the effect
-it costs are two types; deriving both on one doesn't compile.
+A type's key is its name in `snake_case`, `burning`, unless its derive says
+`name = ".."`. [`Key::of::<Burning>()`][`Key`] is that key, as a
+`Key<AnyEffect>`; content names the same effect by the string `"burning"`.
+A type is of one kind, its key's kind inferred from it, so a misspelled
+name, or an ability where an effect goes, doesn't compile.
 
 Code is added to the app: attributes with `add_attribute`, behaviours with
 `add_behaviour`, effect code with `add_execution`, `add_calculation` and
-`add_route`, and the tags, effects and abilities code names with `add_tag`,
-`add_effect` and `add_ability`.
-Data is handed over as one resource, [`MettleContent`], and checked as a
-whole against the code and itself: an effect naming a tag that isn't
-defined, an attribute that wasn't added, a curve that doesn't exist, or an
-effect code names that content doesn't define is an error, all of them at
-once. Content that holds becomes a [`TagRegistry`], a
-[`CurveRegistry`], an [`EffectRegistry`] and an [`AbilityRegistry`]; content
-that doesn't is rejected, and the content before stays. Mettle doesn't load
-files. Your game reads them however it likes, and hands the content over:
-see [Loading data](loading-data.md).
+`add_route`, context data with `register_type`, and tags, curves, effects
+and abilities with `add_tag`, `add_curve`, `add_effect` and `add_ability`.
+
+As the app starts, mettle checks what code defines and content adds as a
+whole: an effect naming a tag that isn't defined, an attribute that wasn't
+added, a curve that doesn't exist, or content defining a key code already
+defines is an error, all of them at once. What holds becomes a
+[`TagRegistry`], a [`CurveRegistry`], an [`EffectRegistry`] and an
+[`AbilityRegistry`], with or without content. They're built again as
+[`MettleContent`] changes, and, with the `hotpatching` feature, as code is
+hot patched, each type defining itself again. What doesn't hold is
+rejected, and the registries before stay. Mettle doesn't load files. Your
+game reads them however it likes, and hands the content over: see
+[Adding and tuning content](content.md).
 
 ## Names and numbers
 
@@ -66,18 +91,19 @@ by.
   such as `value::<Life>()`, `Current<Life>` and `BaseChange::of::<Life>`,
   find its number for you. `world.attribute_id::<Life>()` asks for it, as
   Bevy has `world.component_id::<T>()`, to match what an event names.
-- **Content is numbered as it's checked.** Tags, curves, effects and
-  abilities get a [`TagId`], a [`CurveId`], an [`EffectId`] and an
-  [`AbilityId`], in order of name. A reload keeps the numbers things had,
-  and numbers new ones after them.
+- **What's checked is numbered as it's checked.** Tags, curves, effects
+  and abilities, whether code defines them or content adds them, get a
+  [`TagId`], a [`CurveId`], an [`EffectId`] and an [`AbilityId`], in order
+  of name. Building the registries again keeps the numbers things had, and
+  numbers new ones after them.
 - **Data names code by name.** An effect names the attribute `"life"`, an
   ability the behaviour `"cast_fireball"`. Checking the content resolves
   each name to its number, once: an effect or an ability as the app runs it,
   its `EffectDef` or `AbilityDef`, holds numbers, not names. Code names
-  content by type, and the type is resolved to its number the same way.
+  by type, and the type is resolved to its number the same way.
 - **The network carries numbers.** A server and its clients run the same
   code and the same content. Adding the same attributes, behaviours and
-  routes in the same order numbers them alike, and content numbered in
+  routes in the same order numbers them alike, and what's numbered in
   order of name is numbered alike wherever it's checked. Replication already
   asks the same of components.
 
@@ -85,7 +111,7 @@ Each kind of thing has a registry, a resource that keeps the names beside
 the numbers: [`AttributeRegistry`], `BehaviourRegistry`,
 `ExecutionRegistry`, `CalculationRegistry` and `RouteRegistry` for code;
 [`TagRegistry`], [`CurveRegistry`], [`EffectRegistry`] and
-[`AbilityRegistry`] for content. The registries of code, effects and
+[`AbilityRegistry`] for what's checked as a whole. The registries of code, effects and
 abilities read the same way: `get(id)` for what's numbered `id`,
 `id("name")` for a name's number, `id_of::<T>()` for a type's, `name(id)`
 for a number's name, and `iter()` for all of them. `TagRegistry` goes
@@ -113,9 +139,9 @@ assert_eq!(attributes.name(life), Some("life"));
 | Abilities | Their behaviour's component; costs and cooldowns as effects | Their registry, attributes, owned tags |
 | Your systems | Bases, `OwnedTags`, effects applied, abilities activated | `Current<A>`, abilities' components, what's told |
 
-For the mage, casting the fireball applies `fireball.cost` and
-`fireball.cooldown`. The cost lowers `Base<Mana>`, the cooldown tags its
-owner `cooldown.fireball`, and attributes work out `Current<Mana>` from the new
+For the mage, casting the fireball applies the effects mettle made of its
+cost and cooldown, `fireball.cost` and `fireball.cooldown`. The cost lowers
+`Base<Mana>`, the cooldown tags its owner `cooldown.fireball`, and attributes work out `Current<Mana>` from the new
 base.
 
 ## One step

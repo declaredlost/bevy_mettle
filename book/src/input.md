@@ -1,7 +1,7 @@
 # Input and targets
 
-The fireball goes where the player aims it. Where it's aimed isn't data and
-isn't the cast's own state: it's what the player chose as they cast it, the
+The fireball goes where the player aims it. Where it's aimed isn't part of the
+ability and isn't the cast's own state: it's what the player chose as they cast it, the
 ability's *input*. This chapter gives the mage an aim.
 
 ## The input
@@ -46,7 +46,7 @@ with it as the ability ends. Your systems read both:
 # use bevy_mettle::prelude::*;
 # #[derive(Component, Clone, Copy, Debug, PartialEq)] struct Aim(Vec2);
 # #[derive(Component, Default, Behaviour)] #[behaviour(input = Aim)] struct CastFireball { timer: f32 }
-# #[derive(Ability)] struct Fireball;
+# #[derive(Ability)] #[ability(behaviour::<CastFireball>)] struct Fireball;
 /// Where the player clicked this frame, if they did: kept by your input code.
 #[derive(Resource)]
 struct Clicked(Option<Vec2>);
@@ -70,8 +70,8 @@ fn cast(mut casts: Query<(&ActiveAbility, &mut CastFireball, &Aim)>, time: Res<T
 }
 ```
 
-Which behaviour runs an ability is data, so that the fireball is run by
-`CastFireball` is checked as it activates. If it's run by another, or it's
+`activate_ability_with` names the ability and its behaviour apart, so that
+the fireball is run by `CastFireball` is checked as it activates. If it's run by another, or it's
 activated with `activate_ability` and no input, it fails with
 [`Failure::Input`], and nothing is paid.
 
@@ -88,7 +88,10 @@ ask anything a system can, a spatial query for line of sight too:
 # #[derive(Attribute)] #[attribute(base = 100.0, min = 0.0)] struct Mana;
 # #[derive(Component, Clone, Copy, Debug, PartialEq)] struct Aim(Vec2);
 # #[derive(Component, Default, Behaviour)] #[behaviour(input = Aim)] struct CastFireball { timer: f32 }
-# #[derive(Ability)] struct Fireball;
+#[derive(Ability)]
+#[ability(behaviour::<CastFireball>, cost = Cost::of::<Mana>(20.0))]
+struct Fireball;
+
 /// Whether the aim is within 12 of the mage.
 fn in_reach(In(check): In<InputCheck<Aim>>, mages: Query<&Transform>) -> bool {
     mages
@@ -101,13 +104,7 @@ app.add_plugins((MinimalPlugins, MettlePlugins))
     .add_attribute::<Mana>()
     .add_behaviour::<CastFireball>()
     .check_input::<Aim, _>(in_reach)
-    .add_ability::<Fireball>()
-    .insert_resource(MettleContent {
-        effects: vec![EffectData::instant("fireball.cost")
-            .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0))],
-        abilities: vec![AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>()).cost("fireball.cost")],
-        ..default()
-    });
+    .add_ability::<Fireball>();
 app.update();
 
 let world = app.world_mut();
@@ -186,8 +183,8 @@ it applies.
   bolts it has fired) on the behaviour, not the input. The server takes the
   input from the client as it is, after its check.
 - **Triggers give no input.** An ability whose behaviour takes input can't
-  have triggers: a gameplay event or a tag has no aim to give it. Content
-  with one is rejected. Activating such an ability by tag fails with
+  have triggers: a gameplay event or a tag has no aim to give it. One that
+  does is rejected as the registry is built. Activating such an ability by tag fails with
   `Failure::Input`.
 - **A check is the server's word.** On a client, a check only spares a
   prediction the server would refuse. Write it from what the server knows:

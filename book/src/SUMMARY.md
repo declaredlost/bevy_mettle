@@ -45,7 +45,7 @@
 
 # Putting it together
 
-- [Loading data](loading-data.md)
+- [Adding and tuning content](content.md)
 - [Testing](testing.md)
 
 # Reference

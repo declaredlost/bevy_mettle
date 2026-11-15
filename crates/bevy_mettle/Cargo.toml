@@ -32,6 +32,9 @@ ability = ["effect", "dep:bevy_mettle_ability"]
 # Prediction over lightyear: `bevy_mettle_lightyear`, as
 # `bevy_mettle::lightyear`
 lightyear = ["ability", "dep:bevy_mettle_lightyear"]
+# Defining effects, abilities and curves again as code is hot patched:
+# Bevy's `hotpatching`, run under the Dioxus CLI
+hotpatching = ["bevy/hotpatching", "bevy_mettle_core/hotpatching"]
 
 [dependencies]
 # Gameplay tags, curves and conditions: always there

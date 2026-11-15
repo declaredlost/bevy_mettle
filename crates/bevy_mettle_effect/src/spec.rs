@@ -3,35 +3,48 @@
 use bevy::prelude::*;
 use bevy_mettle_core::Activation;
 use bevy_mettle_core::registry::{AnyEffect, AttributeId, EffectId, Keyed, Ref};
-use bevy_mettle_core::tag::{TagKey, Tags};
+use bevy_mettle_core::tag::Tags;
 
 use crate::EffectRegistry;
 use crate::context::{ContextData, EffectContext};
-use crate::data::{CaptureDef, Read, Side};
+use crate::data::{CaptureDef, EffectData, Read, Side};
 
-/// An effect code names: a marker type, its content's name on it.
+/// An effect: a marker type that defines itself, by its derive's keys.
 ///
-/// Derive it, add it to the app, and apply it: the type is its spec, so
-/// code names effects without a string, and a misspelled one doesn't compile.
+/// Derive it, each key on `#[effect(..)]` the [`EffectData`] builder method
+/// of the same name; add it to the app; and apply it. The type is its spec,
+/// so code names effects without a string, and a misspelled one doesn't
+/// compile.
 ///
 /// ```ignore
 /// #[derive(Effect)]
-/// #[effect(name = "burning")]
-/// pub struct Burning;
+/// #[effect(lasting = 4.0, period = 0.5, owner_tag = Burning)]
+/// #[effect(flat::<Life>(Magnitude::context::<Damage>("amount").times(-1.0)))]
+/// pub struct Burn;
 ///
-/// app.add_effect::<Burning>();
-/// commands.entity(mage).apply_effect(Burning.level(3.0).param(DamageParam, -5.0));
+/// app.add_effect::<Burn>();
+/// commands.entity(mage).apply_effect(Burn.level(3.0).with(Damage { amount: 5.0 }));
 /// ```
 ///
-/// [`add_effect`](crate::code::EffectApp::add_effect) makes content
-/// without it fail its check, so its name is checked once, as content loads.
-/// Its builders make an [`EffectSpec`].
+/// | Key | Meaning |
+/// |---|---|
+/// | `name = ".."` | Its key: its type's name in `snake_case`, unless it says |
+/// | `define = function` | `fn(EffectData) -> EffectData`, defining all of it |
+/// | `key`, `key = value`, `key(a, b)` | `.key()`, `.key(value)`, `.key(a, b)` |
+///
+/// It's a marker: what changes from one application to the next (an
+/// amount, a target picked) goes on its spec's context, as
+/// [`with`](Self::with) puts it, for its magnitudes and code to read.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` isn't an effect",
     label = "not an effect",
     note = "derive it: `#[derive(Effect)]`"
 )]
 pub trait Effect: Keyed<Kind = AnyEffect> + Send + Sync + 'static {
+    /// Its definition: `effect`, an instant effect called by its key, filled
+    /// in.
+    fn define(effect: EffectData) -> EffectData;
+
     /// It, at level 1, from no one.
     #[must_use]
     fn spec(self) -> EffectSpec
@@ -50,13 +63,13 @@ pub trait Effect: Keyed<Kind = AnyEffect> + Send + Sync + 'static {
         self.spec().level(level)
     }
 
-    /// It, with `param` (a tag: `param.damage`) at `value`.
+    /// It, with `data` on its context.
     #[must_use]
-    fn param(self, param: impl Into<TagKey>, value: f32) -> EffectSpec
+    fn with<C: ContextData>(self, data: C) -> EffectSpec
     where
         Self: Sized,
     {
-        self.spec().param(param, value)
+        self.spec().with(data)
     }
 
     /// It, from `source`.
@@ -79,17 +92,15 @@ impl<E: Effect> From<E> for EffectSpec {
 
 /// An effect about to be applied: which, at what level, with what, from whom.
 ///
-/// Unreal's `GameplayEffectSpec`: with what the applying code set. Made from
-/// an [`Effect`] type (`Burning.level(3.0)`); its effect is resolved to its
-/// number as it's applied. An active effect keeps the spec it was applied
-/// with.
+/// Unreal's `GameplayEffectSpec`: with what the applying code set, on its
+/// context. Made from an [`Effect`] type (`Burning.level(3.0)`); its effect
+/// is resolved to its number as it's applied. An active effect keeps the spec
+/// it was applied with.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EffectSpec {
     effect: Ref<AnyEffect>,
     /// Its level: what curves are read at. 1 unless it says.
     pub level: f32,
-    /// What the applying code set, for `Param` magnitudes.
-    pub params: Vec<(TagKey, f32)>,
     /// What it carries beyond them: who applied it, and context data.
     pub context: EffectContext,
     /// Its source's attributes as they were when it was made, for its
@@ -121,7 +132,6 @@ impl EffectSpec {
         Self {
             effect,
             level: 1.0,
-            params: Vec::new(),
             context: EffectContext::default(),
             snapshot: Vec::new(),
             activation: None,
@@ -135,18 +145,6 @@ impl EffectSpec {
         self
     }
 
-    /// With `param` (a tag: `param.damage`) at `value`. Setting one again
-    /// replaces it.
-    #[must_use]
-    pub fn param(mut self, param: impl Into<TagKey>, value: f32) -> Self {
-        let param = param.into();
-        match self.params.iter_mut().find(|(known, _)| *known == param) {
-            Some((_, known)) => *known = value,
-            None => self.params.push((param, value)),
-        }
-        self
-    }
-
     /// From `source`: who's responsible, the caster.
     #[must_use]
     pub fn source(mut self, source: Entity) -> Self {
@@ -156,7 +154,9 @@ impl EffectSpec {
 
     /// With `data` on its context, in place of any of its type: mettle's own
     /// ([`Causer`](crate::context::Causer), [`Hit`](crate::context::Hit), ..)
-    /// or the game's.
+    /// or the game's, for its magnitudes
+    /// ([`Magnitude::context`](crate::data::Magnitude::context)) and code to
+    /// read.
     #[must_use]
     pub fn with<C: ContextData>(mut self, data: C) -> Self {
         self.context = self.context.with(data);
@@ -168,16 +168,6 @@ impl EffectSpec {
     pub fn activation(mut self, activation: Activation) -> Self {
         self.activation = Some(activation);
         self
-    }
-
-    /// What `param` was set to, if it was.
-    #[must_use]
-    pub fn param_value(&self, param: impl Into<TagKey>) -> Option<f32> {
-        let param = param.into();
-        self.params
-            .iter()
-            .find(|(known, _)| *known == param)
-            .map(|(_, value)| *value)
     }
 
     /// What its snapshot holds for `capture`, if it's of its source and the

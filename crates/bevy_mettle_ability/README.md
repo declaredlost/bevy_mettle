@@ -18,10 +18,11 @@ can do, granted to it, activated, paid for, cooled down and ended.
 
 ## Overview
 
-- An [`AbilityData`] is content, named by its name: the behaviour that runs it, its
-  cost and cooldown (effects), what it needs and what blocks it, what it
-  ends and blocks while active, its owner tags, and what triggers
-  it.
+- An ability is a unit struct, `#[derive(Ability)]`, defining itself: each
+  key a call on its [`AbilityData`], the behaviour that runs it, its cost
+  and cooldown, what it needs and what blocks it, what it ends and blocks
+  while active, its owner tags, the effects that grant it, and what
+  triggers it. Content adds more, each an `AbilityData` named by its name.
 - A behaviour is a component of yours, `#[derive(Behaviour)]`, added with
   [`add_behaviour`]: put on the ability's entity as it activates, for your
   systems to run, and taken off as it ends.
@@ -29,9 +30,10 @@ can do, granted to it, activated, paid for, cooled down and ended.
   `activate_ability_with`, or while it runs with `set_input`, checked by a
   system of yours before it's taken, and sent to the server with a
   prediction.
-- An [`AbilityRegistry`] is built from them, checked against the tag tree,
-  the effects and the behaviours: every error at once. A [`Grant`] says
-  which abilities an effect grants while it lasts: gear's skills.
+- An [`AbilityRegistry`] is built from both, checked against the tag tree,
+  the effects and the behaviours: every error at once. Its cost and
+  cooldown are effects mettle makes of it. An ability `granted_by` an
+  effect is granted while that effect lasts: gear's skills.
 - `grant_ability` and `activate_ability` grant and activate it on an actor,
   checking it's granted, not cooling down, affordable, not blocked and its
   requirement holds. [`AbilityActivated`], [`AbilityFailed`] (why) and
@@ -61,9 +63,11 @@ bevy_mettle_ability = "0.1"
 
 ```rust,no_run
 use bevy::prelude::*;
+use bevy_mettle_ability::AbilityScope;
 use bevy_mettle_ability::prelude::*;
 use bevy_mettle_attribute::prelude::*;
 use bevy_mettle_core::prelude::*;
+use bevy_mettle_effect::EffectScope;
 use bevy_mettle_effect::prelude::*;
 
 #[derive(Attribute)]
@@ -76,57 +80,48 @@ struct CastFireball {
     timer: f32,
 }
 
-/// The fireball, as code names it: content defines it as `"fireball"`.
+/// The fireball: 20 mana, then 2 seconds before it's cast again.
 #[derive(Ability)]
+#[ability(behaviour::<CastFireball>, cost = Cost::of::<Mana>(20.0), cooldown = 2.0)]
 struct Fireball;
 
-fn load(
-    mut commands: Commands,
-    attributes: Res<AttributeRegistry>,
-    executions: Res<ExecutionRegistry>,
-    calculations: Res<CalculationRegistry>,
-    routes: Res<RouteRegistry>,
-    behaviours: Res<BehaviourRegistry>,
-    abilities: Res<AbilityRegistry>,
-) {
-    let tags: Vec<TagKey> = ["cooldown", "cooldown.fireball"]
-        .into_iter()
-        .map(TagKey::named)
-        .collect();
-    let tags = TagRegistry::build(tags).unwrap();
-    let effects = [
-        EffectData::instant("fireball.cost")
-            .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-        EffectData::lasting("fireball.cooldown", 2.0).owner_tag("cooldown.fireball"),
-    ];
-    let effects = EffectRegistry::build(
-        &effects,
-        EffectScope {
-            tags: &tags,
-            curves: &CurveRegistry::default(),
-            attributes: &attributes,
-            executions: &executions,
-            calculations: &calculations,
-            routes: &routes,
-        },
-    )
-    .unwrap();
-    let fireball = AbilityData::new("fireball", "cast_fireball")
-        .cost("fireball.cost")
-        .cooldown("fireball.cooldown");
-    // Checked from the app's registry, which knows `Fireball` is code's.
-    let abilities = abilities.rebuild(
-        &[fireball],
-        &[],
-        AbilityScope {
-            tags: &tags,
-            effects: &effects,
-            behaviours: &behaviours,
-        },
-    )
-    .unwrap();
-    commands.insert_resource(effects);
-    commands.insert_resource(abilities);
+/// Checks what code defines and builds the registries, as `bevy_mettle`'s
+/// `MettleContentPlugin` does as the app starts.
+fn load(world: &mut World) {
+    // What abilities pay with: their costs and cooldowns, as effects, and
+    // the tags their cooldowns grant.
+    let upkeep = world.resource::<AbilityRegistry>().upkeep(&[]);
+    let tags = TagRegistry::build(upkeep.tags).unwrap();
+    // Rebuilt from the app's registries, which hold what code defines.
+    let effects = world
+        .resource::<EffectRegistry>()
+        .rebuild(
+            &upkeep.effects,
+            EffectScope {
+                tags: &tags,
+                curves: &CurveRegistry::default(),
+                attributes: world.resource(),
+                executions: world.resource(),
+                calculations: world.resource(),
+                routes: world.resource(),
+                context: world.resource(),
+            },
+        )
+        .unwrap();
+    let abilities = world
+        .resource::<AbilityRegistry>()
+        .rebuild(
+            &[],
+            AbilityScope {
+                tags: &tags,
+                effects: &effects,
+                behaviours: world.resource(),
+            },
+        )
+        .unwrap();
+    world.insert_resource(tags);
+    world.insert_resource(effects);
+    world.insert_resource(abilities);
 }
 
 fn spawn(mut commands: Commands) {
@@ -152,7 +147,8 @@ fn main() {
         .add_attribute::<Mana>()
         .add_behaviour::<CastFireball>()
         .add_ability::<Fireball>()
-        .add_systems(Startup, (load, spawn).chain())
+        .add_systems(PreStartup, load)
+        .add_systems(Startup, spawn)
         .add_systems(Update, cast)
         .run();
 }
@@ -184,7 +180,6 @@ or [MIT license](https://github.com/declaredlost/bevy_mettle/blob/main/LICENSE-M
 [`AbilityData`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/data/struct.AbilityData.html
 [`add_behaviour`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/behaviour/trait.BehaviourApp.html#tymethod.add_behaviour
 [`AbilityRegistry`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/struct.AbilityRegistry.html
-[`Grant`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/data/struct.Grant.html
 [`AbilityActivated`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityActivated.html
 [`AbilityFailed`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityFailed.html
 [`AbilityEnded`]: https://docs.rs/bevy_mettle_ability/latest/bevy_mettle_ability/events/struct.AbilityEnded.html

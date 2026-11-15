@@ -15,6 +15,7 @@ use bevy_platform::collections::HashMap;
 use fnv::FnvHasher;
 use smol_str::SmolStr;
 
+pub use self::definitions::Definitions;
 pub use self::id::{AbilityId, AttributeId, CurveId, EffectId, Id, TagId};
 pub use self::key::Key;
 pub use self::kind::{AnyAbility, AnyAttribute, AnyCurve, AnyEffect, AnyTag, Keyed, Kind};
@@ -23,6 +24,7 @@ use self::numbering::Numbering;
 pub use self::reference::Ref;
 use crate::Error;
 
+mod definitions;
 mod id;
 mod key;
 mod kind;
@@ -324,15 +326,6 @@ impl<K: Kind, T: Clone> Registry<K, T> {
     pub fn set(&mut self, id: Id<K>, entry: T) {
         Arc::make_mut(&mut self.entries)[id.index()] = Some(entry);
     }
-
-    /// The names code names by type that nothing's numbered: what content
-    /// doesn't define.
-    pub fn unnumbered(&self) -> impl Iterator<Item = &'static str> + '_ {
-        self.named
-            .iter()
-            .filter(|(type_id, _)| !self.by_type.contains_key(type_id))
-            .map(|&(_, name)| name)
-    }
 }
 
 #[cfg(test)]
@@ -404,13 +397,11 @@ mod tests {
         registry.name_type(TypeId::of::<Shield>(), "shield");
         let first = registry.renumbered(["shield", "sword"]);
         assert_eq!(first.id_of::<Shield>(), Some(ThingId::new(0)));
-        assert_eq!(first.unnumbered().count(), 0);
 
         let mut reloaded = first.renumbered(["axe", "sword"]);
         assert_eq!(reloaded.id("sword"), Some(ThingId::new(1)), "kept");
         assert_eq!(reloaded.id("axe"), Some(ThingId::new(2)), "after the last");
         assert_eq!(reloaded.id_of::<Shield>(), None);
-        assert_eq!(reloaded.unnumbered().collect::<Vec<_>>(), ["shield"]);
         reloaded.set(ThingId::new(2), 7);
         assert_eq!(reloaded.get(ThingId::new(2)), Some(&7));
         assert_eq!(reloaded.get(ThingId::new(0)), None, "gone");

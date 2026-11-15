@@ -167,8 +167,8 @@ impl ActiveAbility {
     ///
     /// Unreal's `MakeOutgoingGameplayEffectSpec`. What a behaviour applies,
     /// so a rejected prediction takes it back, and what it applies says which
-    /// ability did. Set more on it after: another level, params, what struck
-    /// in its actor's place (a projectile).
+    /// ability did. Set more on it after: another level, context data, what
+    /// struck in its actor's place (a projectile).
     /// An effect applied on another's behalf (a summon's, a reflected
     /// projectile's) is theirs: make its spec yourself.
     #[must_use]

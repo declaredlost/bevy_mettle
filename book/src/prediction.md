@@ -90,9 +90,10 @@ every actor a client receives.
   stacks, how long it lasts and has left, whether it's inhibited, what its
   source owned as it applied, and the attribute values it captured.
   Replicate it with its [`EffectOf`], mapping its context's entities. The
-  effect's definition is data both sides have, so it isn't sent: the
-  replica carries the effect's number, an [`EffectId`], and its params and
-  its source's tags as tag numbers, [`TagId`]s. The replica is sent again as
+  effect's definition is code and content both sides have, so it isn't
+  sent: the replica carries the effect's number, an [`EffectId`], its
+  [context](applying-effects.md#context) with its data serialized, and its
+  source's tags as tag numbers, [`TagId`]s. The replica is sent again as
   it changes, but not as its time runs down.
 - **On a client**, an effect whose replica arrives is shown as a [`Proxy`]: it
   counts, tags its owner, and its time runs down, but it isn't ticked
@@ -112,12 +113,14 @@ a client gives the source its `Modifiers` and `ModifierOf` from it.
 
 Everything mettle sends names what it's about by number, never by name:
 effects by [`EffectId`], abilities by [`AbilityId`], tags by [`TagId`].
-That's effect replicas (the effect, its params and its source's tags),
+That's effect replicas (the effect, its context data's types and its
+source's tags),
 ability requests, replies and replicas, served cues and cue bursts, and
 modifier replicas (each condition's tags). A
 number is a few bytes where a name is a string, and both sides know it
-already: content is numbered in order of name as it's checked, so a server
-and its clients that load the same content number it the same. A reload
+already: what code defines and content adds is numbered in order of name
+as it's checked, so a server and its clients that add the same code and
+load the same content number it the same. A reload
 keeps the numbers things had and numbers new ones after them, so a reload
 on both sides keeps them agreeing. Names stay for content, debug output and
 what a client shows.
@@ -150,8 +153,8 @@ What's applied under a predicted activation is marked:
 
 ## Execution policies
 
-How an ability runs over a network is its own: [`NetExecution`], the `net`
-field of its definition, as in Unreal.
+How an ability runs over a network is its own: [`NetExecution`], its `net`
+key, as in Unreal.
 
 | Policy | On the client | On the server |
 |---|---|---|
@@ -161,14 +164,25 @@ field of its definition, as in Unreal.
 | `LocalOnly` | Runs it, and sends nothing | Runs it only if it's the server's own |
 
 ```rust
+# use bevy::prelude::*;
 # use bevy_mettle::prelude::*;
-// A random proc: the client can't know the roll.
-let proc = AbilityData::new("chaos_bolt", "cast_bolt").net(NetExecution::ServerOnly);
-// Channelled from the server, aimed on the client.
-let beam = AbilityData::new("beam", "channel_beam").net(NetExecution::ServerInitiated);
-// Zoom: the player's own view.
-let zoom = AbilityData::new("zoom", "zoom").net(NetExecution::LocalOnly);
-# let _ = (proc, beam, zoom);
+# #[derive(Component, Default, Behaviour)] struct CastBolt;
+# #[derive(Component, Default, Behaviour)] struct ChannelBeam;
+# #[derive(Component, Default, Behaviour)] struct ZoomIn;
+/// A random proc: the client can't know the roll.
+#[derive(Ability)]
+#[ability(behaviour::<CastBolt>, net = NetExecution::ServerOnly)]
+struct ChaosBolt;
+
+/// Channelled from the server, aimed on the client.
+#[derive(Ability)]
+#[ability(behaviour::<ChannelBeam>, net = NetExecution::ServerInitiated)]
+struct Beam;
+
+/// Zoom: the player's own view.
+#[derive(Ability)]
+#[ability(behaviour::<ZoomIn>, net = NetExecution::LocalOnly)]
+struct Zoom;
 ```
 
 - **`Predicted`** is what a player's own abilities want: what follows is how
@@ -186,7 +200,7 @@ let zoom = AbilityData::new("zoom", "zoom").net(NetExecution::LocalOnly);
   its mirrored behaviour triggers is the server's to decide: a client
   predicts only under its own activations.
 - **`LocalOnly`** suits what's only the player's: zoom, an aim preview, a menu.
-  It can't have a cost or a cooldown, which content checking rejects: what it
+  It can't have a cost or a cooldown, which checking rejects: what it
   paid, the server's replicated values would undo. Triggered, it runs where
   its trigger happened, by an event or a tag, on a client too. A server
   rejects a client asking for one.
@@ -232,12 +246,15 @@ Here's a client predicting the fireball, and the server saying no:
 # use bevy::prelude::*;
 # use bevy::time::TimeUpdateStrategy;
 # use bevy_mettle::prelude::*;
+# use bevy_mettle::ability::net::{AbilityReply, AbilityRequest};
 # #[derive(Attribute)]
 # #[attribute(base = 100.0, min = 0.0)]
 # struct Mana;
 # #[derive(Component, Default, Behaviour)]
 # struct CastFireball;
-# #[derive(Ability)] struct Fireball;
+# #[derive(Ability)]
+# #[ability(behaviour::<CastFireball>, cost = Cost::of::<Mana>(20.0), cooldown = 2.0)]
+# struct Fireball;
 # let mut client = App::new();
 # client
 #     .add_plugins((MinimalPlugins, MettlePlugins))
@@ -246,15 +263,6 @@ Here's a client predicting the fireball, and the server saying no:
 #     .add_attribute::<Mana>()
 #     .add_behaviour::<CastFireball>()
 #     .add_ability::<Fireball>();
-# client.insert_resource(MettleContent {
-#     tags: ["cooldown", "cooldown.fireball"].map(TagKey::named).to_vec(),
-#     effects: vec![
-#         EffectData::instant("fireball.cost").modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-#         EffectData::lasting("fireball.cooldown", 2.0).owner_tag("cooldown.fireball"),
-#     ],
-#     abilities: vec![AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>()).cost("fireball.cost").cooldown("fireball.cooldown")],
-#     ..default()
-# });
 # client.update();
 # let mana = |app: &App, mage| app.world().get::<Current<Mana>>(mage).unwrap().get();
 // The client's mage, as the server serves it.
@@ -358,9 +366,10 @@ Ability requests, replies and replicas are handled in [`AbilitySystems`], in
 
 ## Pitfalls
 
-- **One content, both sides.** Effects, abilities and tags are sent as
-  numbers, not definitions. The server and its clients need the same
-  content, loaded the same way, or the same number names different things.
+- **One game, both sides.** Effects, abilities and tags are sent as
+  numbers, not definitions. The server and its clients need the same code
+  and the same content, loaded the same way, or the same number names
+  different things.
   Over lightyear, a client that doesn't is told: see
   [Checking content](lightyear.md#checking-content).
 - **Confirm late, not early.** A confirmed prediction gives way to the

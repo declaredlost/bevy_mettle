@@ -7,24 +7,35 @@ use bevy_harness::TestApp;
 use bevy_mettle::core::registry::{AttributeId, TagId};
 use bevy_mettle::effect::context::ContextReplica;
 use bevy_mettle::effect::cue::{Burst, CueBursts, ServedCues};
+use bevy_mettle::effect::net::EffectReplica;
 use bevy_mettle::prelude::*;
 
 use crate::common::{Life, Mana, attributes, close, id, mettle};
 
 #[derive(Effect)]
+#[effect(lasting = 4.0, cue = "cue.burning", ongoing = !Condition::owner_has("state.wet"))]
 struct Burning;
 
 #[derive(Effect)]
+#[effect(lasting = 4.0, period = 1.0, flat::<Life>(-2.0))]
+#[effect(cue = "cue.burning", cue = "cue.hit.fire")]
 struct Smoulder;
 
 #[derive(Effect)]
-#[effect(name = "fireball.hit")]
+#[effect(name = "fireball.hit", flat::<Life>(-15.0), cue = "cue.hit.fire")]
 struct FireballHit;
 
 #[derive(Effect)]
+#[effect(flat::<Life>(-20.0), flat::<Mana>(10.0), flat::<Life>(-10.0), cue = "cue.hit")]
 struct Drain;
 
+/// Attunement: while it lasts, the firestorm content defines is granted.
+#[derive(Effect)]
+#[effect(infinite)]
+struct Attuned;
+
 #[derive(Ability)]
+#[ability(behaviour::<Cast>, cue = "cue.casting")]
 struct Fireball;
 
 #[derive(Component, Default, Behaviour)]
@@ -79,30 +90,19 @@ const TAGS: &[&str] = &[
     "state.wet",
 ];
 
+/// The firestorm, as content defines it: run by `behaviour`, playing `cue`,
+/// granted while attuned.
+fn firestorm<B: Behaviour>(cue: &'static str) -> AbilityData {
+    AbilityData::new("firestorm")
+        .behaviour::<B>()
+        .cue(cue)
+        .granted_by::<Attuned>()
+}
+
 fn content() -> MettleContent {
     MettleContent {
         tags: TAGS.iter().map(|&name| TagKey::named(name)).collect(),
-        effects: vec![
-            EffectData::lasting(Key::of::<Burning>(), 4.0)
-                .cue("cue.burning")
-                .ongoing(!Condition::owner_has("state.wet")),
-            EffectData::lasting(Key::of::<Smoulder>(), 4.0)
-                .period(1.0, false)
-                .modifier(EffectModifier::new::<Life>(Operation::Flat, -2.0))
-                .cue("cue.burning")
-                .cue("cue.hit.fire"),
-            EffectData::instant(Key::of::<FireballHit>())
-                .modifier(EffectModifier::new::<Life>(Operation::Flat, -15.0))
-                .cue("cue.hit.fire"),
-            EffectData::instant(Key::of::<Drain>())
-                .modifier(EffectModifier::new::<Life>(Operation::Flat, -20.0))
-                .modifier(EffectModifier::new::<Mana>(Operation::Flat, 10.0))
-                .modifier(EffectModifier::new::<Life>(Operation::Flat, -10.0))
-                .cue("cue.hit"),
-        ],
-        abilities: vec![
-            AbilityData::new(Key::of::<Fireball>(), Key::of::<Cast>()).cue("cue.casting"),
-        ],
+        abilities: vec![firestorm::<Cast>("cue.casting")],
         ..default()
     }
 }
@@ -121,10 +121,7 @@ fn app(role: NetRole) -> (TestApp, Entity) {
                 .add_observer(on_added)
                 .add_observer(on_removed)
                 .add_observer(on_hit)
-                .add_effect::<Burning>()
-                .add_effect::<Smoulder>()
-                .add_effect::<FireballHit>()
-                .add_effect::<Drain>()
+                .add_effects::<(Burning, Smoulder, FireballHit, Drain, Attuned)>()
                 .add_ability::<Fireball>()
                 .insert_resource(content());
         })
@@ -270,7 +267,7 @@ fn an_effect_executing_plays_its_cue_with_what_it_dealt() {
             && close(executed.level, 3.0)
             && executed.context.source == Some(caster)
             && hit.is_some()
-            && executed.effect == hit
+            && executed.effect_id == hit
     });
 }
 
@@ -422,7 +419,7 @@ fn a_cue_that_isnt_a_tag_is_rejected() {
     let mut content = content();
     content
         .effects
-        .push(EffectData::lasting("frozen", 1.0).cue("cue.frozen"));
+        .push(EffectData::new("frozen").lasting(1.0).cue("cue.frozen"));
     let errors = content.check(app.world()).unwrap_err().to_string();
     assert!(errors.contains("cue.frozen"), "{errors}");
 }
@@ -469,28 +466,25 @@ fn a_shown_effect_replicated_away_lets_go_of_its_cues() {
 #[test]
 fn an_ability_reloaded_mid_cast_ends_what_it_started_with() {
     let (mut app, mage) = app(NetRole::Standalone);
-    app.world_mut().grant_ability(mage, Fireball).unwrap();
-    let fireball = app
-        .world_mut()
-        .activate_ability(mage, Fireball)
-        .unwrap()
-        .ability();
+    app.world_mut().apply_effect(mage, Attuned);
+    app.tick();
+    let storm = app.entity(mage).get::<Abilities>().iter().next().unwrap();
+    app.world_mut().activate(storm).unwrap();
     app.tick();
     assert_eq!(shown(&app, mage), ["cue.casting"]);
 
-    // A reload mid-cast: the fireball's run by another behaviour now, and
+    // A reload mid-cast: the firestorm's run by another behaviour now, and
     // plays another cue.
-    app.resource_mut::<MettleContent>().abilities =
-        vec![AbilityData::new(Key::of::<Fireball>(), Key::of::<Channel>()).cue("cue.burning")];
+    app.resource_mut::<MettleContent>().abilities = vec![firestorm::<Channel>("cue.burning")];
     app.tick();
-    app.world_mut().end_ability(fireball);
+    app.world_mut().end_ability(storm);
     app.tick();
     assert_eq!(
         shown(&app, mage),
         Vec::<String>::new(),
         "its own cue let go"
     );
-    app.entity(fireball)
+    app.entity(storm)
         .assert_lacks::<Cast>()
         .assert_lacks::<Channel>();
 }
@@ -509,7 +503,7 @@ fn bursts(tag: TagId, activation: Activation, n: u64) -> CueBursts {
                 level: 1.0,
                 context: ContextReplica::default(),
                 activation: Some(activation),
-                effect: None,
+                effect_id: None,
             })
             .collect(),
     }

@@ -75,6 +75,7 @@ pub(super) fn apply_at(
         world.trigger(EffectBlocked {
             entity: target,
             id: def.id,
+            key: def.name.clone(),
             reason,
         });
         return;
@@ -113,6 +114,7 @@ pub(super) fn apply_at(
         entity: target,
         effect,
         id: def.id,
+        key: def.name.clone(),
     });
     chain(world, target, &spec, &def.on_apply, depth);
 }
@@ -218,7 +220,11 @@ pub(super) fn spawn(
     super::live::watch(world, effect);
     if holds_ongoing(world, effect) {
         activate(world, registry, effect);
-        if def.period.as_ref().is_some_and(|period| period.on_apply) {
+        if def
+            .period
+            .as_ref()
+            .is_some_and(|period| period.execute_on_apply)
+        {
             execute(
                 world,
                 registry,
@@ -293,7 +299,7 @@ pub(super) fn stack_of(
 /// instead.
 ///
 /// Only a stack: `existing` keeps the spec it was first applied with, and
-/// `spec`'s level, params and source go only to what it chains: its
+/// `spec`'s level, source and context go only to what it chains: its
 /// `on_apply`, or at the limit its overflow.
 pub(super) fn stack(
     world: &mut World,
@@ -310,6 +316,7 @@ pub(super) fn stack(
         return;
     };
     let id = active.def.id;
+    let key = active.def.name.clone();
     if active.stacks >= stacking.limit {
         // At the limit, applying again still refreshes the time, as it says.
         if stacking.reapply == Reapply::Refresh {
@@ -330,6 +337,7 @@ pub(super) fn stack(
         world.trigger(EffectBlocked {
             entity: target,
             id,
+            key: key.clone(),
             reason: Blocked::StackLimit,
         });
         return;
@@ -361,6 +369,7 @@ pub(super) fn stack(
         entity: target,
         effect: existing,
         id,
+        key,
         stacks,
     });
     chain(world, target, spec, &on_apply, depth);

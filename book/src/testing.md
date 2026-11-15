@@ -26,28 +26,8 @@ use bevy_harness::TestApp;
 # #[derive(Attribute)] #[attribute(base = 100.0, min = 0.0)] struct Mana;
 # #[derive(Component, Default, Behaviour)] struct CastFireball;
 #[derive(Ability)]
+#[ability(behaviour::<CastFireball>, cost = Cost::of::<Mana>(20.0), cooldown = 2.0)]
 struct Fireball;
-
-/// The mage's content: the fireball, its cost and its cooldown.
-fn content() -> MettleContent {
-    MettleContent {
-        tags: ["cooldown", "cooldown.fireball"]
-            .into_iter()
-            .map(TagKey::named)
-            .collect(),
-        effects: vec![
-            EffectData::instant("fireball.cost")
-                .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-            EffectData::lasting("fireball.cooldown", 2.0).owner_tag("cooldown.fireball"),
-        ],
-        abilities: vec![
-            AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>())
-                .cost("fireball.cost")
-                .cooldown("fireball.cooldown"),
-        ],
-        ..default()
-    }
-}
 
 /// An app with the mage, granted the fireball.
 fn mage_app() -> (TestApp, Entity) {
@@ -56,8 +36,7 @@ fn mage_app() -> (TestApp, Entity) {
         .with(|app| {
             app.add_attribute::<Mana>()
                 .add_behaviour::<CastFireball>()
-                .add_ability::<Fireball>()
-                .insert_resource(content());
+                .add_ability::<Fireball>();
         })
         .watch_triggered::<ContentRejected>()
         .watch_triggered::<AbilityFailed>()
@@ -104,11 +83,13 @@ and its behaviour's component is on it while it's active.
 
 ## What helps
 
-- **Content in code.** The definitions' builders (`EffectData::instant`,
-  `AbilityData::new`) make a test's content short. Check the game's real
-  content in a test of its own: load it into `MettleContent` as the game
-  does, and assert `check` holds against an app with the game's code added,
-  its `add_effect` and `add_ability` types too.
+- **Add code in `with`.** Effects, abilities and curves are added as the
+  app is built, before it starts: the builder's `with` closure runs before
+  `build` starts the app, so `PreStartup` loads them.
+- **Check content on its own.** A test needs no content: the game's code
+  defines what it tests. Check what data adds and tunes in a test of its
+  own: load it into `MettleContent` as the game does, and assert `check`
+  holds against an app with the game's code added.
 - **Watch what's told.** `watch_triggered::<AbilityFailed>()` records every
   failure, so `assert_triggered` can say why a cast didn't happen. The same
   works for `AttributeChanged<A>`, `EffectApplied` and the rest.

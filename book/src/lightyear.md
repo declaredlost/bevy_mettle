@@ -24,8 +24,9 @@ Both sides add the same plugins, in the same order:
 3. your attributes, and [`replicate_attribute`] for each one clients should
    see;
 4. your behaviours, and [`replicate_input`] for each input they take;
-5. the effects and abilities code names, and the same content, as
-   [Loading data](loading-data.md) shows.
+5. the curves, effects and abilities code defines, the same context data
+   types, and the same content, as
+   [Adding and tuning content](content.md) shows.
 
 ```rust
 # use core::time::Duration;
@@ -55,6 +56,7 @@ struct Aim(Vec2);
 struct CastFireball;
 
 #[derive(Ability)]
+#[ability(behaviour::<CastFireball>, cost = Cost::of::<Mana>(20.0), cooldown = 2.0)]
 struct Fireball;
 
 const TICK: Duration = Duration::from_millis(16);
@@ -240,7 +242,7 @@ messages and replication, and before [`AbilitySystems`].
 Effects, abilities and tags go as their numbers, so a client has to number
 content as its server does. The server tells each client how it numbers its
 content, a [`ContentFingerprint`] of every registry, as it connects, and again
-whenever its content changes (a hot reload). The game's context data types
+whenever its registries are rebuilt: content reloaded, or code hot patched. The game's context data types
 are in it too: they go by number, in order of name, so add the same ones on
 both. A client numbering anything otherwise logs an error and
 triggers [`ContentMismatch`]: load the server's content the way the server
@@ -259,8 +261,9 @@ let mut app = App::new();
 app.add_observer(leave);
 ```
 
-Matching content is told nothing. A server that reloads its content alone
-tells every client it no longer matches; reloaded alike, they match again.
+Matching content is told nothing. A server that reloads its content alone,
+or is hot patched alone, tells every client it no longer matches; changed
+alike, they match again.
 
 ## Pitfalls
 
@@ -271,9 +274,9 @@ tells every client it no longer matches; reloaded alike, they match again.
   test app) panics as that system first runs. Add `TimePlugin`.
 - **The same protocol.** Both sides register the same attributes with
   [`replicate_attribute`], and the same components, in the same order.
-- **The same content.** Effects, abilities and tags go as their numbers,
-  never their definitions or names. Both sides need the same content,
-  loaded the same way, or a number names different things: a client that
+- **The same game.** Effects, abilities and tags go as their numbers,
+  never their definitions or names. Both sides need the same code and the
+  same content, loaded the same way, or a number names different things: a client that
   doesn't is told, by [`ContentMismatch`]. Observe it.
 - **A modifier source without its replica.** An item replicated without a
   `ModifiersReplica` shows no modifiers on a client.

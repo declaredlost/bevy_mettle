@@ -1,33 +1,43 @@
-//! Abilities code names: marker types, their content's names on them, and the
-//! specs they're granted by.
+//! Abilities: marker types that define themselves, and the specs they're
+//! granted by.
 
 use bevy::prelude::*;
 use bevy_mettle_core::registry::{AbilityId, AnyAbility, Keyed, Ref};
 
 use crate::AbilityRegistry;
+use crate::data::AbilityData;
 
-/// An ability code names: a marker type, its content's name on it.
+/// An ability: a marker type that defines itself, by its derive's keys.
 ///
-/// Derive it, add it to the app, and grant or activate it: code names
+/// Derive it, each key on `#[ability(..)]` the [`AbilityData`] builder method
+/// of the same name; add it to the app; and grant and activate it. Code names
 /// abilities without a string, and a misspelled one doesn't compile.
 ///
 /// ```ignore
 /// #[derive(Ability)]
+/// #[ability(behaviour::<CastFireball>, cost = Cost::of::<Mana>(20.0), cooldown = 2.0)]
 /// pub struct Fireball;
 ///
 /// app.add_ability::<Fireball>();
 /// commands.entity(mage).grant_ability(Fireball.level(2.0)).activate_ability(Fireball);
 /// ```
 ///
-/// [`add_ability`](AbilityApp::add_ability) makes content without it fail
-/// its check, so its name is checked once, as content loads. Its builders make
-/// an [`AbilitySpec`].
+/// | Key | Meaning |
+/// |---|---|
+/// | `name = ".."` | Its key: its type's name in `snake_case`, unless it says |
+/// | `define = function` | `fn(AbilityData) -> AbilityData`, defining all of it |
+/// | `key`, `key = value`, `key(a, b)` | `.key()`, `.key(value)`, `.key(a, b)` |
+///
+/// Its builders make an [`AbilitySpec`].
 #[diagnostic::on_unimplemented(
     message = "`{Self}` isn't an ability",
     label = "not an ability",
     note = "derive it: `#[derive(Ability)]`"
 )]
 pub trait Ability: Keyed<Kind = AnyAbility> + Send + Sync + 'static {
+    /// Its definition: `ability`, called by its key, filled in.
+    fn define(ability: AbilityData) -> AbilityData;
+
     /// It, at level 1.
     #[must_use]
     fn spec(self) -> AbilitySpec
@@ -97,18 +107,57 @@ impl AbilitySpec {
     }
 }
 
-/// Adding the abilities code names to an app, which content has to define.
+/// Adding the abilities code defines to an app, one or a tuple at once.
 pub trait AbilityApp {
-    /// Adds the ability `A` code names: content has to define it, or it's
-    /// rejected.
+    /// Adds the ability `A`, defined by its type.
     fn add_ability<A: Ability>(&mut self) -> &mut Self;
+
+    /// Adds each ability of `A`, a tuple of them: `add_abilities::<(Fireball,
+    /// Blink)>()`.
+    fn add_abilities<A: AbilityGroup>(&mut self) -> &mut Self;
 }
 
 impl AbilityApp for App {
     fn add_ability<A: Ability>(&mut self) -> &mut Self {
-        self.world_mut()
-            .get_resource_or_init::<AbilityRegistry>()
-            .name_type::<A>();
+        self.add_abilities::<A>()
+    }
+
+    fn add_abilities<A: AbilityGroup>(&mut self) -> &mut Self {
+        A::add_to(&mut self.world_mut().get_resource_or_init::<AbilityRegistry>());
         self
     }
 }
+
+/// Abilities added at once: an [`Ability`], or a tuple of up to 16.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` isn't an ability, or a tuple of them",
+    label = "not abilities"
+)]
+pub trait AbilityGroup {
+    /// Adds each to `registry`.
+    fn add_to(registry: &mut AbilityRegistry);
+}
+
+impl<A: Ability> AbilityGroup for A {
+    fn add_to(registry: &mut AbilityRegistry) {
+        registry.add::<A>();
+    }
+}
+
+/// `AbilityGroup` for each tuple of them, up to 16.
+macro_rules! abilities {
+    ($first:ident $(, $rest:ident)*) => {
+        impl<$first: AbilityGroup $(, $rest: AbilityGroup)*> AbilityGroup for ($first, $($rest,)*) {
+            fn add_to(registry: &mut AbilityRegistry) {
+                $first::add_to(registry);
+                $($rest::add_to(registry);)*
+            }
+        }
+        abilities!($($rest),*);
+    };
+    () => {};
+}
+
+abilities!(
+    A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15
+);

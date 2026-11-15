@@ -4,9 +4,11 @@
 use bevy_mettle_attribute::modifier::{Operation, Per};
 use bevy_mettle_core::condition::Condition;
 use bevy_mettle_core::registry::{AnyEffect, AttributeId, CurveId, EffectId, Key};
-use bevy_mettle_core::tag::{TagKey, Tags};
+use bevy_mettle_core::tag::Tags;
 
-use super::{EffectDuration, Period, Read, Side, Stacking};
+use std::any::TypeId;
+
+use super::{EffectDuration, Read, Side, Stacking};
 use crate::code::{CalculationId, Changes, ExecutionId, RouteId};
 
 /// An effect as an app has it: its data checked, and what it names numbered.
@@ -28,7 +30,7 @@ pub struct EffectDef {
     /// How long it lasts.
     pub duration: EffectDuration<MagnitudeDef>,
     /// How often it executes, if it does as it lasts.
-    pub period: Option<Period<MagnitudeDef>>,
+    pub period: Option<Period>,
     /// What it changes.
     pub modifiers: Vec<ModifierDef>,
     /// What it captures: the slots its magnitudes' attributes, and its
@@ -112,8 +114,9 @@ pub enum MagnitudeDef {
     Value(f32),
     /// The spec's level.
     Level,
-    /// What the code applying it set, by a tag.
-    Param(TagKey),
+    /// A number field of what the spec's context carries: its type, and
+    /// the field's index in it.
+    Context(TypeId, usize),
     /// The effect's capture in this slot of its
     /// [`captures`](EffectDef::captures).
     Attribute(usize),
@@ -164,4 +167,13 @@ pub struct CaptureDef {
     /// What it's read in, all of it: its effect's tags and its own, as a
     /// hit's attributes are, so modifiers counting for such hits count.
     pub read_in: Tags,
+}
+
+/// How often a lasting effect executes, and whether as it's applied too.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Period {
+    /// Every so many seconds.
+    pub every: MagnitudeDef,
+    /// Whether it executes as it's applied, too.
+    pub execute_on_apply: bool,
 }

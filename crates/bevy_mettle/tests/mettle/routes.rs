@@ -5,7 +5,9 @@ use bevy::prelude::*;
 use bevy_harness::TestApp;
 use bevy_mettle::core::Errors;
 use bevy_mettle::core::registry::AttributeId;
-use bevy_mettle::effect::code::Changes;
+use bevy_mettle::effect::EffectScope;
+use bevy_mettle::effect::code::{CalculationRegistry, Changes, EffectGroup, RouteRegistry};
+use bevy_mettle::effect::context::ContextDataRegistry;
 use bevy_mettle::effect::events::Routed;
 use bevy_mettle::prelude::*;
 
@@ -41,12 +43,24 @@ impl RouteFn for BloodPrice {
     }
 }
 
-/// A hit, dealing damage as content says.
+/// A hit, dealing 40 damage.
 #[derive(Effect)]
+#[effect(route::<IncomingDamage>(40.0))]
 struct Hit;
+
+/// A crushing hit, dealing 80 damage.
+#[derive(Effect)]
+#[effect(route::<IncomingDamage>(80.0))]
+struct Crush;
+
+/// A grazing hit, dealing 10 damage.
+#[derive(Effect)]
+#[effect(route::<IncomingDamage>(10.0))]
+struct Graze;
 
 /// A strike, an effect running [`StrikeDamage`].
 #[derive(Effect)]
+#[effect(execution::<StrikeDamage>)]
 struct Strike;
 
 /// The strike's execution, routing the caster's damage into incoming damage.
@@ -63,6 +77,7 @@ impl ExecutionFn for StrikeDamage {
 
 /// A price paid in life.
 #[derive(Effect)]
+#[effect(route::<BloodPrice>(20.0))]
 struct Price;
 
 /// Damage made more by the source's strength as the effect was made.
@@ -82,10 +97,13 @@ impl RouteFn for Empowered {
 
 /// A smite, routing into [`Empowered`].
 #[derive(Effect)]
+#[effect(route::<Empowered>(2.0))]
 struct Smite;
 
-/// A burn, routing into incoming damage each second.
+/// A burn, routing into incoming damage as it's applied and each second.
 #[derive(Effect)]
+#[effect(lasting = 10.0, period = 1.0, execute_on_apply)]
+#[effect(route::<IncomingDamage>(10.0))]
 struct Searing;
 
 /// An attribute no test adds.
@@ -98,6 +116,7 @@ struct Unrouted;
 
 /// An effect running [`Stray`].
 #[derive(Effect)]
+#[effect(execution::<Stray>)]
 struct Strayed;
 
 /// An execution returning what it's added with: changes however named, into
@@ -145,10 +164,6 @@ impl ExecutionFn for Stray {
     }
 }
 
-/// The blood bolt, as code names it.
-#[derive(Ability)]
-struct Bolt;
-
 /// The shield takes what it can, life the rest, and the source steals a
 /// fifth of what life lost.
 fn route_damage(context: &ExecutionContext, damage: f32) -> Vec<BaseChange> {
@@ -195,6 +210,7 @@ fn check(world: &World, effects: &[EffectData]) -> Result<EffectRegistry, Errors
             executions: world.resource(),
             calculations: world.resource(),
             routes: world.resource(),
+            context: &ContextDataRegistry::default(),
         },
     )
 }
@@ -206,21 +222,20 @@ fn errors(effects: &[EffectData]) -> String {
     check(app.world(), effects).unwrap_err().to_string()
 }
 
-/// `app`'s effect registry, `effects` checked into it.
-fn load(app: &mut App, effects: &[EffectData]) {
-    let registry = check(app.world(), effects).unwrap();
+/// `app`'s effect registry, the effects code defines compiled into it.
+fn load(app: &mut App) {
+    let registry = check(app.world(), &[]).unwrap();
     app.insert_resource(registry);
 }
 
-/// An app with the shield, `effects` and the routers, `E` the effect code
-/// names.
-fn app<E: Effect>(effects: &[EffectData]) -> TestApp {
+/// An app with the shield, the routers and `E`, the effects code defines.
+fn app<E: EffectGroup>() -> TestApp {
     TestApp::builder()
         .plugins(EffectPlugin)
         .with(|app| {
             code(app);
-            app.add_effect::<E>();
-            load(app, effects);
+            app.add_effects::<E>();
+            load(app);
         })
         .build()
 }
@@ -234,13 +249,9 @@ fn shielded(app: &mut TestApp, shield: f32, life: f32) -> Entity {
     actor
 }
 
-fn hit(damage: f32) -> EffectData {
-    EffectData::instant(Key::of::<Hit>()).modifier(EffectModifier::route::<IncomingDamage>(damage))
-}
-
 #[test]
 fn damage_is_routed_through_the_shield_into_life() {
-    let mut app = app::<Hit>(&[hit(40.0)]);
+    let mut app = app::<Hit>();
     app.watch_triggered::<EffectExecuted>();
     let npc = shielded(&mut app, 30.0, 50.0);
     let caster = shielded(&mut app, 0.0, 30.0);
@@ -272,9 +283,7 @@ fn damage_is_routed_through_the_shield_into_life() {
 
 #[test]
 fn an_execution_routes_into_a_route_routed_the_same() {
-    let mut app = app::<Strike>(&[
-        EffectData::instant(Key::of::<Strike>()).execution(Key::of::<StrikeDamage>())
-    ]);
+    let mut app = app::<Strike>();
     let npc = shielded(&mut app, 5.0, 50.0);
     let caster = actor(&mut app, [ModifierSpec::flat::<Damage>(15.0)]);
     app.world_mut().apply_effect(npc, Strike.source(caster));
@@ -286,10 +295,10 @@ fn an_execution_routes_into_a_route_routed_the_same() {
 
 #[test]
 fn what_an_execution_changes_is_told_as_it_was_kept() {
-    let mut app = app::<Hit>(&[hit(80.0)]);
+    let mut app = app::<Crush>();
     app.watch_triggered::<EffectExecuted>();
     let npc = shielded(&mut app, 0.0, 50.0);
-    app.world_mut().apply_effect(npc, Hit);
+    app.world_mut().apply_effect(npc, Crush);
     app.tick();
     assert!(close(get::<Life>(&app, npc), 0.0));
     // 80 routed, but life had only 50 to lose; no source to steal it.
@@ -310,18 +319,18 @@ fn routing_is_single_pass() {
         .plugins(EffectPlugin)
         .with(|app| {
             code(app);
-            app.add_effect::<Hit>()
+            app.add_effect::<Graze>()
                 .add_route(IncomingDamage(|_, damage| {
                     vec![
                         BaseChange::route::<BloodPrice>(damage),
                         BaseChange::of::<Mana>(Operation::Flat, -damage),
                     ]
                 }));
-            load(app, &[hit(10.0)]);
+            load(app);
         })
         .build();
     let npc = shielded(&mut app, 0.0, 50.0);
-    app.world_mut().apply_effect(npc, Hit);
+    app.world_mut().apply_effect(npc, Graze);
     app.tick();
     assert!(close(get::<Mana>(&app, npc), 20.0));
     assert!(close(get::<Life>(&app, npc), 50.0), "not routed again");
@@ -329,9 +338,7 @@ fn routing_is_single_pass() {
 
 #[test]
 fn a_preview_sees_what_routes_are_routed_into() {
-    let price =
-        EffectData::instant(Key::of::<Price>()).modifier(EffectModifier::route::<BloodPrice>(20.0));
-    let mut app = app::<Price>(&[price]);
+    let mut app = app::<Price>();
     let mage = shielded(&mut app, 0.0, 50.0);
     let changes = app.world().preview_effect(mage, &Price.spec()).unwrap();
     assert_eq!(changes.len(), 1);
@@ -345,12 +352,13 @@ fn a_preview_sees_what_routes_are_routed_into() {
 
 #[test]
 fn a_route_is_routed_into_flat_by_what_executes_and_never_read() {
-    let lasting =
-        EffectData::lasting("aura", 5.0).modifier(EffectModifier::route::<IncomingDamage>(1.0));
+    let lasting = EffectData::new("aura")
+        .lasting(5.0)
+        .route::<IncomingDamage>(1.0);
     let mut additive = EffectModifier::route::<IncomingDamage>(0.5);
     additive.op = Operation::Additive;
-    let scaled = EffectData::instant("scaled").modifier(additive);
-    let reads = EffectData::instant("reads").modifier(EffectModifier::new::<Strength>(
+    let scaled = EffectData::new("scaled").modifier(additive);
+    let reads = EffectData::new("reads").modifier(EffectModifier::new::<Strength>(
         Operation::Flat,
         Magnitude::Attribute(AttributeRead {
             attribute: Key::from_static("incoming_damage"),
@@ -360,9 +368,10 @@ fn a_route_is_routed_into_flat_by_what_executes_and_never_read() {
             tags: Tags::new(),
         }),
     ));
-    let periodic = EffectData::lasting("bleed", 5.0)
-        .period(1.0, false)
-        .modifier(EffectModifier::route::<IncomingDamage>(1.0));
+    let periodic = EffectData::new("bleed")
+        .lasting(5.0)
+        .period(1.0)
+        .route::<IncomingDamage>(1.0);
     let errors = errors(&[lasting, scaled, reads, periodic]);
     for expected in [
         "route `incoming_damage` on a lasting effect with no period",
@@ -384,8 +393,8 @@ fn a_modifier_changes_an_attribute_or_a_route() {
     let mut neither = EffectModifier::route::<IncomingDamage>(1.0);
     neither.route = None;
     let errors = errors(&[
-        EffectData::instant("both").modifier(both),
-        EffectData::instant("neither").modifier(neither),
+        EffectData::new("both").modifier(both),
+        EffectData::new("neither").modifier(neither),
     ]);
     for expected in [
         "a modifier of both an attribute and a route: it's one or the other (in `both`)",
@@ -393,52 +402,6 @@ fn a_modifier_changes_an_attribute_or_a_route() {
     ] {
         assert!(errors.contains(expected), "{expected} not in: {errors}");
     }
-}
-
-/// The behaviour a blood bolt runs.
-#[derive(Component, Default, Behaviour)]
-struct CastBolt;
-
-#[test]
-fn an_ability_paid_through_a_route_is_checked_as_routed() {
-    let price =
-        EffectData::instant("bolt.cost").modifier(EffectModifier::route::<BloodPrice>(30.0));
-    let mut app = TestApp::builder()
-        .plugins((EffectPlugin, AbilityPlugin))
-        .with(|app| {
-            code(app);
-            app.add_behaviour::<CastBolt>().add_ability::<Bolt>();
-            load(app, &[price]);
-        })
-        .build();
-    let world = app.world();
-    let abilities = world
-        .resource::<AbilityRegistry>()
-        .rebuild(
-            &[AbilityData::new(Key::of::<Bolt>(), Key::of::<CastBolt>()).cost("bolt.cost")],
-            &[],
-            AbilityScope {
-                tags: &tags(),
-                effects: world.resource(),
-                behaviours: world.resource(),
-            },
-        )
-        .unwrap();
-    app.insert_resource(abilities);
-    let mage = shielded(&mut app, 0.0, 20.0);
-    let bolt = app.world_mut().grant_ability(mage, Bolt).unwrap();
-    app.tick();
-    // 30 life to pay, 20 to pay it with.
-    assert!(!app.world().can_afford(bolt));
-    assert_eq!(
-        app.world_mut().activate_ability(mage, Bolt),
-        Err(Failure::Cost)
-    );
-    set_base::<Life>(&mut app, mage, 50.0);
-    app.tick();
-    assert!(app.world_mut().activate_ability(mage, Bolt).is_ok());
-    app.tick();
-    assert!(close(get::<Life>(&app, mage), 20.0));
 }
 
 /// An actor with a shield of 5 and 50 life, struck by a [`Stray`] running
@@ -449,10 +412,7 @@ fn strayed(run: fn(&ExecutionContext) -> Vec<BaseChange>) -> (TestApp, Entity) {
         .with(move |app| {
             code(app);
             app.add_execution(Stray(run)).add_effect::<Strayed>();
-            load(
-                app,
-                &[EffectData::instant(Key::of::<Strayed>()).execution(Key::of::<Stray>())],
-            );
+            load(app);
         })
         .build();
     let npc = shielded(&mut app, 5.0, 50.0);
@@ -489,24 +449,13 @@ fn what_an_execution_routes_into_undeclared_is_dropped() {
     assert!(close(get::<Mana>(&app, npc), 25.0), "the rest kept");
 }
 
-/// What `name`'s effect captures, as `registry` compiled it: each capture's
-/// attribute and side.
-fn captured(registry: &EffectRegistry, name: &str) -> Vec<(AttributeId, Side)> {
-    let def = registry.get(registry.id(name).unwrap()).unwrap();
-    def.captures
-        .iter()
-        .map(|capture| (capture.attribute, capture.from))
-        .collect()
-}
-
 #[test]
 fn an_effect_captures_what_the_routes_it_routes_into_capture() {
     let mut app = App::new();
     code(&mut app);
-    app.add_route(Empowered);
-    let strike = EffectData::instant("strike").execution(Key::of::<StrikeDamage>());
-    let registry = check(app.world(), &[strike]).unwrap();
-    let def = registry.get(registry.id("strike").unwrap()).unwrap();
+    app.add_route(Empowered).add_effect::<Strike>();
+    let registry = check(app.world(), &[]).unwrap();
+    let def = registry.get(registry.id_of::<Strike>().unwrap()).unwrap();
     let routes = app.world().resource::<RouteRegistry>();
     let incoming = routes.id_of::<IncomingDamage>().unwrap();
     assert_eq!(
@@ -519,7 +468,10 @@ fn an_effect_captures_what_the_routes_it_routes_into_capture() {
     );
     let shield = app.world().attribute_id::<Shield>().unwrap();
     assert_eq!(
-        captured(&registry, "strike"),
+        def.captures
+            .iter()
+            .map(|capture| (capture.attribute, capture.from))
+            .collect::<Vec<_>>(),
         [(id::<Damage>(), Side::Source), (shield, Side::Target)],
         "its own and incoming damage's, not empowered's strength"
     );
@@ -530,10 +482,9 @@ fn a_route_capturing_what_isnt_added_rejects_only_what_routes_into_it() {
     let mut app = App::new();
     code(&mut app);
     app.add_route(Broken).add_execution(Breaking);
-    let strike = EffectData::instant("strike").execution(Key::of::<StrikeDamage>());
-    let by_modifier =
-        EffectData::instant("by_modifier").modifier(EffectModifier::route::<Broken>(1.0));
-    let by_execution = EffectData::instant("by_execution").execution(Key::of::<Breaking>());
+    let strike = EffectData::new("strike").execution::<StrikeDamage>();
+    let by_modifier = EffectData::new("by_modifier").route::<Broken>(1.0);
+    let by_execution = EffectData::new("by_execution").execution::<Breaking>();
     let errors = check(app.world(), &[strike.clone(), by_modifier, by_execution])
         .unwrap_err()
         .to_string();
@@ -552,7 +503,7 @@ fn an_execution_routing_into_a_route_never_added_is_rejected() {
     let mut app = App::new();
     code(&mut app);
     app.add_execution(Lost);
-    let lost = EffectData::instant("lost").execution(Key::of::<Lost>());
+    let lost = EffectData::new("lost").execution::<Lost>();
     let errors = check(app.world(), &[lost]).unwrap_err().to_string();
     assert!(
         errors.contains(
@@ -582,9 +533,7 @@ fn a_router_reads_what_it_captures_as_the_effect_was_made() {
         .with(|app| {
             code(app);
             app.add_route(Empowered).add_effect::<Smite>();
-            let smite = EffectData::instant(Key::of::<Smite>())
-                .modifier(EffectModifier::route::<Empowered>(2.0));
-            load(app, &[smite]);
+            load(app);
         })
         .build();
     let npc = shielded(&mut app, 0.0, 50.0);
@@ -613,10 +562,7 @@ fn a_router_follows_what_it_captures_live_each_period() {
         .with(|app| {
             code(app);
             app.add_effect::<Searing>();
-            let searing = EffectData::lasting(Key::of::<Searing>(), 10.0)
-                .period(1.0, true)
-                .modifier(EffectModifier::route::<IncomingDamage>(10.0));
-            load(app, &[searing]);
+            load(app);
         })
         .build();
     let npc = shielded(&mut app, 15.0, 50.0);

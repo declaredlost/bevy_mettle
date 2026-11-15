@@ -20,7 +20,7 @@ pub trait EffectCommands {
 
     /// Takes every effect applied under `activation` off this actor: what a
     /// rejected prediction does.
-    fn remove_activation(&mut self, activation: Activation) -> &mut Self;
+    fn remove_effects_under(&mut self, activation: Activation) -> &mut Self;
 }
 
 impl EffectCommands for EntityCommands<'_> {
@@ -39,10 +39,10 @@ impl EffectCommands for EntityCommands<'_> {
         })
     }
 
-    fn remove_activation(&mut self, activation: Activation) -> &mut Self {
+    fn remove_effects_under(&mut self, activation: Activation) -> &mut Self {
         self.queue(move |entity: EntityWorldMut| {
             let target = entity.id();
-            engine::remove_activation(entity.into_world_mut(), target, activation);
+            engine::remove_under(entity.into_world_mut(), target, activation);
         })
     }
 }
@@ -57,6 +57,9 @@ pub trait EffectWorld {
 
     /// Takes every effect tagged any of `tags` off `target`.
     fn remove_effects(&mut self, target: Entity, tags: &Tags);
+
+    /// Takes every effect applied under `activation` off `target`.
+    fn remove_effects_under(&mut self, target: Entity, activation: Activation);
 
     /// The server confirmed `activation`: what was predicted under it stays,
     /// until the server's own effects replace it; its base changes, and the
@@ -93,6 +96,10 @@ impl EffectWorld for World {
 
     fn remove_effects(&mut self, target: Entity, tags: &Tags) {
         engine::remove_tagged(self, target, tags, 0);
+    }
+
+    fn remove_effects_under(&mut self, target: Entity, activation: Activation) {
+        engine::remove_under(self, target, activation);
     }
 
     fn confirm_prediction(&mut self, activation: Activation) {

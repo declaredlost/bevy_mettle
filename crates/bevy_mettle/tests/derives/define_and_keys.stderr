@@ -1,0 +1,5 @@
+error: `define` defines all of it: the other keys go in the function
+  --> tests/derives/define_and_keys.rs:10:10
+   |
+10 | #[effect(define = burn, period = 0.5)]
+   |          ^^^^^^

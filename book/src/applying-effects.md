@@ -1,12 +1,11 @@
 # Applying effects
 
 An effect's definition says what it does. To use it, you apply a spec of it
-to a target: this effect, at this level, from this caster, with these
-numbers. Code names the effect by its type, as [Defining
-effects](effects.md#naming-effects-in-code) shows: `#[derive(Effect)] struct
-Burning;`, added with `app.add_effect::<Burning>()`. A lasting effect then
-becomes an entity of its own, attached to its target, until it runs out or
-something takes it off.
+to a target: this effect, at this level, from this caster, with this
+context. Code names the effect by its type, as [Defining
+effects](effects.md) shows: `#[derive(Effect)] struct Burning;`, added with
+`app.add_effect::<Burning>()`. A lasting effect then becomes an entity of its
+own, attached to its target, until it runs out or something takes it off.
 
 ## Specs
 
@@ -16,44 +15,47 @@ which effect, and these fields:
 | Field | What it is |
 |---|---|
 | `level` | What [curves](curves.md) are read at: 1 unless it says |
-| `params` | Numbers the applying code sets, for `Param` magnitudes |
-| `context` | What else it carries: who applied it, what struck, where. See [Context](#context) |
+| `context` | What it carries: who applied it, how hard it hits, what struck, where. See [Context](#context) |
 | `snapshot` | Its source's attributes as it was made, if the code making it took them: see [Snapshots](#snapshots) |
 | `activation` | The ability activation it's applied under, if any: see [Prediction](prediction.md) |
 
 An effect type is its own spec, at level 1 from no one: `Burning` is
-`EffectSpec::of::<Burning>()`. Its builders make a spec with more set. A
-param is named by a [tag](tags.md), here `param.damage` as a type:
+`EffectSpec::of::<Burning>()`. Its builders, `level`, `source` and `with`,
+make a spec with more set:
 
 ```rust
 # use bevy::prelude::*;
+# use bevy::ecs::entity::MapEntities;
 # use bevy_mettle::prelude::*;
+# use serde::{Deserialize, Serialize};
 # let caster = Entity::PLACEHOLDER;
 #[derive(Effect)]
+#[effect(lasting = 4.0)]
 struct Burning;
 
-#[derive(Tag)]
-struct Param;
+/// How hard a burn hits.
+#[derive(Reflect, Clone, PartialEq, Serialize, Deserialize, MapEntities)]
+#[reflect(ContextData)]
+struct Damage {
+    amount: f32,
+}
 
-#[derive(Tag)]
-#[tag(parent = Param, name = "damage")]
-struct DamageParam; // "param.damage"
-
-let spec = Burning.level(3.0).param(DamageParam, -5.0).source(caster);
+let spec = Burning.level(3.0).with(Damage { amount: 5.0 }).source(caster);
 assert_eq!(spec.level, 3.0);
-assert_eq!(spec.param_value(DamageParam), Some(-5.0));
+assert!(spec.context.get::<Damage>() == Some(&Damage { amount: 5.0 }));
 assert_eq!(spec.context.source, Some(caster));
 assert_eq!(EffectSpec::from(Burning), EffectSpec::of::<Burning>());
 ```
 
-Setting a param again replaces it. A spec names its effect by type, never by
-name or number: an effect code applies has a type. Which effect a spec
-applies is resolved to its number as it's applied.
+A spec names its effect by type, never by name or number: an effect code
+applies has a type. Which effect a spec applies is resolved to its number
+as it's applied.
 
 ## Context
 
-A spec's [`EffectContext`] is what the applying code knew beyond numbers.
-It's Unreal's `FGameplayEffectContext`. Its one field is `source`, who's
+A spec's [`EffectContext`] is what the applying code knows that the effect
+doesn't. It's Unreal's `FGameplayEffectContext`, and the only way a value
+reaches one application and not the next. Its one field is `source`, who's
 responsible: the archer. Source tags, attribute captures and stacking by
 source read it, set with `.source(archer)`.
 
@@ -71,17 +73,21 @@ Everything else is *context data*, one of each type, added with
 Which run of an ability applied it is the spec's `activation`.
 
 A game adds its own with a [`ContextData`] type, Unreal's context
-subclassed. It's for **structured** data, which none of the rest says:
+subclassed. Any type deriving `Reflect`, `Clone`, `PartialEq`, `Serialize`,
+`Deserialize` and `MapEntities` is context data. Reflect it as
+`ContextData`, and register it with the app, as Bevy registers a component.
+It carries two kinds of thing:
 
-- A flag, a critical or a headshot, is a [tag](tags.md), which conditions,
-  blocking and cues see.
-- A number is a [param](#specs).
-- What struck and what it came from are [`Causer`] and [`SourceObject`].
+- **Numbers** for the effect's magnitudes, as Unreal's `SetByCaller`: how
+  hard this fireball hit. An `f32` field, read by
+  `Magnitude::context::<Damage>("amount")`, as [Magnitudes](effects.md#magnitudes)
+  shows.
+- **Structured data** for code: the targets a chain of lightning already
+  struck, say.
 
-What's left is a game's own shape: the targets a chain of lightning already
-struck, say. Any type deriving `Reflect`, `Clone`, `PartialEq`,
-`Serialize`, `Deserialize` and `MapEntities` is context data. Reflect it as
-`ContextData`, and register it with the app, as Bevy registers a component:
+A flag, a critical or a headshot, is a [tag](tags.md) instead, which
+conditions, blocking and cues see. What struck and what it came from are
+[`Causer`] and [`SourceObject`].
 
 ```rust
 # use bevy::prelude::*;
@@ -138,17 +144,19 @@ Apply a spec through commands, from any system:
 
 ```rust
 # use bevy::prelude::*;
+# use bevy::ecs::entity::MapEntities;
 # use bevy_mettle::prelude::*;
+# use serde::{Deserialize, Serialize};
 # #[derive(Component)] struct Mage;
-# #[derive(Effect)] struct Burning;
-# #[derive(Tag)] struct Param;
-# #[derive(Tag)] #[tag(parent = Param, name = "damage")] struct DamageParam;
+# #[derive(Effect)] #[effect(lasting = 4.0)] struct Burning;
+# #[derive(Reflect, Clone, PartialEq, Serialize, Deserialize, MapEntities)]
+# #[reflect(ContextData)] struct Damage { amount: f32 }
 /// Sets every mage within reach on fire.
 fn ignite(mages: Query<Entity, With<Mage>>, mut commands: Commands) {
     for mage in &mages {
         commands
             .entity(mage)
-            .apply_effect(Burning.param(DamageParam, -5.0));
+            .apply_effect(Burning.with(Damage { amount: 5.0 }));
     }
 }
 ```
@@ -160,7 +168,7 @@ on the world, at once, from an exclusive system or a test, with
 Applying checks, in order:
 
 1. There's an [`EffectRegistry`], and it has the effect: its type was added
-   with `add_effect`, or its number is one content has. If not, nothing
+   with `add_effect`, or its number is one content added. If not, nothing
    happens but a warning.
 2. The target owns tags. Any actor with an attribute's `Base` does. Without
    [`OwnedTags`], nothing happens but a warning.
@@ -177,7 +185,7 @@ Then:
 - **Anything else** spawns an active effect. Its duration and period are
   worked out from the spec. One that would last 0 seconds or less, or not a
   number, isn't applied, with a warning. If its `ongoing` requirement holds,
-  it starts counting, and executes at once if its period says `on_apply`.
+  it starts counting, and executes at once if it says `execute_on_apply`.
   [`EffectApplied`] is triggered, and its `on_apply` effects are chained.
 
 ## The burning mage
@@ -186,44 +194,43 @@ This mage burns for 5 every half second, gets wet, and dries off:
 
 ```rust
 # use bevy::prelude::*;
+# use bevy::ecs::entity::MapEntities;
 # use bevy::time::TimeUpdateStrategy;
 # use bevy_mettle::prelude::*;
+# use serde::{Deserialize, Serialize};
 # #[derive(Attribute)]
 # #[attribute(base = 100.0, min = 0.0, max = MaxLife)]
 # struct Life;
 # #[derive(Attribute)]
 # #[attribute(base = 100.0)]
 # struct MaxLife;
+# #[derive(Tag)] #[tag(name = "effect")] struct Effects;
+# #[derive(Tag)] #[tag(parent = Effects)] struct Affliction;
+# #[derive(Tag)] #[tag(parent = Affliction, name = "burning")] struct Burns;
 # #[derive(Tag)] struct State;
 # #[derive(Tag)] #[tag(parent = State, name = "burning")] struct OnFire;
 # #[derive(Tag)] #[tag(parent = State)] struct Wet;
-# #[derive(Tag)] struct Param;
-# #[derive(Tag)] #[tag(parent = Param, name = "damage")] struct DamageParam;
-# #[derive(Effect)] struct Burning;
-# fn tags() -> Vec<TagKey> {
-#     [
-#         "effect", "effect.affliction", "effect.affliction.burning",
-#         "immune", "immune.fire", "param", "param.damage",
-#         "state", "state.burning", "state.wet",
-#     ]
-#     .map(TagKey::named)
-#     .to_vec()
-# }
-# fn burning() -> EffectData {
-#     EffectData::lasting(Key::of::<Burning>(), 4.0)
-#         .tag("effect.affliction.burning")
-#         .period(0.5, true)
-#         .modifier(EffectModifier::new::<Life>(Operation::Flat, Magnitude::param("param.damage")))
-#         .owner_tag("state.burning")
-#         .require(!Condition::owner_has("immune.fire"))
-#         .ongoing(!Condition::owner_has("state.wet"))
-# }
+# #[derive(Tag)] struct Immune;
+# #[derive(Tag)] #[tag(parent = Immune, name = "fire")] struct ImmuneToFire;
+# #[derive(Reflect, Clone, PartialEq, Serialize, Deserialize, MapEntities)]
+# #[reflect(ContextData)] struct Damage { amount: f32 }
+# #[derive(Effect)]
+# #[effect(lasting = 4.0, period = 0.5, execute_on_apply)]
+# #[effect(tag = Burns, owner_tag = OnFire)]
+# #[effect(flat::<Life>(Magnitude::context::<Damage>("amount").times(-1.0)))]
+# #[effect(require = !Condition::owner_has(ImmuneToFire))]
+# #[effect(ongoing = !Condition::owner_has(Wet))]
+# struct Burning;
 # let mut app = App::new();
 # app.add_plugins((MinimalPlugins, MettlePlugins))
 #     .add_attribute::<Life>()
 #     .add_attribute::<MaxLife>()
+#     .add_tag::<Burns>()
+#     .add_tag::<OnFire>()
+#     .add_tag::<Wet>()
+#     .add_tag::<ImmuneToFire>()
+#     .register_type::<Damage>()
 #     .add_effect::<Burning>()
-#     .insert_resource(MettleContent { tags: tags(), effects: vec![burning()], ..default() })
 #     // One fixed step, 1/64 of a second, each update.
 #     .insert_resource(TimeUpdateStrategy::FixedTimesteps(1));
 # app.finish();
@@ -242,7 +249,7 @@ let mage = app
 let life = |app: &App| app.world().get::<Base<Life>>(mage).unwrap().get();
 
 app.world_mut()
-    .apply_effect(mage, Burning.param(DamageParam, -5.0));
+    .apply_effect(mage, Burning.with(Damage { amount: 5.0 }));
 assert_eq!(life(&app), 95.0, "once as it's applied");
 
 run(&mut app, 1.0);
@@ -299,25 +306,17 @@ read as they're needed, either way.
 #[derive(Attribute)]
 struct SpellPower;
 
-#[derive(Effect)]
-#[effect(name = "fireball.hit")]
-struct FireballHit;
-
 /// As much damage as the caster has spell power.
-fn hit() -> EffectData {
-    EffectData::instant(Key::of::<FireballHit>()).modifier(EffectModifier::new::<Life>(
-        Operation::Flat,
-        Magnitude::source::<SpellPower>().times(-1.0),
-    ))
-}
+#[derive(Effect)]
+#[effect(name = "fireball.hit", flat::<Life>(Magnitude::source::<SpellPower>().times(-1.0)))]
+struct FireballHit;
 
 let mut app = App::new();
 app.add_plugins((MinimalPlugins, MettlePlugins))
 #   .insert_resource(TimeUpdateStrategy::FixedTimesteps(1))
     .add_attribute::<Life>()
     .add_attribute::<SpellPower>()
-    .add_effect::<FireballHit>()
-    .insert_resource(MettleContent { effects: vec![hit()], ..default() });
+    .add_effect::<FireballHit>();
 app.update();
 let caster = app.world_mut().spawn(Base::<SpellPower>::new(30.0)).id();
 let mage = app.world_mut().spawn(Base::<Life>::default()).id();
@@ -380,6 +379,7 @@ despawn the target, and its effects go with it.
 [`ActiveEffect`] tells you how it stands:
 
 - `spec()`: what was applied.
+- `is::<E>()`: whether it's of the effect `E`.
 - `def()` and `id()`: its definition, and its number, an [`EffectId`].
 - `stacks()`: how many stacks of it there are.
 - `remaining()`: the seconds it has left, or `None` if it's infinite.
@@ -415,27 +415,24 @@ Take effects off by their tags, or one by one, by despawning it:
 ```rust
 # use bevy::prelude::*;
 # use bevy_mettle::prelude::*;
+# #[derive(Tag)] #[tag(name = "effect")] struct Effects;
+# #[derive(Tag)] #[tag(parent = Effects)] struct Affliction;
 #[derive(Effect)]
-#[effect(name = "fireball.cooldown")]
-struct FireballCooldown;
+#[effect(infinite)]
+struct Ward;
 
 /// Cleanses every affliction off whoever drinks a potion.
 fn cleanse(drinkers: Query<Entity, Added<Drinking>>, mut commands: Commands) {
-    let afflictions: Tags = ["effect.affliction"].into_iter().collect();
+    let afflictions = Tags::from_iter([Affliction]);
     for drinker in &drinkers {
         commands.entity(drinker).remove_effects(afflictions.clone());
     }
 }
 
-/// Ends fireball's cooldown early, as a reset rune does.
-fn reset(
-    effects: Query<(Entity, &ActiveEffect)>,
-    registry: Res<EffectRegistry>,
-    mut commands: Commands,
-) {
-    let cooldown = registry.id_of::<FireballCooldown>();
+/// Breaks every ward, as a dispel does.
+fn dispel(effects: Query<(Entity, &ActiveEffect)>, mut commands: Commands) {
     for (effect, active) in &effects {
-        if Some(active.id()) == cooldown {
+        if active.is::<Ward>() {
             commands.entity(effect).despawn();
         }
     }
@@ -451,10 +448,9 @@ the world. Either way, the effect's tags and modifiers are taken back,
 ## What's told
 
 Effects trigger entity events on their target, for cues, sounds and
-abilities to observe. Each names its effect by number, `id`, an
-[`EffectId`]; compare it with the registry's number for a type,
-`registry.id_of::<Burning>()`, or look up its name with
-`registry.name(id)` for a log:
+abilities to observe. Each names its effect: `is::<Burning>()` says whether
+it's of that type, `key` is its key, for a log, and `id` its number, an
+[`EffectId`].
 
 | Event | When |
 |---|---|
@@ -464,21 +460,30 @@ abilities to observe. Each names its effect by number, `id`, an
 | [`EffectExecuted`] | An effect changed bases: an instant one applied, or a period came round. `changes` says what it changed the target's bases by, `source_changes` its source's, and `routed` what it routed into each [route](effect-code.md#routes) |
 | [`EffectRemoved`] | An active effect came off: `expired` says if it ran out of time |
 
-Observe them for every actor, or for one:
+What an effect does beyond its definition goes in an observer of these:
+spawning flames as a burn starts, a sound as a ward breaks, a summon as a
+curse runs out. An effect's definition says what it changes; its observers
+do the rest. Observe them for every actor, or for one:
 
 ```rust
 # use bevy::prelude::*;
 # use bevy_mettle::prelude::*;
 #[derive(Effect)]
+#[effect(lasting = 4.0)]
 struct Burning;
 
 #[derive(Effect)]
+#[effect(infinite)]
 struct Ward;
 
-/// Plays a sizzle whenever anything starts burning.
-fn sizzle(applied: On<EffectApplied>, registry: Res<EffectRegistry>) {
-    if registry.id_of::<Burning>() == Some(applied.id) {
-        // Play the sound on `applied.entity`.
+/// Flames, for as long as something burns.
+#[derive(Component)]
+struct Flames;
+
+/// Sets flames on whatever starts burning.
+fn ignite(applied: On<EffectApplied>, mut commands: Commands) {
+    if applied.is::<Burning>() {
+        commands.spawn((Flames, ChildOf(applied.entity)));
     }
 }
 
@@ -486,14 +491,14 @@ fn spawn_mage(mut commands: Commands) {
     commands
         .spawn(Base::<Life>::default())
         // Only this mage's ward breaking.
-        .observe(|removed: On<EffectRemoved>, registry: Res<EffectRegistry>| {
-            if registry.id_of::<Ward>() == Some(removed.id) && !removed.expired {
+        .observe(|removed: On<EffectRemoved>| {
+            if removed.is::<Ward>() && !removed.expired {
                 // Flash the broken ward.
             }
         });
 }
 # #[derive(Attribute)] #[attribute(base = 100.0)] struct Life;
-# App::new().add_observer(sizzle).add_systems(Startup, spawn_mage);
+# App::new().add_observer(ignite).add_systems(Startup, spawn_mage);
 ```
 
 ## Previewing

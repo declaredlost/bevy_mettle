@@ -11,11 +11,15 @@ use bevy::prelude::*;
 use bevy::reflect::TypeRegistry;
 use bevy::state::app::StatesPlugin;
 use bevy_harness::{TestApp, TestWorld};
+use bevy_mettle_ability::AbilityScope;
 use bevy_mettle_ability::data::NetExecution;
+use bevy_mettle_ability::net::{AbilityCancelRequest, AbilityReplica, AbilityRequest};
 use bevy_mettle_ability::prelude::*;
 use bevy_mettle_attribute::prelude::*;
 use bevy_mettle_core::prelude::*;
+use bevy_mettle_effect::EffectScope;
 use bevy_mettle_effect::context::ContextDataRegistry;
+use bevy_mettle_effect::net::EffectReplica;
 use bevy_mettle_effect::prelude::*;
 use bevy_mettle_lightyear::prelude::*;
 use bevy_replicon::shared::server_entity_map::ServerEntityMap;
@@ -35,55 +39,83 @@ const SERVER: SocketAddr = SocketAddr::new(core::net::IpAddr::V4(Ipv4Addr::LOCAL
 #[attribute(base = 30.0, min = 0.0)]
 struct Mana;
 
+/// 20 mana, then a second before it's cast again; not while stunned.
 #[derive(Ability)]
+#[ability(behaviour::<Cast>, tag = "ability", cost = Cost::of::<Mana>(20.0), cooldown = 1.0)]
+#[ability(require = !Condition::owner_has("state.stunned"))]
+#[ability(end_if = Condition::owner_has("state.stunned"))]
 struct Fireball;
 
+/// Aimed, and 20 mana.
 #[derive(Ability)]
+#[ability(behaviour::<Shoot>, cost = Cost::of::<Mana>(20.0))]
 struct Shot;
 
 /// Run by the server alone: a client's ask, sent and not run.
 #[derive(Ability)]
+#[ability(behaviour::<Smiting>, cost = Cost::of::<Mana>(20.0), net = NetExecution::ServerOnly)]
 struct Smite;
 
 /// Run by the server, then by its owning client as the server says.
 #[derive(Ability)]
+#[ability(behaviour::<Warding>, cost = Cost::of::<Mana>(20.0))]
+#[ability(trigger = Trigger::Event(TagKey::named("event.ward")))]
+#[ability(net = NetExecution::ServerInitiated)]
 struct Ward;
 
 /// Run where it's activated, and never sent.
 #[derive(Ability)]
+#[ability(behaviour::<Zooming>, net = NetExecution::LocalOnly)]
 struct Zoom;
 
 /// Predicted, and sending `event.spark` under its activation as it starts.
 #[derive(Ability)]
+#[ability(behaviour::<Flaring>, cost = Cost::of::<Mana>(20.0))]
+#[ability(require = !Condition::owner_has("state.stunned"))]
 struct Flare;
 
 /// Predicted, and triggered by `event.spark`.
 #[derive(Ability)]
+#[ability(behaviour::<Sparking>, trigger = Trigger::Event(TagKey::named("event.spark")))]
 struct Spark;
 
 /// Server-initiated, triggered by `event.beacon`, and flaring as it starts:
 /// sending `event.spark` under its activation, the server's.
 #[derive(Ability)]
+#[ability(behaviour::<Flaring>, trigger = Trigger::Event(TagKey::named("event.beacon")))]
+#[ability(net = NetExecution::ServerInitiated)]
 struct Beacon;
 
 /// Local only, triggered by `event.lens`.
 #[derive(Ability)]
+#[ability(behaviour::<Zooming>, trigger = Trigger::Event(TagKey::named("event.lens")))]
+#[ability(net = NetExecution::LocalOnly)]
 struct Lens;
 
 /// Local only, triggered as `state.aiming` is added.
 #[derive(Ability)]
+#[ability(behaviour::<Zooming>, trigger = Trigger::TagAdded(TagKey::named("state.aiming")))]
+#[ability(net = NetExecution::LocalOnly)]
 struct Scope;
 
-#[derive(Effect)]
-#[effect(name = "fireball.cost")]
-struct FireballCost;
+/// Predicted, its behaviour draining its actor as it starts.
+#[derive(Ability)]
+#[ability(behaviour::<Draining>)]
+struct Strike;
 
+/// 20 mana off, with a one-shot cue.
 #[derive(Effect)]
-#[effect(name = "fireball.cooldown")]
-struct FireballCooldown;
+#[effect(flat::<Mana>(-20.0), cue = "cue.hit")]
+struct Drain;
 
-/// Half its caster's mana, snapshotted: only one test's content has it.
+/// A second's cooldown of the fireball, with a lasting cue.
 #[derive(Effect)]
+#[effect(lasting = 1.0, owner_tag = "cooldown.fireball", cue = "cue.cooling")]
+struct Cooling;
+
+/// Half its caster's mana, snapshotted.
+#[derive(Effect)]
+#[effect(infinite, flat::<Mana>(Magnitude::source::<Mana>().times(0.5)))]
 struct Siphon;
 
 #[derive(Component, Default, Behaviour)]
@@ -104,6 +136,9 @@ struct Flaring;
 #[derive(Component, Default, Behaviour)]
 struct Sparking;
 
+#[derive(Component, Default, Behaviour)]
+struct Draining;
+
 /// A flare, as it starts on either side: sends `event.spark` to its actor
 /// under its activation.
 fn flare(add: On<Add<Flaring>>, active: Query<&ActiveAbility>, mut commands: Commands) {
@@ -113,6 +148,17 @@ fn flare(add: On<Add<Flaring>>, active: Query<&ActiveAbility>, mut commands: Com
     let event =
         GameplayEvent::new(active.actor, TagKey::named("event.spark")).under(active.activation);
     commands.trigger(event);
+}
+
+/// A strike, as it starts on either side: drains its actor under its
+/// activation.
+fn drain(add: On<Add<Draining>>, active: Query<&ActiveAbility>, mut commands: Commands) {
+    let Ok(active) = active.get(add.entity) else {
+        return;
+    };
+    let actor = active.actor;
+    let spec = active.effect_spec::<Drain>();
+    commands.entity(actor).apply_effect(spec);
 }
 
 /// Where a shot is aimed: how far along. Sent from clients.
@@ -170,7 +216,9 @@ fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
         .add_behaviour::<Zooming>()
         .add_behaviour::<Flaring>()
         .add_behaviour::<Sparking>()
+        .add_behaviour::<Draining>()
         .add_observer(flare)
+        .add_observer(drain)
         .check_input::<Aim, _>(in_reach)
         .add_ability::<Fireball>()
         .add_ability::<Shot>()
@@ -182,8 +230,8 @@ fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
         .add_ability::<Beacon>()
         .add_ability::<Lens>()
         .add_ability::<Scope>()
-        .add_effect::<FireballCost>()
-        .add_effect::<FireballCooldown>()
+        .add_ability::<Strike>()
+        .add_effects::<(Drain, Cooling, Siphon)>()
         .register_type::<Impact>()
         .register_type::<Wound>()
         .insert_resource(Reach(if role == NetRole::Server { 10.0 } else { 100.0 }))
@@ -211,17 +259,12 @@ fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
     .collect();
     let tags = TagRegistry::build(tags).unwrap();
     let world = app.world_mut();
+    // What abilities pay with: their costs and cooldowns, as effects.
+    let upkeep = world.resource::<AbilityRegistry>().upkeep(&[]);
     let effects = world
         .resource::<EffectRegistry>()
         .rebuild(
-            &[
-                EffectData::instant(Key::of::<FireballCost>())
-                    .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0))
-                    .cue("cue.hit"),
-                EffectData::lasting(Key::of::<FireballCooldown>(), 1.0)
-                    .owner_tag("cooldown.fireball")
-                    .cue("cue.cooling"),
-            ],
+            &upkeep.effects,
             EffectScope {
                 tags: &tags,
                 curves: &CurveRegistry::default(),
@@ -229,13 +272,13 @@ fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
                 executions: world.resource(),
                 calculations: world.resource(),
                 routes: world.resource(),
+                context: world.resource(),
             },
         )
         .unwrap();
     let abilities = world
         .resource::<AbilityRegistry>()
         .rebuild(
-            &abilities(),
             &[],
             AbilityScope {
                 tags: &tags,
@@ -247,44 +290,6 @@ fn protocol(app: &mut App, role: NetRole, replicas: Replicas) {
     world.insert_resource(effects);
     world.insert_resource(abilities);
     world.insert_resource(tags);
-}
-
-/// Every ability both sides have, as data.
-fn abilities() -> [AbilityData; 10] {
-    let fireball = AbilityData::new(Key::of::<Fireball>(), Key::of::<Cast>())
-        .tag("ability")
-        .cost(Key::of::<FireballCost>())
-        .cooldown(Key::of::<FireballCooldown>())
-        .require(!Condition::owner_has("state.stunned"))
-        .end_if(Condition::owner_has("state.stunned"));
-    let shot =
-        AbilityData::new(Key::of::<Shot>(), Key::of::<Shoot>()).cost(Key::of::<FireballCost>());
-    let smite = AbilityData::new(Key::of::<Smite>(), Key::of::<Smiting>())
-        .cost(Key::of::<FireballCost>())
-        .net(NetExecution::ServerOnly);
-    let ward = AbilityData::new(Key::of::<Ward>(), Key::of::<Warding>())
-        .cost(Key::of::<FireballCost>())
-        .trigger(Trigger::Event(TagKey::named("event.ward")))
-        .net(NetExecution::ServerInitiated);
-    let zoom =
-        AbilityData::new(Key::of::<Zoom>(), Key::of::<Zooming>()).net(NetExecution::LocalOnly);
-    let flare = AbilityData::new(Key::of::<Flare>(), Key::of::<Flaring>())
-        .cost(Key::of::<FireballCost>())
-        .require(!Condition::owner_has("state.stunned"));
-    let spark = AbilityData::new(Key::of::<Spark>(), Key::of::<Sparking>())
-        .trigger(Trigger::Event(TagKey::named("event.spark")));
-    let beacon = AbilityData::new(Key::of::<Beacon>(), Key::of::<Flaring>())
-        .trigger(Trigger::Event(TagKey::named("event.beacon")))
-        .net(NetExecution::ServerInitiated);
-    let lens = AbilityData::new(Key::of::<Lens>(), Key::of::<Zooming>())
-        .trigger(Trigger::Event(TagKey::named("event.lens")))
-        .net(NetExecution::LocalOnly);
-    let scope = AbilityData::new(Key::of::<Scope>(), Key::of::<Zooming>())
-        .trigger(Trigger::TagAdded(TagKey::named("state.aiming")))
-        .net(NetExecution::LocalOnly);
-    [
-        fireball, shot, smite, ward, zoom, flare, spark, beacon, lens, scope,
-    ]
 }
 
 /// The app of one side, `role`, on `plugins`: lightyear's, with mettle.
@@ -636,7 +641,7 @@ fn a_shown_effects_source_is_the_clients_own() {
         client.entity(shown).get::<ActiveEffect>().id(),
         client
             .resource::<EffectRegistry>()
-            .id_of::<FireballCooldown>()
+            .id("fireball.cooldown")
             .unwrap(),
         "the cooldown"
     );
@@ -659,7 +664,7 @@ fn an_actor_not_replicated_has_its_effects_kept_back_too() {
     let server = &mut world["server"];
     let hidden = server.spawn(Base::<Mana>::default());
     server.tick();
-    server.world_mut().apply_effect(hidden, FireballCooldown);
+    server.world_mut().apply_effect(hidden, Cooling);
     world.ticks(20);
     world["client"].query::<&EffectReplica, ()>().assert_len(0);
     world["client"].entity(here).assert_has::<Abilities>();
@@ -877,8 +882,8 @@ fn another_clients_actor_shows_its_cues_but_not_its_effects() {
     world["client"].entity(here).assert_lacks::<Abilities>();
     world["client"].watch_triggered::<CueExecuted>();
     let server = world["server"].world_mut();
-    server.apply_effect(there, FireballCooldown);
-    server.apply_effect(there, FireballCost);
+    server.apply_effect(there, Cooling);
+    server.apply_effect(there, Drain);
     world
         .until(|world| cues(&world["client"], here) == ["cue.cooling"])
         .describe("the client shows the cooldown's cue")
@@ -895,11 +900,13 @@ fn another_clients_actor_shows_its_cues_but_not_its_effects() {
 #[test]
 fn a_one_shot_a_client_predicted_plays_once() {
     let mut world = net();
-    let (_, here) = mage(&mut world, true);
+    let (_, here) = granted(&mut world, |server, there| {
+        server.grant_ability(there, Strike);
+    });
     world["client"].watch_triggered::<CueExecuted>();
     world["client"]
         .world_mut()
-        .activate_ability(here, Fireball)
+        .activate_ability(here, Strike)
         .unwrap();
     world.ticks(30);
     let played: Vec<_> = world["client"]
@@ -922,9 +929,7 @@ fn a_client_coming_to_see_an_actor_joins_its_cues() {
         Base::<Mana>::default(),
         Replicate::to_clients(NetworkTarget::All),
     ));
-    world["server"]
-        .world_mut()
-        .apply_effect(there, FireballCooldown);
+    world["server"].world_mut().apply_effect(there, Cooling);
     world
         .until(|world| {
             mapped(&world["client"], there)
@@ -1001,9 +1006,7 @@ fn replicas_follow_control_as_it_comes_and_goes() {
 fn owner_only_replicas_go_and_come_back_with_their_actor() {
     let mut world = net();
     let (there, here) = mage(&mut world, true);
-    world["server"]
-        .world_mut()
-        .apply_effect(there, FireballCooldown);
+    world["server"].world_mut().apply_effect(there, Cooling);
     world
         .until(|world| effects(&world["client"], here).len() == 1)
         .describe("the cooldown reaches its owner")
@@ -1135,14 +1138,7 @@ fn watch_mismatches(app: &mut TestApp) {
 /// Rechecks `world`'s effects with `effects` added, as a reload does: the
 /// numbers effects had kept, new ones after.
 fn reload_with(world: &mut World, effects: &[EffectData]) {
-    let mut all = vec![
-        EffectData::instant(Key::of::<FireballCost>())
-            .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0))
-            .cue("cue.hit"),
-        EffectData::lasting(Key::of::<FireballCooldown>(), 1.0)
-            .owner_tag("cooldown.fireball")
-            .cue("cue.cooling"),
-    ];
+    let mut all = world.resource::<AbilityRegistry>().upkeep(&[]).effects;
     all.extend_from_slice(effects);
     let reloaded = world
         .resource::<EffectRegistry>()
@@ -1155,6 +1151,7 @@ fn reload_with(world: &mut World, effects: &[EffectData]) {
                 executions: world.resource(),
                 calculations: world.resource(),
                 routes: world.resource(),
+                context: world.resource(),
             },
         )
         .unwrap();
@@ -1181,7 +1178,7 @@ fn a_server_reloading_alone_tells_its_clients_they_number_content_otherwise() {
     // `aura` sorts first, but a reload numbers it after what's there.
     reload_with(
         world["server"].world_mut(),
-        &[EffectData::lasting("aura", 1.0)],
+        &[EffectData::new("aura").lasting(1.0)],
     );
     world.ticks(20);
     let server = ContentFingerprint::of(world["server"].world());
@@ -1193,7 +1190,7 @@ fn a_server_reloading_alone_tells_its_clients_they_number_content_otherwise() {
     // Reloaded alike, the client numbers it as its server does.
     reload_with(
         world["client"].world_mut(),
-        &[EffectData::lasting("aura", 1.0)],
+        &[EffectData::new("aura").lasting(1.0)],
     );
     world.ticks(20);
     assert_eq!(
@@ -1210,7 +1207,7 @@ fn a_client_with_other_content_is_told_as_it_connects() {
     watch_mismatches(&mut world["client"]);
     reload_with(
         world["client"].world_mut(),
-        &[EffectData::lasting("aura", 1.0)],
+        &[EffectData::new("aura").lasting(1.0)],
     );
     world.ticks(20);
     assert_ne!(
@@ -1309,7 +1306,7 @@ fn a_replicated_effects_context_names_the_clients_entities() {
     let (marked, marked_here) = replicated(&mut world);
     world["server"]
         .world_mut()
-        .apply_effect(there, carrying(FireballCooldown, there, arrow, bow, marked));
+        .apply_effect(there, carrying(Cooling, there, arrow, bow, marked));
     world
         .until(|world| {
             world["client"]
@@ -1379,18 +1376,6 @@ fn context_data_registered_by_reflection_is_numbered_alike_on_both_sides() {
 #[test]
 fn a_snapshot_replicates_and_the_client_shows_the_servers() {
     let mut world = net();
-    // Half the caster's mana, snapshotted.
-    let siphon = EffectData::infinite(Key::of::<Siphon>()).modifier(EffectModifier::new::<Mana>(
-        Operation::Flat,
-        Magnitude::source::<Mana>().times(0.5),
-    ));
-    for side in ["server", "client"] {
-        world[side]
-            .resource_mut::<EffectRegistry>()
-            .name_type::<Siphon>();
-    }
-    reload_with(world["server"].world_mut(), std::slice::from_ref(&siphon));
-    reload_with(world["client"].world_mut(), &[siphon]);
     let (there, here) = mage(&mut world, true);
     let caster = world["server"].spawn((
         Base::<Mana>::new(40.0),
@@ -1454,7 +1439,7 @@ fn a_one_shot_the_server_plays_is_told_its_context_on_the_client() {
     world["client"].watch_triggered::<CueExecuted>();
     world["server"]
         .world_mut()
-        .apply_effect(there, carrying(FireballCost, archer, arrow, bow, there));
+        .apply_effect(there, carrying(Drain, archer, arrow, bow, there));
     world.ticks(20);
     let played = world["client"].read_triggered::<CueExecuted>();
     let [played] = &played[..] else {

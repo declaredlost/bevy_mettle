@@ -6,10 +6,10 @@ use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 
 use bevy::ecs::entity::{EntityMapper, MapEntities};
-use bevy::platform::collections::HashSet;
+use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
-use bevy::reflect::{CreateTypeData, TypeRegistry};
-use bevy_mettle_core::registry::{Id, Kind, Registry};
+use bevy::reflect::{CreateTypeData, TypeInfo, TypeRegistry};
+use bevy_mettle_core::registry::{Id, Key, Kind, Registry};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -42,10 +42,11 @@ use serde::de::DeserializeOwned;
 /// assert!(spec.context.get::<Chain>().is_some());
 /// ```
 ///
-/// Unreal's context subclassed, for **structured** data: a flag (a critical,
-/// a headshot) is a tag the application carries, which conditions, blocking
-/// and cues see; a number is a [`param`](crate::EffectSpec::param). Mettle's
-/// own are context data too: [`Causer`](super::Causer),
+/// Unreal's context subclassed, and its `SetByCaller` values: a magnitude
+/// reads an `f32` field of one
+/// ([`Magnitude::context`](crate::data::Magnitude::context)). A flag (a
+/// critical, a headshot) is a tag the application carries, which conditions,
+/// blocking and cues see. Mettle's own are context data too: [`Causer`](super::Causer),
 /// [`SourceObject`](super::SourceObject), [`AbilityRef`](super::AbilityRef),
 /// [`Hit`](super::Hit) and [`Origin`](super::Origin), registered by the
 /// effect plugin.
@@ -229,26 +230,71 @@ fn decode<C: ContextData>(bytes: &[u8], entities: &[Entity]) -> Option<Data> {
 /// register them. Read as a [`Registry`]: `id(name)`, `name(id)`; and by
 /// type, [`id_of::<C>()`](Self::id_of).
 #[derive(Resource, Deref, Clone, Default, Debug)]
-pub struct ContextDataRegistry(Registry<AnyContextData, ReflectContextData>);
+pub struct ContextDataRegistry {
+    #[deref]
+    registry: Registry<AnyContextData, ReflectContextData>,
+    /// Each type's `f32` fields, by type path: what magnitudes can read.
+    numbers: Arc<HashMap<&'static str, (TypeId, Vec<(&'static str, bool)>)>>,
+}
 
 impl ContextDataRegistry {
     /// The types `types` has as context data, numbered in order of type path.
     #[must_use]
     pub fn of(types: &TypeRegistry) -> Self {
         let mut registry = Registry::default();
+        let mut numbers = HashMap::new();
         for registration in types.iter() {
             if let Some(data) = registration.data::<ReflectContextData>() {
                 let info = registration.type_info();
                 registry.add_type(info.type_id(), info.type_path(), info.type_path(), *data);
+                let fields = match info {
+                    TypeInfo::Struct(fields) => fields
+                        .iter()
+                        .map(|field| (field.name(), field.is::<f32>()))
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                numbers.insert(info.type_path(), (info.type_id(), fields));
             }
         }
-        Self(registry.sorted())
+        Self {
+            registry: registry.sorted(),
+            numbers: Arc::new(numbers),
+        }
     }
 
     /// The number of the context data type `C`, if it's registered as such.
     #[must_use]
     pub fn id_of<C: ContextData>(&self) -> Option<ContextDataId> {
-        self.0.id_of_type(TypeId::of::<C>())
+        self.registry.id_of_type(TypeId::of::<C>())
+    }
+
+    /// Where the `f32` field `field` of the context data type `data` is: its
+    /// type, and its index in it.
+    ///
+    /// # Errors
+    ///
+    /// What's wrong, in words: no such type registered as context data, or
+    /// no `f32` field of that name.
+    pub(crate) fn field(
+        &self,
+        data: &Key<AnyContextData>,
+        field: &str,
+    ) -> Result<(TypeId, usize), String> {
+        let Some((type_id, fields)) = self.numbers.get(data.as_str()) else {
+            return Err(format!(
+                "a magnitude reading `{data}`, which isn't registered as context data"
+            ));
+        };
+        match fields.iter().position(|(named, _)| *named == field) {
+            Some(index) if fields[index].1 => Ok((*type_id, index)),
+            Some(_) => Err(format!(
+                "a magnitude reading `{data}::{field}`, which isn't an `f32`"
+            )),
+            None => Err(format!(
+                "a magnitude reading `{data}::{field}`, which isn't a field of it"
+            )),
+        }
     }
 
     /// Decodes what's numbered `id` from `bytes` and `entities`, if it's
@@ -259,7 +305,7 @@ impl ContextDataRegistry {
         bytes: &[u8],
         entities: &[Entity],
     ) -> Option<Data> {
-        (self.0.get(id)?.decode)(bytes, entities)
+        (self.registry.get(id)?.decode)(bytes, entities)
     }
 }
 

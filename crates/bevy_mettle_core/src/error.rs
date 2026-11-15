@@ -9,7 +9,7 @@ use crate::registry::Kind;
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum Error {
     /// Two definitions of one kind share a name.
-    #[error("there are two {kind}s called `{name}`")]
+    #[error("{kind} `{name}` is defined twice")]
     Duplicate {
         /// What kind of thing: `tag`, `item`.
         kind: &'static str,
@@ -26,13 +26,13 @@ pub enum Error {
         /// Where it was named, if in a definition: its name.
         within: Option<String>,
     },
-    /// Something code names by type that content doesn't define: an effect
-    /// or ability added with `add_effect` or `add_ability`.
-    #[error("code names {kind} `{name}`, which content doesn't define")]
-    NotInContent {
+    /// Content defining what a type in code defines: content adds, it
+    /// doesn't redefine. A curve is the exception, as data tunes curves.
+    #[error("content defines {kind} `{name}`, which code defines")]
+    DefinedInCode {
         /// What kind of thing: `effect`, `ability`.
         kind: &'static str,
-        /// The name code gives it.
+        /// The key they share.
         name: String,
     },
     /// Something that can't be: a number that isn't finite, a `per` of 0 or

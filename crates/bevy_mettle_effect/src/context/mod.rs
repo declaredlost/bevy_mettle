@@ -66,6 +66,21 @@ impl EffectContext {
             .find_map(|data| data.as_any().downcast_ref::<C>())
     }
 
+    /// The `f32` field at `index` of what's added of the type `type_id`, if
+    /// anything is.
+    pub(crate) fn number(&self, type_id: std::any::TypeId, index: usize) -> Option<f32> {
+        let data = self
+            .data
+            .iter()
+            .find(|data| data.as_any().type_id() == type_id)?;
+        match data.as_reflect().reflect_ref() {
+            bevy::reflect::ReflectRef::Struct(fields) => {
+                fields.field_at(index)?.try_downcast_ref::<f32>().copied()
+            }
+            _ => None,
+        }
+    }
+
     /// Adds `data`, in place of any of its type.
     fn insert(&mut self, data: Data) {
         let type_id = data.as_any().type_id();

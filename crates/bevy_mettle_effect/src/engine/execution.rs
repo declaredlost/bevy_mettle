@@ -26,13 +26,17 @@ pub(super) fn resolve(
     match magnitude {
         MagnitudeDef::Value(value) => *value,
         MagnitudeDef::Level => context.spec.level,
-        MagnitudeDef::Param(param) => context.spec.param_value(*param).unwrap_or_else(|| {
-            warn!(
-                "effect `{}` reads {param:?}, which its spec doesn't set: 0",
-                context.def.name
-            );
-            0.0
-        }),
+        MagnitudeDef::Context(data, field) => context
+            .spec
+            .context
+            .number(*data, *field)
+            .unwrap_or_else(|| {
+                warn!(
+                    "effect `{}` reads context data its spec doesn't carry: 0",
+                    context.def.name
+                );
+                0.0
+            }),
         MagnitudeDef::Attribute(slot) => captured(context, *slot),
         MagnitudeDef::Custom(calculation, reads) => registry
             .calculation(*calculation)
@@ -343,6 +347,7 @@ pub(super) fn execute(
     world.trigger(EffectExecuted {
         entity: target,
         id: def.id,
+        key: def.name.clone(),
         context: spec.context.clone(),
         changes: dealt.clone(),
         source_changes: stolen,

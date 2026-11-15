@@ -1,53 +1,10 @@
 //! What the derives share: where the crate they implement for is, names in
-//! `snake_case`, and marker types known by name.
+//! `snake_case`, and keys.
 
 use proc_macro_crate::{FoundCrate, crate_name};
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{DeriveInput, Error, LitStr};
-
-/// A marker type known by name: `impl #trait for #ident`, keyed as `kind` by
-/// its name on `#[#attr(name = "..")]`, else the type's in `snake_case`.
-/// `what` is what it is, for errors: "a route".
-pub(crate) fn named(
-    input: &DeriveInput,
-    attr: &str,
-    what: &str,
-    trait_path: &TokenStream,
-    krate: &TokenStream,
-    kind: &TokenStream,
-) -> syn::Result<TokenStream> {
-    if !input.generics.params.is_empty() {
-        return Err(Error::new_spanned(
-            &input.generics,
-            format!("{what} can't be generic"),
-        ));
-    }
-    let mut name: Option<LitStr> = None;
-    for attr in input
-        .attrs
-        .iter()
-        .filter(|found| found.path().is_ident(attr))
-    {
-        attr.parse_nested_meta(|meta| {
-            if !meta.path.is_ident("name") {
-                return Err(meta.error(format!("expected `name`: {what} has only a name")));
-            }
-            if name.is_some() {
-                return Err(meta.error("`name` is given twice"));
-            }
-            name = Some(meta.value()?.parse()?);
-            Ok(())
-        })?;
-    }
-    let ident = &input.ident;
-    let name = name.unwrap_or_else(|| LitStr::new(&snake(&ident.to_string()), Span::call_site()));
-    let keyed = keyed(ident, krate, kind, &name);
-    Ok(quote! {
-        impl #trait_path for #ident {}
-        #keyed
-    })
-}
+use syn::LitStr;
 
 /// `impl Keyed for #ident`: its kind, `kind`, and its key, `name`. `krate` is
 /// the derive's crate, `kind` a kind in core's registry, or `krate`'s own at a

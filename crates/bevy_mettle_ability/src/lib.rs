@@ -19,7 +19,7 @@ pub mod __core {
     pub use bevy_mettle_core::*;
 }
 
-pub use self::ability::{Ability, AbilityApp, AbilitySpec};
+pub use self::ability::{Ability, AbilityApp, AbilityGroup, AbilitySpec};
 pub use self::commands::{AbilityCommands, AbilityWorld};
 pub use self::plugin::{AbilityPlugin, AbilitySystems};
-pub use self::registry::{AbilityRegistry, AbilityScope};
+pub use self::registry::{AbilityRegistry, AbilityScope, Upkeep};

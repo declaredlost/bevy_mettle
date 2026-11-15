@@ -7,34 +7,10 @@ use bevy_mettle::prelude::*;
 
 use crate::common::{Strength, attributes, close, mettle};
 
-/// The buff, as code names it.
-#[derive(Effect)]
-struct Buff;
-
 /// A buff to `Strength` for a few ticks.
-fn buff() -> EffectData {
-    EffectData::lasting(Key::of::<Buff>(), 0.05)
-        .modifier(EffectModifier::new::<Strength>(Operation::Flat, 5.0))
-}
-
-/// `app`'s effect registry, of `buff`: checked against what `app` has.
-fn registry(app: &App) -> EffectRegistry {
-    let world = app.world();
-    world
-        .resource::<EffectRegistry>()
-        .rebuild(
-            &[buff()],
-            EffectScope {
-                tags: &TagRegistry::default(),
-                curves: &CurveRegistry::default(),
-                attributes: world.resource(),
-                executions: world.resource(),
-                calculations: world.resource(),
-                routes: world.resource(),
-            },
-        )
-        .unwrap()
-}
+#[derive(Effect)]
+#[effect(lasting = 0.05, flat::<Strength>(5.0))]
+struct Buff;
 
 /// Each tick, after mettle: whether the actor's buffed, and its strength.
 #[derive(Resource, Default)]
@@ -66,9 +42,7 @@ fn effects_tick_before_attributes_fold_in_the_same_step() {
         .plugins(mettle())
         .with(attributes)
         .with(|app| {
-            app.add_effect::<Buff>();
-            let registry = registry(app);
-            app.insert_resource(registry)
+            app.add_effect::<Buff>()
                 .init_resource::<Seen>()
                 .add_systems(FixedPostUpdate, see.after(MettleSystems));
         })
@@ -103,9 +77,7 @@ fn mettle_runs_where_its_core_plugin_says() {
         .plugins(mettle().set(MettleCorePlugin::new(Update)))
         .with(attributes)
         .with(|app| {
-            app.add_effect::<Buff>();
-            let registry = registry(app);
-            app.insert_resource(registry)
+            app.add_effect::<Buff>()
                 .init_resource::<Seen>()
                 .init_resource::<Before>()
                 .add_systems(

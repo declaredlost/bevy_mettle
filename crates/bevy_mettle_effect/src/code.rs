@@ -12,7 +12,7 @@ use bevy_mettle_attribute::registry::AttributeRegistry;
 use bevy_mettle_core::registry::{
     AnyAttribute, AttributeId, EffectId, Id, Key, Keyed, Kind, Ref, Registry,
 };
-use bevy_mettle_core::tag::{OwnedTags, TagKey};
+use bevy_mettle_core::tag::OwnedTags;
 
 use crate::context::{ContextData, EffectContext};
 use crate::data::{AttributeRead, EffectDef, Side};
@@ -55,12 +55,6 @@ impl ExecutionContext<'_> {
     #[must_use]
     pub fn level(&self) -> f32 {
         self.spec.level
-    }
-
-    /// What `param` was set to, if it was.
-    #[must_use]
-    pub fn param(&self, param: impl Into<TagKey>) -> Option<f32> {
-        self.spec.param_value(param)
     }
 
     /// What it carries: who applied it, what struck, where.
@@ -335,20 +329,24 @@ pub type RouteId = Id<AnyRoute>;
 ///
 /// ```
 /// # use bevy::prelude::*;
+/// # use bevy::ecs::entity::MapEntities;
 /// # use bevy_mettle_attribute::prelude::*;
 /// # use bevy_mettle_effect::prelude::*;
+/// # use serde::{Deserialize, Serialize};
 /// # #[derive(Attribute)] #[attribute(base = 100.0, min = 0.0)] struct Life;
 /// # #[derive(Attribute)] struct SpellPower;
 /// # #[derive(Attribute)] struct Resistance;
-/// /// The spec's damage, more with the caster's spell power, less with the
-/// /// target's fire resistance.
+/// # #[derive(Reflect, Clone, PartialEq, Serialize, Deserialize, MapEntities)]
+/// # #[reflect(ContextData)] struct Damage { amount: f32 }
+/// /// The damage on the spec's context, more with the caster's spell power,
+/// /// less with the target's fire resistance.
 /// #[derive(Execution)]
 /// #[execution(source(SpellPower), target(Resistance, tagged("damage.fire")))]
 /// pub struct FireDamage;
 ///
 /// impl ExecutionFn for FireDamage {
 ///     fn execute(&self, cx: &ExecutionContext) -> Vec<BaseChange> {
-///         let damage = cx.param("param.damage").unwrap_or_default();
+///         let damage = cx.get::<Damage>().map_or(0.0, |damage| damage.amount);
 ///         let power = cx.captured::<SpellPower>(Side::Source).unwrap_or_default();
 ///         let resisted = cx.captured::<Resistance>(Side::Target).unwrap_or_default();
 ///         let dealt = damage * (1.0 + power / 100.0) * (1.0 - resisted);
@@ -463,6 +461,11 @@ pub type CalculationId = Id<AnyCalculation>;
 /// (`&self`); it reads the world, never changes it: what it changes, it
 /// returns, so a client's prediction of it can be undone. It changes
 /// attributes' bases, and routes into the routes it declares.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` doesn't run as an execution",
+    label = "no `ExecutionFn`",
+    note = "implement `ExecutionFn` for it: what it changes as an effect executes"
+)]
 pub trait ExecutionFn: Send + Sync + 'static {
     /// What it changes, worked out from `cx`.
     fn execute(&self, cx: &ExecutionContext) -> Vec<BaseChange>;
@@ -472,6 +475,11 @@ pub trait ExecutionFn: Send + Sync + 'static {
 ///
 /// Unreal's `CalculateBaseMagnitude`. On the calculation's type, with what
 /// it's set up with (`&self`).
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` doesn't work out a calculation",
+    label = "no `CalculationFn`",
+    note = "implement `CalculationFn` for it: the magnitude it works out"
+)]
 pub trait CalculationFn: Send + Sync + 'static {
     /// The magnitude, worked out from `cx`.
     fn calculate(&self, cx: &ExecutionContext) -> f32;
@@ -482,6 +490,11 @@ pub trait CalculationFn: Send + Sync + 'static {
 /// Changes to the attributes actors have.
 ///
 /// On the route's type, with what it's set up with (`&self`).
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` doesn't route",
+    label = "no `RouteFn`",
+    note = "implement `RouteFn` for it: what all routed into it changes"
+)]
 pub trait RouteFn: Send + Sync + 'static {
     /// What `amount`, all `cx`'s effect routed into the route, changes.
     fn route(&self, cx: &ExecutionContext, amount: f32) -> Vec<BaseChange>;
@@ -632,10 +645,47 @@ pub trait EffectApp {
     /// attributes actors have.
     fn add_route<R: Route + RouteFn>(&mut self, route: R) -> &mut Self;
 
-    /// Adds the effect `E` code names: content has to define it, or it's
-    /// rejected.
+    /// Adds the effect `E`, defined by its type.
     fn add_effect<E: Effect>(&mut self) -> &mut Self;
+
+    /// Adds each effect of `E`, a tuple of them: `add_effects::<(Burn,
+    /// Chill)>()`.
+    fn add_effects<E: EffectGroup>(&mut self) -> &mut Self;
 }
+
+/// Effects added at once: an [`Effect`], or a tuple of up to 16 of them.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` isn't an effect, or a tuple of them",
+    label = "not effects"
+)]
+pub trait EffectGroup {
+    /// Adds each to `registry`.
+    fn add_to(registry: &mut EffectRegistry);
+}
+
+impl<E: Effect> EffectGroup for E {
+    fn add_to(registry: &mut EffectRegistry) {
+        registry.add::<E>();
+    }
+}
+
+/// `EffectGroup` for each tuple of them, up to 16.
+macro_rules! effects {
+    ($first:ident $(, $rest:ident)*) => {
+        impl<$first: EffectGroup $(, $rest: EffectGroup)*> EffectGroup for ($first, $($rest,)*) {
+            fn add_to(registry: &mut EffectRegistry) {
+                $first::add_to(registry);
+                $($rest::add_to(registry);)*
+            }
+        }
+        effects!($($rest),*);
+    };
+    () => {};
+}
+
+effects!(
+    E0, E1, E2, E3, E4, E5, E6, E7, E8, E9, E10, E11, E12, E13, E14, E15
+);
 
 impl EffectApp for App {
     fn add_execution<E: Execution + ExecutionFn>(&mut self, execution: E) -> &mut Self {
@@ -660,9 +710,11 @@ impl EffectApp for App {
     }
 
     fn add_effect<E: Effect>(&mut self) -> &mut Self {
-        self.world_mut()
-            .get_resource_or_init::<EffectRegistry>()
-            .name_type::<E>();
+        self.add_effects::<E>()
+    }
+
+    fn add_effects<E: EffectGroup>(&mut self) -> &mut Self {
+        E::add_to(&mut self.world_mut().get_resource_or_init::<EffectRegistry>());
         self
     }
 }

@@ -37,10 +37,11 @@ Gameplay Ability System: attributes, effects and abilities.
 - **Cues**: what's shown of effects and abilities, as entities while they
   last and one-shots as they execute, routed to the most specific handler,
   and replicated to every client that sees the actor.
-- **Data first**: tags, curves, effects and abilities are data, handed over
-  as one `MettleContent` resource and checked as a whole; change it and it's
-  reloaded, or rejected with every error while the content before stays.
-  Mettle doesn't load files: your game reads them.
+- **Code first, data adds**: effects, abilities and curves are your types,
+  each defining itself on its derive. One `MettleContent` resource adds more
+  by data and tunes curves, checked as a whole with what code defines;
+  change it and it's reloaded, or rejected with every error while the
+  content before stays. Mettle doesn't load files: your game reads them.
 - **Prediction**: a client predicts its own abilities and the server
   decides, with an adapter for lightyear.
 
@@ -77,19 +78,10 @@ struct Mana;
 #[derive(Component, Default, Behaviour)]
 struct CastFireball;
 
-/// The fireball, as code names it: content defines it as `"fireball"`.
+/// The fireball: 20 mana, then 2 seconds before it's cast again.
 #[derive(Ability)]
+#[ability(behaviour::<CastFireball>, cost = Cost::of::<Mana>(20.0), cooldown = 2.0)]
 struct Fireball;
-
-/// The game's content: in a game, read from its files.
-fn content() -> MettleContent {
-    MettleContent {
-        effects: vec![EffectData::instant("fireball.cost")
-            .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0))],
-        abilities: vec![AbilityData::new("fireball", "cast_fireball").cost("fireball.cost")],
-        ..default()
-    }
-}
 
 fn spawn(mut commands: Commands) {
     commands
@@ -111,16 +103,16 @@ fn main() {
         .add_attribute::<Mana>()
         .add_behaviour::<CastFireball>()
         .add_ability::<Fireball>()
-        .insert_resource(content())
         .add_systems(Startup, spawn)
         .add_systems(Update, cast)
         .run();
 }
 ```
 
-Content inserted as the app is built is checked and loaded in `PreStartup`;
-changed later, it's loaded again in the next `PreUpdate`, or rejected with
-every error while the content before stays. Effects and attributes run in
+What code defines is checked and loaded in `PreStartup`, with the content
+inserted as the app is built; content changed later is loaded again in the
+next `PreUpdate`, or rejected with every error while the content before
+stays. Effects and attributes run in
 mettle's own schedule, `Mettle`, each fixed step in `FixedPostUpdate`:
 effects ticked, attributes folded, live reads settled, values published.
 Abilities handle network messages in `PreUpdate`. Systems that read
@@ -150,7 +142,7 @@ attributes as they stand go after `MettleSystems`.
   [grants and triggers](https://declaredlost.github.io/bevy_mettle/grants-triggers.html)
 - **Multiplayer**: [prediction](https://declaredlost.github.io/bevy_mettle/prediction.html), and
   [over lightyear](https://declaredlost.github.io/bevy_mettle/lightyear.html)
-- **Putting it together**: [loading data](https://declaredlost.github.io/bevy_mettle/loading-data.html),
+- **Putting it together**: [adding and tuning content](https://declaredlost.github.io/bevy_mettle/content.html),
   and [testing](https://declaredlost.github.io/bevy_mettle/testing.html)
 
 The API reference is on [docs.rs](https://docs.rs/bevy_mettle).
