@@ -46,10 +46,10 @@ use serde::de::DeserializeOwned;
 /// reads an `f32` field of one
 /// ([`Magnitude::context`](crate::data::Magnitude::context)). A flag (a
 /// critical, a headshot) is a tag the application carries, which conditions,
-/// blocking and cues see. Mettle's own are context data too: [`Causer`](super::Causer),
-/// [`SourceObject`](super::SourceObject), [`AbilityRef`](super::AbilityRef),
-/// [`Hit`](super::Hit) and [`Origin`](super::Origin), registered by the
-/// effect plugin.
+/// blocking and cues see. Mettle's own are context data too:
+/// [`Causer`](super::Causer), [`SourceObject`](super::SourceObject),
+/// [`AbilityRef`](super::AbilityRef), [`Hit`](super::Hit) and
+/// [`Origin`](super::Origin), registered by the effect plugin.
 ///
 /// Replicated with what carries the context (an effect's replica, a cue's
 /// burst): serialized, its entities mapped as it arrives. Numbered by its type

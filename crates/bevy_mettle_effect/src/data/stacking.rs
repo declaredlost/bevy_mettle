@@ -1,9 +1,9 @@
 //! How applying an effect again stacks.
 
 use bevy_mettle_core::registry::{AnyEffect, Key};
+use serde::{Deserialize, Serialize};
 
 use crate::Effect;
-use serde::{Deserialize, Serialize};
 
 /// How an effect applied again onto its target stacks, up to a limit.
 ///
@@ -24,7 +24,9 @@ use serde::{Deserialize, Serialize};
 /// ```
 /// # use bevy_mettle_effect::prelude::*;
 /// # #[derive(Effect)] struct Detonate;
-/// let poison = Stacking::up_to(5).by(StackBy::Source).overflow::<Detonate>();
+/// let poison = Stacking::up_to(5)
+///     .by(StackBy::Source)
+///     .overflow::<Detonate>();
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

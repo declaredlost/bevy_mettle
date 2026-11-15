@@ -53,8 +53,9 @@ pub struct AbilityData {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cost: Vec<Cost>,
     /// How many seconds it cools down for once it commits: it can't activate
-    /// while it does. Run by a lasting effect mettle makes, `<its key>.cooldown`,
-    /// granting its owner its [`cooldown_tag`](Self::cooldown_tag).
+    /// while it does. Run by a lasting effect mettle makes, `<its
+    /// key>.cooldown`, granting its owner its
+    /// [`cooldown_tag`](Self::cooldown_tag).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cooldown: Option<Magnitude>,
     /// The tag its owner holds while it cools down, which it can't activate

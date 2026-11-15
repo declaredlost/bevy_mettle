@@ -1,12 +1,12 @@
 //! Effects as an app has them: checked, what their data names resolved to
 //! numbers.
 
+use std::any::TypeId;
+
 use bevy_mettle_attribute::modifier::{Operation, Per};
 use bevy_mettle_core::condition::Condition;
 use bevy_mettle_core::registry::{AnyEffect, AttributeId, CurveId, EffectId, Key};
 use bevy_mettle_core::tag::Tags;
-
-use std::any::TypeId;
 
 use super::{EffectDuration, Read, Side, Stacking};
 use crate::code::{CalculationId, Changes, ExecutionId, RouteId};

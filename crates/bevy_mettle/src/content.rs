@@ -48,7 +48,11 @@ use serde::{Deserialize, Serialize};
 ///         EffectData::new("frostbite")
 ///             .lasting(3.0)
 ///             .tag("modded.frost")
-///             .modifier(EffectModifier::named("life".into(), Operation::Flat, -5.0)),
+///             .modifier(EffectModifier::named(
+///                 "life".into(),
+///                 Operation::Flat,
+///                 -5.0,
+///             )),
 ///     ],
 ///     ..Default::default()
 /// };

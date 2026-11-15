@@ -13,11 +13,11 @@ use crate::context::{AnyContextData, ContextData};
 ///
 /// A small expression: terms (a value, the level, a number the spec's
 /// context carries, an attribute, a calculation), a curve at any of them, and
-/// sums, products and clamps of them. Unreal's `FGameplayEffectModifierMagnitude`, its kinds composed
-/// rather than each with its own extras: a scalable float is a value times a
-/// curve at the level; an attribute-based magnitude's coefficient and
-/// additions, a product and a sum; an attribute curve, a curve at an
-/// attribute.
+/// sums, products and clamps of them. Unreal's
+/// `FGameplayEffectModifierMagnitude`, its kinds composed rather than each with
+/// its own extras: a scalable float is a value times a curve at the level; an
+/// attribute-based magnitude's coefficient and additions, a product and a sum;
+/// an attribute curve, a curve at an attribute.
 ///
 /// ```
 /// # use bevy::prelude::*;
