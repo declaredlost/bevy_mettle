@@ -149,7 +149,7 @@ mod book {
         #[cfg(feature = "lightyear")]
         Lightyear: "lightyear.md",
         #[cfg(all(feature = "ability", not(feature = "lightyear")))]
-        LoadingData: "loading-data.md",
+        Content: "content.md",
         #[cfg(all(feature = "ability", not(feature = "lightyear")))]
         Testing: "testing.md",
         #[cfg(all(feature = "ability", not(feature = "lightyear")))]

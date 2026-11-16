@@ -2,36 +2,40 @@
 
 mod def;
 
+use bevy_mettle_attribute::Attribute;
+use bevy_mettle_attribute::modifier::Operation;
 use bevy_mettle_core::condition::Condition;
-use bevy_mettle_core::registry::{AnyAbility, AnyEffect, Key};
+use bevy_mettle_core::registry::{AnyAbility, AnyAttribute, AnyEffect, Key};
 use bevy_mettle_core::tag::{TagKey, Tags};
+use bevy_mettle_effect::Effect;
+use bevy_mettle_effect::data::{EffectData, EffectModifier, Magnitude};
 use serde::{Deserialize, Serialize};
 
 pub use self::def::AbilityDef;
-use crate::behaviour::AnyBehaviour;
+use crate::behaviour::{AnyBehaviour, Behaviour};
 
-/// An ability, as data: what runs it, what it costs, and what activates it.
+/// An ability's definition: what runs it, what it costs, what activates it.
 ///
-/// Unreal's `GameplayAbility`, its properties. Named by a `Key<AnyAbility>`,
-/// its `id`.
-///
-/// Written by a game's content, in whatever format it loads with serde, or
-/// built in code:
+/// Unreal's `GameplayAbility`, its properties. Named by a `Key<AnyAbility>`.
+/// An [`Ability`](crate::Ability) type defines one, each key of its derive
+/// the builder method of the same name; content adds more, written in
+/// whatever format the game loads with serde.
 ///
 /// ```
+/// # use bevy::prelude::*;
 /// # use bevy_mettle_ability::prelude::*;
+/// # use bevy_mettle_attribute::prelude::*;
 /// # use bevy_mettle_core::prelude::*;
-/// let fireball = AbilityData::new("fireball", "projectile_cast")
-///     .tag("ability.spell.fire")
-///     .cost("fireball.cost")
-///     .cooldown("fireball.cooldown")
-///     .require(Condition::all([
-///         !Condition::owner_has("state.silenced"),
-///         !Condition::owner_has("state.stunned"),
-///     ]))
-///     .ends("ability.channel")
-///     .blocks("ability.spell")
-///     .owner_tag("state.casting");
+/// # #[derive(Attribute)] struct Mana;
+/// # #[derive(Component, Default, Behaviour)] struct CastProjectile;
+/// # #[derive(Tag)] struct Fire;
+/// # #[derive(Tag)] struct Silenced;
+/// # #[derive(Tag)] struct Casting;
+/// #[derive(Ability)]
+/// #[ability(behaviour::<CastProjectile>, tag = Fire, owner_tag = Casting)]
+/// #[ability(cost = Cost::of::<Mana>(20.0), cooldown = 2.0)]
+/// #[ability(require = !Condition::owner_has(Silenced))]
+/// struct Fireball;
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -41,16 +45,24 @@ pub struct AbilityData {
     /// What it is: what blocking, cancelling and activating by tag match on.
     #[serde(default, skip_serializing_if = "Tags::is_empty")]
     pub tags: Tags,
-    /// The behaviour that runs it, registered in code.
-    pub behaviour: Key<AnyBehaviour>,
-    /// An instant effect it costs, applied to its owner as it commits: it can't
-    /// activate if paying would take an attribute below 0.
+    /// The behaviour that runs it, registered in code: every ability has one.
+    pub behaviour: Option<Key<AnyBehaviour>>,
+    /// What it costs, paid from its owner as it commits: it can't activate if
+    /// paying would take an attribute below 0. Paid by an instant effect
+    /// mettle makes of them, `<its key>.cost`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cost: Vec<Cost>,
+    /// How many seconds it cools down for once it commits: it can't activate
+    /// while it does. Run by a lasting effect mettle makes, `<its
+    /// key>.cooldown`, granting its owner its
+    /// [`cooldown_tag`](Self::cooldown_tag).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cost: Option<Key<AnyEffect>>,
-    /// A lasting effect applied to its owner as it commits: it can't activate
-    /// while its owner owns what that effect grants.
+    pub cooldown: Option<Magnitude>,
+    /// The tag its owner holds while it cools down, which it can't activate
+    /// while its owner holds: `cooldown.<its key>`, unless it says. Abilities
+    /// sharing one share a cooldown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cooldown: Option<Key<AnyEffect>>,
+    pub cooldown_tag: Option<TagKey>,
     /// What has to hold for it to activate: weighed in its own tags
     /// (`ReadTagged`) and its owner's (`OwnerHas`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -76,12 +88,44 @@ pub struct AbilityData {
     /// What activates it besides being asked to.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub triggers: Vec<Trigger>,
+    /// Lasting effects that grant it to their target while they last:
+    /// equipping a staff applies its effect, which grants its skills.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub granted_by: Vec<Key<AnyEffect>>,
     /// When its cost and cooldown are applied: as it activates, unless it says.
     #[serde(default)]
     pub commit: Commit,
     /// How it runs over a network: predicted by the client, unless it says.
     #[serde(default)]
     pub net: NetExecution,
+}
+
+/// What an ability costs: an amount of one of its owner's attributes.
+///
+/// ```
+/// # use bevy_mettle_ability::prelude::*;
+/// # use bevy_mettle_attribute::prelude::*;
+/// # #[derive(Attribute)] struct Mana;
+/// let cost = Cost::of::<Mana>(20.0);
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Cost {
+    /// The attribute paid from.
+    pub attribute: Key<AnyAttribute>,
+    /// How much: taken off its base.
+    pub amount: Magnitude,
+}
+
+impl Cost {
+    /// `amount` of `A`.
+    #[must_use]
+    pub fn of<A: Attribute>(amount: impl Into<Magnitude>) -> Self {
+        Self {
+            attribute: Key::of::<A>(),
+            amount: amount.into(),
+        }
+    }
 }
 
 /// What activates an ability besides being asked to: an event, or a tag owned.
@@ -154,16 +198,17 @@ pub enum NetExecution {
 }
 
 impl AbilityData {
-    /// An ability called `id`, run by `behaviour`, costing nothing yet: for
-    /// abilities defined in code.
+    /// An ability called `name`, with no behaviour yet, costing nothing:
+    /// what an [`Ability`](crate::Ability)'s `define` is handed, named.
     #[must_use]
-    pub fn new(id: impl Into<Key<AnyAbility>>, behaviour: impl Into<Key<AnyBehaviour>>) -> Self {
+    pub fn new(name: impl Into<Key<AnyAbility>>) -> Self {
         Self {
-            name: id.into(),
+            name: name.into(),
             tags: Tags::new(),
-            behaviour: behaviour.into(),
-            cost: None,
+            behaviour: None,
+            cost: Vec::new(),
             cooldown: None,
+            cooldown_tag: None,
             require: None,
             end_if: None,
             ends: Tags::new(),
@@ -171,6 +216,7 @@ impl AbilityData {
             owner_tags: Tags::new(),
             cues: Tags::new(),
             triggers: Vec::new(),
+            granted_by: Vec::new(),
             commit: Commit::OnActivate,
             net: NetExecution::Predicted,
         }
@@ -183,17 +229,32 @@ impl AbilityData {
         self
     }
 
-    /// Costing `effect`.
+    /// Run by the behaviour `B`.
     #[must_use]
-    pub fn cost(mut self, effect: impl Into<Key<AnyEffect>>) -> Self {
-        self.cost = Some(effect.into());
+    pub fn behaviour<B: Behaviour>(mut self) -> Self {
+        self.behaviour = Some(Key::of::<B>());
         self
     }
 
-    /// Cooling down by `effect`.
+    /// Costing `cost` too.
     #[must_use]
-    pub fn cooldown(mut self, effect: impl Into<Key<AnyEffect>>) -> Self {
-        self.cooldown = Some(effect.into());
+    pub fn cost(mut self, cost: Cost) -> Self {
+        self.cost.push(cost);
+        self
+    }
+
+    /// Cooling down for `seconds` once it commits.
+    #[must_use]
+    pub fn cooldown(mut self, seconds: impl Into<Magnitude>) -> Self {
+        self.cooldown = Some(seconds.into());
+        self
+    }
+
+    /// Its owner holding `tag` while it cools down, in place of
+    /// `cooldown.<its key>`: abilities sharing a tag share a cooldown.
+    #[must_use]
+    pub fn cooldown_tag(mut self, tag: impl Into<TagKey>) -> Self {
+        self.cooldown_tag = Some(tag.into());
         self
     }
 
@@ -247,6 +308,13 @@ impl AbilityData {
         self
     }
 
+    /// Granted to their target by `E` while it lasts.
+    #[must_use]
+    pub fn granted_by<E: Effect>(mut self) -> Self {
+        self.granted_by.push(Key::of::<E>());
+        self
+    }
+
     /// Committing as `commit` says.
     #[must_use]
     pub fn commit(mut self, commit: Commit) -> Self {
@@ -262,35 +330,55 @@ impl AbilityData {
     }
 }
 
-/// What an effect grants while it lasts: the abilities it gives its target.
-///
-/// The ability crate's part of an effect, as Unreal's abilities component is
-/// (an effect knows nothing of abilities). Equipping a staff applies its
-/// effect, which grants its skills; taking it off takes them away.
-///
-/// ```
-/// # use bevy_mettle_ability::prelude::*;
-/// let staff = Grant::new("staff", ["channel"]);
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Grant {
-    /// The effect: a lasting one.
-    pub effect: Key<AnyEffect>,
-    /// The abilities its target is granted while it lasts.
-    pub abilities: Vec<Key<AnyAbility>>,
+/// What an ability pays with, made from its definition: its cost and its
+/// cooldown, as effects, and the tag its cooldown grants.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct Upkeep {
+    /// Its cost, an instant effect, if it costs anything.
+    pub(crate) cost: Option<EffectData>,
+    /// Its cooldown, a lasting effect granting `tag`, if it has one.
+    pub(crate) cooldown: Option<EffectData>,
+    /// The tag its cooldown grants.
+    pub(crate) tag: Option<TagKey>,
 }
 
-impl Grant {
-    /// `effect` granting `abilities`.
-    #[must_use]
-    pub fn new<A: Into<Key<AnyAbility>>>(
-        effect: impl Into<Key<AnyEffect>>,
-        abilities: impl IntoIterator<Item = A>,
-    ) -> Self {
-        Self {
-            effect: effect.into(),
-            abilities: abilities.into_iter().map(Into::into).collect(),
+impl AbilityData {
+    /// The key of the effect mettle makes of its cost.
+    pub(crate) fn cost_key(&self) -> Key<AnyEffect> {
+        Key::new(format!("{}.cost", self.name))
+    }
+
+    /// The key of the effect mettle makes of its cooldown.
+    pub(crate) fn cooldown_key(&self) -> Key<AnyEffect> {
+        Key::new(format!("{}.cooldown", self.name))
+    }
+
+    /// What it pays with, as effects.
+    pub(crate) fn upkeep(&self) -> Upkeep {
+        let cost = (!self.cost.is_empty()).then(|| {
+            self.cost
+                .iter()
+                .fold(EffectData::new(self.cost_key()), |effect, cost| {
+                    effect.modifier(EffectModifier::named(
+                        cost.attribute.clone(),
+                        Operation::Flat,
+                        cost.amount.clone().times(-1.0),
+                    ))
+                })
+        });
+        let tag = self.cooldown.as_ref().map(|_| {
+            self.cooldown_tag
+                .unwrap_or_else(|| TagKey::named(&format!("cooldown.{}", self.name)))
+        });
+        let cooldown = self.cooldown.as_ref().zip(tag).map(|(seconds, tag)| {
+            EffectData::new(self.cooldown_key())
+                .lasting(seconds.clone())
+                .owner_tag(tag)
+        });
+        Upkeep {
+            cost,
+            cooldown,
+            tag,
         }
     }
 }

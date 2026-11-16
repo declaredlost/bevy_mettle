@@ -18,7 +18,7 @@ curves, the condition language, and the registries everything is numbered in.
 
 ## Overview
 
-- A [`Key<K>`] names what content defines: a tag, a curve, an effect, of
+- A [`Key<K>`] names what code or content defines: a tag, a curve, an effect, of
   one of mettle's [`Kind`]s, such as `AnyEffect`. Checked, it's known by its number, an
   [`Id<K>`], in a [`Registry`]: entries by number, numbers by name and by
   type, as Bevy keeps components.
@@ -28,8 +28,9 @@ curves, the condition language, and the registries everything is numbered in.
 - [`Tags`] is a set of them, what an effect or an ability is labelled with;
   [`OwnedTags`] is what an actor owns by count, as its states come and go,
   told by [`TagAdded`] and [`TagRemoved`].
-- A [`CurveRegistry`] is values by level, from [`CurveData`]s in data, built as
-  Bevy's curves: what effects scale by.
+- A [`CurveRegistry`] is values by level, from [`ScalingCurve`] types in code
+  and [`CurveData`]s in data tuning them, built as Bevy's curves: what
+  effects scale by.
 - A [`Condition`] is an expression over a read's tags, what its owner,
   target and source own, and the facts it supplies, weighed from 0 to 1.
 - Building any of them checks it, and returns every [`Error`] at once.
@@ -80,14 +81,20 @@ hit.insert(Fire);
 assert!(hit.contains(Elemental));
 
 // Damage by level: 10 at level 1, 110 at level 11, linearly between.
-let curves = CurveRegistry::build(&[CurveData {
-    name: Key::new("fireball.damage"),
-    interpolation: Interpolation::Linear,
-    keys: vec![(1.0, 10.0), (11.0, 110.0)],
-}])
-.unwrap();
-let damage = curves.id("fireball.damage").unwrap();
+#[derive(ScalingCurve)]
+#[curve(keys = [(1.0, 10.0), (11.0, 110.0)])]
+struct FireballDamage;
+
+let mut code = CurveRegistry::default();
+code.add::<FireballDamage>();
+let curves = code.rebuild(&[]).unwrap();
+let damage = curves.id_of::<FireballDamage>().unwrap();
 assert_eq!(curves.at(damage, 6.0), Some(60.0));
+
+// Content tuning it, by its key: 20 more at every level.
+let tuned = CurveData::new("fireball_damage").keys([(1.0, 30.0), (11.0, 130.0)]);
+let curves = curves.rebuild(&[tuned]).unwrap();
+assert_eq!(curves.at(damage, 6.0), Some(80.0));
 
 // A condition, checked against the tree.
 let elemental = Condition::read_tagged(Elemental);
@@ -122,6 +129,7 @@ or [MIT license](https://github.com/declaredlost/bevy_mettle/blob/main/LICENSE-M
 [`TagAdded`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagAdded.html
 [`TagRemoved`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/tag/struct.TagRemoved.html
 [`CurveRegistry`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveRegistry.html
+[`ScalingCurve`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/trait.ScalingCurve.html
 [`CurveData`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveData.html
 [`Condition`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/condition/type.Condition.html
 [`Error`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/enum.Error.html

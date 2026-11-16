@@ -1,0 +1,5 @@
+error: expected `name = ".."`
+ --> tests/derives/curve_name.rs:6:9
+  |
+6 | #[curve(name = fireball_damage, keys = [(1.0, 10.0), (10.0, 85.0)])]
+  |         ^^^^

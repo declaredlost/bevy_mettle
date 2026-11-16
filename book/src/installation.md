@@ -18,6 +18,7 @@ one before it: abilities pay with effects, and effects change attributes.
 | `effect` | Effects; turns on `attribute` (default) |
 | `ability` | Abilities; turns on `effect` (default) |
 | `lightyear` | Prediction over lightyear; turns on `ability` |
+| `hotpatching` | Effects, abilities and curves defined again as code is hot patched |
 
 Gameplay tags, curves and conditions are always there.
 [Feature flags](features.md) has the full list.
@@ -129,14 +130,20 @@ the parts before it, not after.
 
 Each part's plugin adds [`MettleCorePlugin`] if it isn't there yet. To run
 mettle elsewhere, add `MettleCorePlugin::new(..)` before them. If you add the
-plugins one by one, also add [`MettleContentPlugin`]. It loads
-[`MettleContent`]; [Loading data](loading-data.md) shows how.
+plugins one by one, also add [`MettleContentPlugin`]. It builds the
+registries of tags, curves, effects and abilities from what code defines
+and [`MettleContent`] adds, as the app starts and again as either changes;
+[Adding and tuning content](content.md) shows how.
 
 ## Pitfalls
 
 - **`add_attribute` before the plugins.** `add_attribute` adds
   `AttributePlugin` itself if it isn't there yet. `MettlePlugins` added
   after it adds it again, and Bevy panics. Add `MettlePlugins` first.
+- **Code added once the app runs.** Effects, abilities and curves are
+  added with `add_effect`, `add_ability` and `add_curve` as the app is
+  built: the registries are built from them in `PreStartup`, before your
+  `Startup` systems grant and apply them. Add them before the app runs.
 - **Time.** Effects run out by Bevy's time. `DefaultPlugins` and
   `MinimalPlugins` both include `TimePlugin`.
 - **A frame without a fixed step.** Mettle runs in the fixed step, so a

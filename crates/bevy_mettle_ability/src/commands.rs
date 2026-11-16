@@ -235,6 +235,10 @@ pub trait AbilityWorld {
     /// it's decided) `input` doesn't pass its check, which cancels it.
     fn set_input<B: Behaviour>(&mut self, ability: Entity, input: B::Input) -> Result<(), Failure>;
 
+    /// Activates each of `actor`'s abilities tagged any of `tags`, as it runs
+    /// over a network: what those that activated came to.
+    fn activate_tagged(&mut self, actor: Entity, tags: &Tags) -> Vec<Activated>;
+
     /// Cancels `actor`'s active abilities tagged any of `tags`: those it
     /// cancelled.
     fn cancel_abilities(&mut self, actor: Entity, tags: &Tags) -> Vec<Entity>;
@@ -314,6 +318,10 @@ impl AbilityWorld for World {
     fn set_input<B: Behaviour>(&mut self, ability: Entity, input: B::Input) -> Result<(), Failure> {
         let behaviour = behaviour_id::<B>(self).ok_or(Failure::Input)?;
         engine::set_input(self, ability, Some(behaviour), input)
+    }
+
+    fn activate_tagged(&mut self, actor: Entity, tags: &Tags) -> Vec<Activated> {
+        crate::net::predict_tagged(self, actor, tags)
     }
 
     fn cancel_abilities(&mut self, actor: Entity, tags: &Tags) -> Vec<Entity> {

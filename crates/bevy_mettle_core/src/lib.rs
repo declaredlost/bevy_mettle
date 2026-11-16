@@ -14,6 +14,12 @@ pub mod registry;
 mod schedule;
 pub mod tag;
 
+/// This crate, as the derives reach it.
+#[doc(hidden)]
+pub mod __core {
+    pub use crate::*;
+}
+
 pub use self::activation::Activation;
 pub use self::error::{Error, Errors};
 pub use self::schedule::{Mettle, MettleCorePlugin, MettleSet, MettleSystems};

@@ -1,0 +1,10 @@
+error[E0599]: no method named `lastin` found for struct `EffectData` in the current scope
+ --> tests/derives/unknown_key.rs:7:10
+  |
+7 | #[effect(lastin = 4.0)]
+  |          ^^^^^^
+  |
+help: there is a method `lasting` with a similar name
+  |
+7 | #[effect(lasting = 4.0)]
+  |                +

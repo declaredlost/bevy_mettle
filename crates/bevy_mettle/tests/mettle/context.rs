@@ -5,8 +5,10 @@ use std::sync::{Arc, Mutex};
 
 use bevy::ecs::entity::MapEntities;
 use bevy::prelude::*;
+use bevy::reflect::TypePath;
 use bevy_harness::TestApp;
 use bevy_mettle::core::registry::AbilityId;
+use bevy_mettle::effect::EffectScope;
 use bevy_mettle::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -27,17 +29,50 @@ struct Tracer {
     marked: Entity,
 }
 
+/// The game's own: how much a wound hurt.
+#[derive(Reflect, Clone, Debug, PartialEq, Serialize, Deserialize, MapEntities)]
+#[reflect(ContextData)]
+struct Hurt {
+    amount: f32,
+}
+
+/// The game's own, but never registered.
+#[derive(Reflect, Clone, Debug, PartialEq, Serialize, Deserialize, MapEntities)]
+#[reflect(ContextData)]
+struct Unregistered {
+    amount: f32,
+}
+
 /// A strike, running [`ShotDamage`], playing `cue.hit`.
 #[derive(Effect)]
+#[effect(execution::<ShotDamage>, cue = "cue.hit")]
 struct Strike;
 
 /// A graze, its damage worked out by [`Falloff`].
 #[derive(Effect)]
+#[effect(flat::<Life>(Magnitude::calculation::<Falloff>()))]
 struct Graze;
 
 /// A fuse, chaining the echo every way it can.
 #[derive(Effect)]
+#[effect(
+    lasting = 0.5,
+    on_apply::<Echo>,
+    on_remove::<Echo>,
+    on_expire::<Echo>,
+    stacking = Stacking::up_to(1).overflow::<Echo>(),
+)]
 struct Fuse;
+
+/// Runs [`Witness`].
+#[derive(Effect)]
+#[effect(execution::<Witness>)]
+struct Echo;
+
+/// As much damage as the [`Hurt`] it's applied with says.
+#[derive(Effect)]
+#[effect(flat::<Life>(Magnitude::context::<Hurt>("amount").times(-1.0)))]
+struct Wound;
 
 /// 10 damage, twice that for a headshot; what it saw, noted. Or, in its
 /// place, what each part of the context reads, noted, and no damage.
@@ -129,29 +164,27 @@ impl Seen {
 
 const TAGS: &[&str] = &["cue", "cue.hit"];
 
-fn effects() -> Vec<EffectData> {
-    vec![
-        EffectData::instant(Key::of::<Strike>())
-            .execution(Key::of::<ShotDamage>())
-            .cue("cue.hit"),
-        EffectData::instant(Key::of::<Graze>()).modifier(EffectModifier::new::<Life>(
-            Operation::Flat,
-            Magnitude::Custom(Key::of::<Falloff>()),
-        )),
-        EffectData::lasting(Key::of::<Fuse>(), 0.5)
-            .on_apply("echo")
-            .on_remove("echo")
-            .on_expire("echo")
-            .stacking(Stacking {
-                by: StackBy::Target,
-                limit: 1,
-                reapply: Reapply::Refresh,
-                reset_period: false,
-                expire: Expire::ClearAll,
-                overflow: vec![Key::from_static("echo")],
-            }),
-        EffectData::instant("echo").execution(Key::of::<Witness>()),
-    ]
+/// What effects are checked against: what `world` has.
+fn scope(world: &World) -> EffectScope<'_> {
+    EffectScope {
+        tags: world.resource(),
+        curves: world.resource(),
+        attributes: world.resource(),
+        executions: world.resource(),
+        calculations: world.resource(),
+        routes: world.resource(),
+        context: world.resource(),
+    }
+}
+
+/// Defines the effects code adds: once the app's finished, so they're
+/// checked against every type registered as context data.
+fn define(world: &mut World) {
+    let registry = world
+        .resource::<EffectRegistry>()
+        .rebuild(&[], scope(world))
+        .unwrap();
+    world.insert_resource(registry);
 }
 
 /// An app with the effects, the game's types, and what executions see noted
@@ -168,29 +201,13 @@ fn app(seen: &Seen, code: impl FnOnce(&mut App)) -> TestApp {
             .init_resource::<CurveRegistry>()
             .register_type::<Shot>()
             .register_type::<Tracer>()
-            .add_effect::<Strike>()
-            .add_effect::<Graze>()
-            .add_effect::<Fuse>()
+            .register_type::<Hurt>()
+            .add_effects::<(Strike, Graze, Fuse, Echo, Wound)>()
             .add_execution(ShotDamage::Noted(seen.clone()))
             .add_execution(Witness { seen })
-            .add_calculation(Falloff);
+            .add_calculation(Falloff)
+            .add_systems(PreStartup, define);
             code(app);
-            let world = app.world();
-            let registry = world
-                .resource::<EffectRegistry>()
-                .rebuild(
-                    &effects(),
-                    EffectScope {
-                        tags: world.resource(),
-                        curves: world.resource(),
-                        attributes: world.resource(),
-                        executions: world.resource(),
-                        calculations: world.resource(),
-                        routes: world.resource(),
-                    },
-                )
-                .unwrap();
-            app.insert_resource(registry);
         })
         .watch_triggered::<EffectExecuted>()
         .watch_triggered::<CueExecuted>()
@@ -426,4 +443,96 @@ fn a_type_added_again_replaces_its_own_and_no_other() {
         Strike.spec().with(Tracer { marked }),
         "the same count of others isn't the same"
     );
+}
+
+#[test]
+fn a_magnitude_reads_a_field_of_the_context() {
+    let mut app = app(&Seen::default(), |_| {});
+    let npc = actor(&mut app, []);
+    apply(&mut app, npc, Wound.with(Hurt { amount: 5.0 }));
+    assert!(close(get::<Life>(&app, npc), 45.0), "hurt by 5");
+    apply(
+        &mut app,
+        npc,
+        Wound
+            .with(Shot { headshot: true })
+            .with(Hurt { amount: 12.0 }),
+    );
+    assert!(
+        close(get::<Life>(&app, npc), 33.0),
+        "hurt by 12, whatever else it carries: {}",
+        get::<Life>(&app, npc)
+    );
+}
+
+#[test]
+fn a_magnitude_reading_context_its_spec_doesnt_carry_is_nothing() {
+    let mut app = app(&Seen::default(), |_| {});
+    let npc = actor(&mut app, []);
+    // Each warned of, and read as 0.
+    apply(&mut app, npc, Wound.spec());
+    assert!(close(get::<Life>(&app, npc), 50.0), "no context: 0");
+    apply(&mut app, npc, Wound.with(Shot { headshot: true }));
+    assert!(close(get::<Life>(&app, npc), 50.0), "other data: 0");
+}
+
+#[test]
+fn an_effect_with_data_is_its_spec_with_it() {
+    let marked = Entity::from_raw_u32(9).unwrap();
+    assert_eq!(
+        Wound.with(Hurt { amount: 5.0 }),
+        Wound.spec().with(Hurt { amount: 5.0 })
+    );
+    assert_eq!(
+        Wound.with(Hurt { amount: 5.0 }).context.get::<Hurt>(),
+        Some(&Hurt { amount: 5.0 })
+    );
+    assert_eq!(
+        Strike.with(Shot { headshot: true }).with(Tracer { marked }),
+        Strike
+            .spec()
+            .with(Shot { headshot: true })
+            .with(Tracer { marked }),
+        "and more after it"
+    );
+}
+
+#[test]
+fn content_rejects_context_magnitudes_it_cant_read() {
+    let app = app(&Seen::default(), |_| {});
+    let world = app.world();
+    let errors = world
+        .resource::<EffectRegistry>()
+        .rebuild(
+            &[
+                EffectData::new("unregistered")
+                    .flat::<Life>(Magnitude::context::<Unregistered>("amount")),
+                EffectData::new("not_a_number")
+                    .flat::<Life>(Magnitude::context::<Shot>("headshot")),
+                EffectData::new("no_such_field").flat::<Life>(Magnitude::context::<Hurt>("depth")),
+                // Registered, and an `f32`: read.
+                EffectData::new("read").flat::<Life>(Magnitude::context::<Hurt>("amount")),
+            ],
+            scope(world),
+        )
+        .unwrap_err();
+    assert_eq!(errors.0.len(), 3, "{errors}");
+    let errors = errors.to_string();
+    for expected in [
+        format!(
+            "a magnitude reading `{}`, which isn't registered as context data (in \
+             `unregistered`)",
+            Unregistered::type_path()
+        ),
+        format!(
+            "a magnitude reading `{}::headshot`, which isn't an `f32` (in `not_a_number`)",
+            Shot::type_path()
+        ),
+        format!(
+            "a magnitude reading `{}::depth`, which isn't a field of it (in `no_such_field`)",
+            Hurt::type_path()
+        ),
+    ] {
+        assert!(errors.contains(&expected), "{expected} not in: {errors}");
+    }
 }

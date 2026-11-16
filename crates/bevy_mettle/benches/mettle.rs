@@ -10,8 +10,12 @@ use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
+use bevy_mettle::MettleContentPlugin;
+#[cfg(feature = "ability")]
+use bevy_mettle::ability::net::{AbilityReply, AbilityRequest};
 use bevy_mettle::core::condition::Context;
 use bevy_mettle::effect::cue::CueBursts;
+use bevy_mettle::effect::net::EffectReplica;
 use bevy_mettle::prelude::*;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 
@@ -48,14 +52,23 @@ impl RouteFn for IncomingDamage {
     }
 }
 
-/// The effects the benches apply, as code names them.
+/// The effects the benches apply.
 #[derive(Effect)]
+#[effect(flat::<Life>(-1.0))]
 struct Hit;
 #[derive(Effect)]
+#[effect(route::<IncomingDamage>(2.0))]
 struct Routed;
 #[derive(Effect)]
+#[effect(execution::<Strike>)]
 struct Struck;
 #[derive(Effect)]
+#[effect(
+    lasting = 1_000_000.0,
+    tag = "effect.affliction.burning",
+    period = 0.016
+)]
+#[effect(owner_tag = "state.burning", flat::<Life>(0.0))]
 struct Burning;
 /// What a strike executes.
 #[derive(Execution)]
@@ -84,31 +97,37 @@ impl ExecutionFn for Scorch {
     }
 }
 
-/// Effects capturing what they read, as code names them.
+/// Effects capturing what they read.
 #[derive(Effect)]
+#[effect(lasting = 1_000_000.0, period = 0.016, execution::<Scorch>)]
 struct Scorching;
+/// A tenth of the source's `A0`, a third of it in fire, followed live.
 #[derive(Effect)]
+#[effect(infinite, flat::<A2>(Magnitude::source::<A0>().live().times(0.1)))]
+#[effect(flat::<A4>(Magnitude::source::<A3>().live().tagged(FIRE).times(1.0 / 3.0)))]
 struct Aura;
 /// Its source's `A0` bonus and fire `A3` as the spec was made, off life.
 #[derive(Effect)]
+#[effect(flat::<Life>(Magnitude::source::<A0>().bonus().times(-0.01)))]
+#[effect(flat::<Life>(Magnitude::source::<A3>().tagged(FIRE).times(-0.01)))]
 struct Snapped;
 
-/// Effects stacking, served and ticking, as code names them.
+/// Up to 5 stacks on a target, each refreshing its time.
 #[derive(Effect)]
+#[effect(lasting = 1_000_000.0, tag = "effect.affliction", stacking = Stacking::up_to(5))]
+#[effect(flat::<A5>(1.0))]
 struct Stacked;
+/// Effects served and ticking.
 #[derive(Effect)]
+#[effect(lasting = 1_000_000.0, flat::<A6>(1.0))]
 struct Ward;
 #[derive(Effect)]
+#[effect(flat::<Life>(-1.0), cue = "cue.hit")]
 struct Flare;
+/// Damage over time: every half second.
 #[derive(Effect)]
+#[effect(lasting = 1_000_000.0, period = 0.5, flat::<Life>(-1.0))]
 struct Dot;
-/// What an ability costs, and its cooldown.
-#[derive(Effect)]
-#[effect(name = "bolt.cost")]
-struct BoltCost;
-#[derive(Effect)]
-#[effect(name = "bolt.cooldown")]
-struct BoltCooldown;
 
 const ACTORS: u16 = 1000;
 const FIRE: &str = "damage.elemental.fire";
@@ -159,8 +178,9 @@ fn own_modifiers(
         .collect()
 }
 
-fn tags() -> TagRegistry {
-    let defs: Vec<TagKey> = [
+/// The tags the benches' content adds.
+fn tags() -> Vec<TagKey> {
+    [
         "damage",
         "damage.elemental",
         "damage.elemental.fire",
@@ -181,8 +201,7 @@ fn tags() -> TagRegistry {
     ]
     .into_iter()
     .map(TagKey::named)
-    .collect();
-    TagRegistry::build(defs).unwrap()
+    .collect()
 }
 
 /// An app keeping attributes every update, with `ACTORS` actors.
@@ -365,74 +384,6 @@ fn bench_tags(c: &mut Criterion) {
     group.finish();
 }
 
-/// The effects the benches apply, as content defines them.
-fn effects() -> Vec<EffectData> {
-    vec![
-        EffectData::instant(Key::of::<Hit>())
-            .modifier(EffectModifier::new::<Life>(Operation::Flat, -1.0)),
-        EffectData::instant(Key::of::<Routed>())
-            .modifier(EffectModifier::route::<IncomingDamage>(2.0)),
-        EffectData::instant(Key::of::<Struck>()).execution(Key::of::<Strike>()),
-        EffectData::lasting(Key::of::<Burning>(), 1_000_000.0)
-            .tag("effect.affliction.burning")
-            .period(0.016, false)
-            .owner_tag("state.burning")
-            .modifier(EffectModifier::new::<Life>(Operation::Flat, 0.0)),
-        EffectData::lasting(Key::of::<Scorching>(), 1_000_000.0)
-            .period(0.016, false)
-            .execution(Key::of::<Scorch>()),
-        // A tenth of the source's `A0`, a third of it in fire, followed live.
-        EffectData::infinite(Key::of::<Aura>())
-            .modifier(EffectModifier::new::<A2>(
-                Operation::Flat,
-                Magnitude::source::<A0>().live().times(0.1),
-            ))
-            .modifier(EffectModifier::new::<A4>(
-                Operation::Flat,
-                Magnitude::source::<A3>()
-                    .live()
-                    .tagged(FIRE)
-                    .times(1.0 / 3.0),
-            )),
-        // Its source's `A0` bonus and fire `A3`, as the spec was made.
-        EffectData::instant(Key::of::<Snapped>())
-            .modifier(EffectModifier::new::<Life>(
-                Operation::Flat,
-                Magnitude::source::<A0>().bonus().times(-0.01),
-            ))
-            .modifier(EffectModifier::new::<Life>(
-                Operation::Flat,
-                Magnitude::source::<A3>().tagged(FIRE).times(-0.01),
-            )),
-        // Up to 5 stacks on a target, each refreshing its time.
-        EffectData::lasting(Key::of::<Stacked>(), 1_000_000.0)
-            .tag("effect.affliction")
-            .stacking(Stacking {
-                by: StackBy::Target,
-                limit: 5,
-                reapply: Reapply::Refresh,
-                reset_period: false,
-                expire: Expire::ClearAll,
-                overflow: Vec::new(),
-            })
-            .modifier(EffectModifier::new::<A5>(Operation::Flat, 1.0)),
-        EffectData::lasting(Key::of::<Ward>(), 1_000_000.0)
-            .modifier(EffectModifier::new::<A6>(Operation::Flat, 1.0)),
-        EffectData::instant(Key::of::<Flare>())
-            .modifier(EffectModifier::new::<Life>(Operation::Flat, -1.0))
-            .cue("cue.hit"),
-        // Damage over time: every half second.
-        EffectData::lasting(Key::of::<Dot>(), 1_000_000.0)
-            .period(0.5, false)
-            .modifier(EffectModifier::new::<Life>(Operation::Flat, -1.0)),
-        // What an ability costs, and its cooldown: shorter than an update, run
-        // out by the next.
-        EffectData::instant(Key::of::<BoltCost>())
-            .modifier(EffectModifier::new::<Life>(Operation::Flat, -1.0)),
-        EffectData::lasting(Key::of::<BoltCooldown>(), 0.01).owner_tag("cooldown.fireball"),
-    ]
-}
-
 /// The stacks of `actor`'s first active effect.
 fn stacks(app: &App, actor: Entity) -> u32 {
     let effect = app
@@ -467,16 +418,25 @@ fn effect_app() -> (App, Vec<Entity>) {
 /// An app with effects, as a server keeping what its clients are sent.
 fn server_app() -> (App, Vec<Entity>) {
     effect_app_with(ACTORS, |app| {
-        app.insert_resource(NetRole::Server).insert_resource(tags());
+        app.insert_resource(NetRole::Server);
     })
 }
 
 /// An app with effects and `actors` actors, `extra` setting it up further
-/// once its effects are checked, before its actors are spawned.
+/// before its actors are spawned and what it defines is loaded.
 fn effect_app_with(actors: u16, extra: impl FnOnce(&mut App)) -> (App, Vec<Entity>) {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
-        .add_plugins((MettleCorePlugin::new(Update), AttributePlugin, EffectPlugin))
+        .add_plugins((
+            MettleCorePlugin::new(Update),
+            AttributePlugin,
+            EffectPlugin,
+            MettleContentPlugin,
+        ))
+        .insert_resource(MettleContent {
+            tags: tags(),
+            ..default()
+        })
         .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
             16,
         )));
@@ -497,27 +457,10 @@ fn effect_app_with(actors: u16, extra: impl FnOnce(&mut App)) -> (App, Vec<Entit
         .add_effect::<Stacked>()
         .add_effect::<Ward>()
         .add_effect::<Flare>()
-        .add_effect::<Dot>()
-        .add_effect::<BoltCost>()
-        .add_effect::<BoltCooldown>();
-    let effects = effects();
-    let world = app.world();
-    let registry = world
-        .resource::<EffectRegistry>()
-        .rebuild(
-            &effects,
-            EffectScope {
-                tags: &tags(),
-                curves: &CurveRegistry::default(),
-                attributes: world.resource(),
-                executions: world.resource(),
-                calculations: world.resource(),
-                routes: world.resource(),
-            },
-        )
-        .unwrap();
-    app.insert_resource(registry);
+        .add_effect::<Dot>();
     extra(&mut app);
+    app.finish();
+    app.cleanup();
     let attributes = app.world().resource::<AttributeRegistry>().clone();
     let actors: Vec<Entity> = (0..actors)
         .map(|i| {
@@ -702,9 +645,11 @@ fn bench_captures(c: &mut Criterion) {
 #[derive(Component, Default, Behaviour)]
 struct Cast;
 
-/// An ability costing a life and cooling down for 10 ms.
+/// An ability costing a life and cooling down for 10 ms: shorter than an
+/// update, run out by the next.
 #[cfg(feature = "ability")]
 #[derive(Ability)]
+#[ability(behaviour::<Cast>, cost = Cost::of::<Life>(1.0), cooldown = 0.01)]
 struct Bolt;
 
 /// An app playing as `role`, each actor granted a bolt.
@@ -713,25 +658,8 @@ fn ability_app(role: NetRole) -> (App, Vec<Entity>) {
     let (mut app, actors) = effect_app_with(ACTORS, move |app| {
         app.add_plugins(AbilityPlugin)
             .insert_resource(role)
-            .insert_resource(tags())
             .add_behaviour::<Cast>()
             .add_ability::<Bolt>();
-        let world = app.world_mut();
-        let abilities = world
-            .resource::<AbilityRegistry>()
-            .rebuild(
-                &[AbilityData::new(Key::of::<Bolt>(), Key::of::<Cast>())
-                    .cost(Key::of::<BoltCost>())
-                    .cooldown(Key::of::<BoltCooldown>())],
-                &[],
-                AbilityScope {
-                    tags: world.resource(),
-                    effects: world.resource(),
-                    behaviours: world.resource(),
-                },
-            )
-            .unwrap();
-        world.insert_resource(abilities);
     });
     for &actor in &actors {
         app.world_mut().grant_ability(actor, Bolt).expect("granted");

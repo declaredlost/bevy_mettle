@@ -1,19 +1,24 @@
-//! `#[derive(Effect)]`: an effect's name.
+//! `#[derive(Effect)]`: an effect, defined by its keys.
 
 use proc_macro2::TokenStream;
+use quote::quote;
 use syn::DeriveInput;
 
-use crate::shared::{named, path};
+use crate::defined::{self, Defining};
+use crate::shared::path;
 
 pub(crate) fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let krate = path("bevy_mettle_effect", "effect");
-    named(
+    defined::expand(
         input,
-        "effect",
-        "an effect",
-        &quote::quote!(#krate::Effect),
-        &krate,
-        &quote::quote!(#krate::__core::registry::AnyEffect),
+        &Defining {
+            attr: "effect",
+            what: "an effect",
+            trait_path: quote!(#krate::Effect),
+            data: quote!(#krate::data::EffectData),
+            kind: quote!(#krate::__core::registry::AnyEffect),
+            krate,
+        },
     )
 }
 
@@ -24,42 +29,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn it_has_only_a_name() {
-        let input = parse_quote! {
-            #[effect(base = 1.0)]
-            struct Burning;
-        };
-        let error = expand(&input).expect_err("an error");
-        assert!(error.to_string().contains("only a name"), "{error}");
-    }
-
-    #[test]
-    fn it_is_named_in_snake_case() {
-        let input = parse_quote! {
-            struct Burning;
-        };
-        let expanded = expand(&input).unwrap().to_string();
-        assert!(
-            expanded.contains("const KEY : & 'static str = \"burning\""),
-            "{expanded}"
-        );
-    }
-
-    #[test]
     fn it_is_keyed_as_an_effect() {
         let input = parse_quote! {
-            #[effect(name = "fire.burning")]
+            #[effect(name = "fire.burning", lasting = 4.0)]
             struct Burning;
         };
         let expanded = expand(&input).unwrap().to_string();
+        assert!(expanded.contains("Effect for Burning"), "{expanded}");
         assert!(expanded.contains("Keyed for Burning"), "{expanded}");
         assert!(
             expanded.contains("__core :: registry :: AnyEffect ;"),
             "{expanded}"
         );
-        assert!(
-            expanded.contains("const KEY : & 'static str = \"fire.burning\""),
-            "{expanded}"
-        );
+        assert!(expanded.contains(". lasting (4.0)"), "{expanded}");
     }
 }

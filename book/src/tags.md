@@ -53,8 +53,10 @@ Tags code names are added to the app, as attributes are:
 App::new().add_tag::<Burning>(); // and `state`, above it
 ```
 
-They join the registry content is checked against, whether the content
-defines them or not, so data naming them is checked against code.
+They join the registry everything is checked against, whether content
+lists them or not, so data naming them is checked against code. The tags
+an ability's cooldown grants, `cooldown` and `cooldown.fireball`, are
+added for you.
 
 ## Keys
 
@@ -94,9 +96,9 @@ and a mod can add its own. In data, a tag is written as its name:
 `"damage.elemental.fire"`.
 
 In a game, they go in [`MettleContent`]'s `tags`, beside those code adds,
-and mettle checks them as the content is loaded, keeping them as a
+and mettle checks them all as the app starts, keeping them as a
 resource, `Res<TagRegistry>`. The tags code adds are kept in the registry
-too, so a reload doesn't lose them. [`TagRegistry::build`] is that step on
+too, so building it again doesn't lose them. [`TagRegistry::build`] is that step on
 its own: it checks the definitions and gives you the registry everything
 else is checked against:
 
@@ -127,7 +129,7 @@ let reloaded = tags
 assert_eq!(reloaded.id("damage.elemental.fire"), Some(fire));
 ```
 
-Mettle rebuilds the registry this way each time content is loaded again, so
+Mettle rebuilds the registry this way each time content changes, so
 what holds a tag's number still names the same tag.
 
 `build` takes definitions from however many files at once: chain them, or
@@ -151,7 +153,7 @@ assert_eq!(
 ```
 
 Mettle doesn't read files. Your game loads them however it likes, and hands
-the definitions over: see [Loading data](loading-data.md).
+the definitions over: see [Adding and tuning content](content.md).
 
 ## Sets of tags
 
@@ -259,7 +261,7 @@ A client and its server have to agree on the registry: tags travel as their
 numbers, so a tag numbered differently would be read as another.
 [`TagRegistry::fingerprint`], as every registry's, is a hash of the tags with
 their numbers. Built from the same tags, in whatever order they were defined,
-registries hash the same; a registry rebuilt by a reload keeps old numbers, so
+registries hash the same; a registry rebuilt as content changes keeps old numbers, so
 two hash the same only if they were loaded the same way. Over lightyear,
 mettle compares them for you as a client connects:
 [Lightyear](lightyear.md#checking-content).

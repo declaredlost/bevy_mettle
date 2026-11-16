@@ -35,6 +35,7 @@ pub(crate) fn remove(world: &mut World, effect: Entity, expired: bool, depth: u3
         entity: target,
         effect,
         id: def.id,
+        key: def.name.clone(),
         expired,
     });
     chain(world, target, &spec, &def.on_remove, depth);
@@ -59,7 +60,7 @@ pub(crate) fn remove_tagged(world: &mut World, target: Entity, tags: &Tags, dept
 }
 
 /// Takes every effect applied under `activation` off `target`.
-pub(crate) fn remove_activation(world: &mut World, target: Entity, activation: Activation) {
+pub(crate) fn remove_under(world: &mut World, target: Entity, activation: Activation) {
     let applied: Vec<Entity> = effects_on(world, target)
         .into_iter()
         .filter(|effect| {
@@ -97,6 +98,7 @@ pub(super) fn expire(
                     entity: target,
                     effect,
                     id: def.id,
+                    key: def.name.clone(),
                     stacks,
                 });
             }
@@ -141,6 +143,7 @@ pub(crate) fn removed_unasked(
         entity: target,
         effect,
         id: def.id,
+        key: def.name.clone(),
         expired: false,
     });
     chain(world, target, spec, &def.on_remove, 0);

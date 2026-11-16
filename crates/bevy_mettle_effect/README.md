@@ -19,25 +19,26 @@ often.
 
 ## Overview
 
-- An [`EffectData`] is content, named by its name: its duration, period,
-  modifiers, executions in code, the tags it grants, what it needs to apply
-  or to count, what it removes or keeps off, how it stacks, and the effects
-  it chains into.
-- An [`EffectRegistry`] is built from them, checked against the tags, the
+- An effect is a unit struct, `#[derive(Effect)]`, defining itself: each
+  key a call on its [`EffectData`], its duration, period, modifiers,
+  executions in code, the tags it grants, what it needs to apply or to
+  count, what it removes or keeps off, how it stacks, and the effects it
+  chains into. Content adds more, each an `EffectData` named by its name.
+- An [`EffectRegistry`] is built from both, checked against the tags, the
   curves, the attributes the app added and its executions, calculations and
   routes: every error at once. Each effect is numbered, an `EffectId`, and a
   reload keeps the numbers. Insert a new one and active effects take their
   new definitions.
-- A [`Magnitude`] is a small expression: values, the level, params, curves,
+- A [`Magnitude`] is a small expression: values, the level, context data, curves,
   attributes and calculations in code, summed, multiplied and clamped.
   Checked, its names are numbers and its constants folded.
 - An attribute it reads is captured as the spec is made (a projectile
   carries its caster's spell power, [`Snapshots`]) or as it's applied, or
   read live, a lasting effect following it as it changes. Executions and
   calculations declare theirs on their derive.
-- Code names an effect by an [`Effect`] type, which is its spec: its level,
-  its params and its source (`Burning.level(3.0)`), an [`EffectSpec`], and
-  its context: what struck, where, and a game's own reflected types.
+- Code names an effect by its [`Effect`] type, which is its spec: its level
+  and its source (`Burning.level(3.0)`), an [`EffectSpec`], and its
+  context: what struck, where, and a game's own reflected types.
   `apply_effect` checks it, then executes it, stacks it, or spawns it as an
   entity [`EffectOf`] its target.
 - While it counts, a lasting effect's modifiers count for its target and
@@ -82,43 +83,45 @@ bevy_mettle_effect = "0.1"
 use bevy::prelude::*;
 use bevy_mettle_attribute::prelude::*;
 use bevy_mettle_core::prelude::*;
+use bevy_mettle_effect::EffectScope;
 use bevy_mettle_effect::prelude::*;
 
 #[derive(Attribute)]
 #[attribute(base = 100.0, min = 0.0)]
 struct Life;
 
-/// Burning, as code names it: content defines it as `"burning"`.
+/// Burning: 5 damage at once and every half second, for 4 seconds.
 #[derive(Effect)]
+#[effect(lasting = 4.0, period = 0.5, execute_on_apply, flat::<Life>(-5.0))]
+#[effect(owner_tag = "state.burning")]
 struct Burning;
 
-/// Burning: 5 fire damage every half second, for 4 seconds.
-fn load(
-    mut commands: Commands,
-    effects: Res<EffectRegistry>,
-    attributes: Res<AttributeRegistry>,
-    executions: Res<ExecutionRegistry>,
-    calculations: Res<CalculationRegistry>,
-    routes: Res<RouteRegistry>,
-) {
+/// Checks what code defines and builds the registries, as `bevy_mettle`'s
+/// `MettleContentPlugin` does as the app starts.
+fn load(world: &mut World) {
     let tags: Vec<TagKey> = ["state", "state.burning"]
         .into_iter()
         .map(TagKey::named)
         .collect();
-    let burning = EffectData::lasting("burning", 4.0)
-        .period(0.5, true)
-        .modifier(EffectModifier::new::<Life>(Operation::Flat, -5.0))
-        .owner_tag("state.burning");
-    let checks = EffectScope {
-        tags: &TagRegistry::build(tags).unwrap(),
-        curves: &CurveRegistry::default(),
-        attributes: &attributes,
-        executions: &executions,
-        calculations: &calculations,
-        routes: &routes,
-    };
-    // Checked from the app's registry, which knows `Burning` is code's.
-    commands.insert_resource(effects.rebuild(&[burning], checks).unwrap());
+    let tags = TagRegistry::build(tags).unwrap();
+    // Rebuilt from the app's registry, which holds the effects code defines.
+    let effects = world
+        .resource::<EffectRegistry>()
+        .rebuild(
+            &[],
+            EffectScope {
+                tags: &tags,
+                curves: &CurveRegistry::default(),
+                attributes: world.resource(),
+                executions: world.resource(),
+                calculations: world.resource(),
+                routes: world.resource(),
+                context: world.resource(),
+            },
+        )
+        .unwrap();
+    world.insert_resource(tags);
+    world.insert_resource(effects);
 }
 
 #[derive(Component)]
@@ -140,7 +143,8 @@ fn main() {
         .add_plugins((MinimalPlugins, EffectPlugin))
         .add_attribute::<Life>()
         .add_effect::<Burning>()
-        .add_systems(Startup, (load, spawn))
+        .add_systems(PreStartup, load)
+        .add_systems(Startup, spawn)
         .add_systems(Update, ignite)
         .run();
 }

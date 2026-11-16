@@ -46,8 +46,6 @@ pub struct EffectReplica {
     pub effect: EffectId,
     /// The level it was applied at.
     pub level: f32,
-    /// What the applying code set, those the tree has.
-    pub params: Vec<(TagId, f32)>,
     /// What it was applied with: who applied it, what struck, where; mapped
     /// as it arrives.
     #[entities]
@@ -87,11 +85,6 @@ impl EffectReplica {
         let mut now = Self {
             effect: active.def.id,
             level: spec.level,
-            params: spec
-                .params
-                .iter()
-                .filter_map(|&(param, value)| Some((tags.id(param)?, value)))
-                .collect(),
             context: ContextReplica::default(),
             activation: spec.activation,
             stacks: active.stacks,
@@ -116,15 +109,9 @@ impl EffectReplica {
         Some(now)
     }
 
-    /// What was applied, its params' tags as `tags` numbers them, and its
-    /// context's data as `data` decodes it.
-    pub(crate) fn spec(&self, tags: &TagRegistry, data: &ContextDataRegistry) -> EffectSpec {
+    /// What was applied, its context's data as `data` decodes it.
+    pub(crate) fn spec(&self, data: &ContextDataRegistry) -> EffectSpec {
         let mut spec = EffectSpec::from_id(self.effect).level(self.level);
-        for &(param, value) in &self.params {
-            if let Some(param) = tags.key(param) {
-                spec = spec.param(param, value);
-            }
-        }
         spec.context = self.context.context(data);
         spec.activation = self.activation;
         spec
@@ -155,7 +142,6 @@ impl EffectReplica {
         ran_down
             && self.effect == now.effect
             && self.level == now.level
-            && self.params == now.params
             && self.activation == now.activation
             && self.stacks == now.stacks
             && self.duration == now.duration

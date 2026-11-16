@@ -9,96 +9,129 @@ an attribute for diminishing returns: see
 
 ## Defining a curve
 
-A curve is data, a [`CurveData`]: a name, how it goes between its keys, and
-its keys as `(at, value)` pairs, rising:
+A curve is a marker type that defines itself. Derive [`ScalingCurve`] on a
+unit struct and give it its keys as `(at, value)` pairs, rising:
 
 ```rust
+# use bevy::prelude::*;
 # use bevy_mettle::prelude::*;
-fn curves() -> Vec<CurveData> {
-    vec![
-        CurveData {
-            name: "fireball.damage".into(),
-            interpolation: Interpolation::Constant,
-            keys: vec![(1.0, 10.0), (10.0, 85.0), (20.0, 240.0)],
-        },
-        CurveData {
-            name: "burning.damage".into(),
-            interpolation: Interpolation::Linear,
-            keys: vec![(1.0, 4.0), (20.0, 40.0)],
-        },
-    ]
-}
-# assert_eq!(curves().len(), 2);
+/// Steps up at levels 10 and 20.
+#[derive(ScalingCurve)]
+#[curve(keys = [(1.0, 10.0), (10.0, 85.0), (20.0, 240.0)], constant)]
+struct FireballDamage;
+
+/// Grows steadily between its keys.
+#[derive(ScalingCurve)]
+#[curve(key(1.0, 4.0), key(20.0, 40.0))]
+struct BurningDamage;
+
+App::new().add_curve::<FireballDamage>().add_curve::<BurningDamage>();
 ```
 
-Here the fireball's damage steps up at levels 10 and 20, and burning's
-grows steadily between its keys. `CurveData` is a serde type: in a file, it's
-a struct with a `name` (a string), an `interpolation`, and
-`keys` as a list of pairs. `interpolation` can be left out: it's `Linear`
-unless it says.
+Each key on `#[curve(..)]` is the [`CurveData`] builder method of the same
+name: `keys = [..]` is `.keys([..])`, `key(at, value)` adds one key,
+`constant` is `.constant()`, and `ease = EaseFunction::SineInOut` is
+`.ease(EaseFunction::SineInOut)`. A curve's key is its type's name in
+`snake_case`, `fireball_damage`, unless `name = ".."` says otherwise. For a
+long definition, `define = function` hands it to a
+`fn(CurveData) -> CurveData` of yours instead.
 
 Between keys, a curve goes one of three ways:
 
-| `interpolation` | Between two keys |
+| Key | Between two keys |
 |---|---|
-| `Linear` | A straight line from one to the next. The default. |
-| `Constant` | Each key's value, held until the next. |
-| `Ease(..)` | One of Bevy's easing functions, such as `Ease(EaseFunction::SineInOut)` or `Ease(EaseFunction::ExponentialIn)`, from one key to the next. |
+| none | A straight line from one to the next, `Linear`. |
+| `constant` | Each key's value, held until the next. |
+| `ease = ..` | One of Bevy's easing functions, such as `EaseFunction::SineInOut` or `EaseFunction::ExponentialIn`, from one key to the next. |
 
 Before the first key and past the last, a curve stays at that key's value. A
 curve with one key is that value at every level.
 
+An effect names a curve by its type: `Magnitude::scaled::<FireballDamage>(1.0)`
+is 1 times the curve at the spec's level, as Unreal's scalable float is.
+[Defining effects](effects.md) shows it.
+
+## Tuning in data
+
+Code says which curves there are; data tunes them, as Unreal's curve tables
+do. A [`CurveData`] in [`MettleContent`]'s `curves` with a code curve's key
+replaces that curve's keys. One with a key no code defines adds a curve,
+for a mod's effects to scale by.
+
+```rust
+# use bevy::prelude::*;
+# use bevy_mettle::prelude::*;
+# #[derive(ScalingCurve)]
+# #[curve(keys = [(1.0, 10.0), (10.0, 85.0), (20.0, 240.0)], constant)]
+# struct FireballDamage;
+let mut app = App::new();
+app.add_plugins((MinimalPlugins, MettlePlugins))
+    .add_curve::<FireballDamage>()
+    .insert_resource(MettleContent {
+        curves: vec![CurveData::new("fireball_damage").keys([(1.0, 12.0), (20.0, 300.0)])],
+        ..Default::default()
+    });
+app.update();
+
+let curves = app.world().resource::<CurveRegistry>();
+let fireball = curves.id_of::<FireballDamage>().unwrap();
+assert_eq!(curves.at(fireball, 1.0), Some(12.0));
+```
+
+`CurveData` is a serde type: in a file, it's a struct with a `name` (a
+string), an `interpolation`, and `keys` as a list of pairs.
+`interpolation` can be left out: it's `Linear` unless it says, and
+otherwise `Constant` or `Ease(SineInOut)`. A tuned curve is the data's
+alone: it doesn't keep the code curve's interpolation.
+
 ## The curve registry
 
-In a game, the curves go in [`MettleContent`]'s `curves`, and mettle builds
-the registry as the content is loaded, keeping it as a resource,
-`Res<CurveRegistry>`. [`CurveRegistry::build`] is that step on its own: it checks
-each curve, builds it as one of Bevy's curves, and numbers it.
+Mettle builds the registry as the app starts, from the curves code adds and
+those content adds or tunes, and keeps it as a resource,
+`Res<CurveRegistry>`. It builds it again as [`MettleContent`] changes, and,
+with the `hotpatching` feature, as code is hot patched, so a curve's keys
+can be changed while the game runs.
 
 A curve's number is a [`CurveId`], given in order of name, as Bevy gives a
 component its `ComponentId`. Effects scale by the number once content is
-checked; the name is for content and debug output. [`CurveRegistry::id`] finds
-a curve's number by its name:
+checked; the name is for content and debug output. `id_of::<C>()` finds a
+curve type's number, [`CurveRegistry::id`] a name's, and
+[`CurveRegistry::at`] reads it:
 
 ```rust
+# use bevy::prelude::*;
 # use bevy_mettle::prelude::*;
-# fn curves() -> Vec<CurveData> {
-#     vec![
-#         CurveData {
-#             name: "fireball.damage".into(),
-#             interpolation: Interpolation::Constant,
-#             keys: vec![(1.0, 10.0), (10.0, 85.0), (20.0, 240.0)],
-#         },
-#         CurveData {
-#             name: "burning.damage".into(),
-#             interpolation: Interpolation::Linear,
-#             keys: vec![(1.0, 4.0), (20.0, 40.0)],
-#         },
-#     ]
-# }
-let curves = CurveRegistry::build(&curves()).unwrap();
+# #[derive(ScalingCurve)]
+# #[curve(key(1.0, 4.0), key(20.0, 40.0))]
+# struct BurningDamage;
+let mut app = App::new();
+app.add_plugins((MinimalPlugins, MettlePlugins))
+    .add_curve::<BurningDamage>();
+app.update();
 
-let burning = curves.id("burning.damage").unwrap();
+let curves = app.world().resource::<CurveRegistry>();
+let burning = curves.id_of::<BurningDamage>().unwrap();
+assert_eq!(curves.id("burning_damage"), Some(burning));
 assert_eq!(curves.at(burning, 1.0), Some(4.0));
 assert_eq!(curves.at(burning, 50.0), Some(40.0)); // Past the last key.
-assert_eq!(curves.id("frost.damage"), None);
+assert_eq!(curves.id("frost_damage"), None);
 ```
 
-As content is loaded again, the registry is rebuilt with
-[`CurveRegistry::rebuild`]: curves keep the numbers they had, and new ones are
-numbered after them.
+As the registry is built again, curves keep the numbers they had, and new
+ones are numbered after them. [`CurveRegistry::build`] builds one from data
+alone, for tools and tests.
 
-`build` reports every mistake together:
+Building reports every mistake together:
 
-- **A curve defined twice.**
+- **A curve defined twice** in content.
 - **A curve with no keys.**
 - **A key that isn't finite**, such as `NaN`.
 - **Levels that don't rise.** Each key's level has to be above the one
   before it.
 
-Effects name curves by name. As content is loaded, every curve an effect
-names is checked against the registry, and resolved to its number. [Defining
-effects](effects.md) shows a magnitude scaled by a curve.
+An effect added by content names curves by name. As the registries are built,
+every curve an effect names is checked against the registry, and resolved
+to its number.
 
 ## As one of Bevy's curves
 
@@ -108,13 +141,9 @@ adaptors:
 
 ```rust
 # use bevy_mettle::prelude::*;
-# let curves = CurveRegistry::build(&[CurveData {
-#     name: Key::from_static("burning.damage"),
-#     interpolation: Interpolation::Linear,
-#     keys: vec![(1.0, 4.0), (20.0, 40.0)],
-# }])
-# .unwrap();
-let burning = curves.curve(curves.id("burning.damage").unwrap()).unwrap();
+# let curves = CurveRegistry::build(&[CurveData::new("burning_damage").keys([(1.0, 4.0), (20.0, 40.0)])])
+#     .unwrap();
+let burning = curves.curve(curves.id("burning_damage").unwrap()).unwrap();
 let graph: Vec<f32> = (1..=20).map(|level| burning.sample_clamped(level as f32)).collect();
 assert_eq!(graph.len(), 20);
 ```
@@ -122,15 +151,19 @@ assert_eq!(graph.len(), 20);
 ## Pitfalls
 
 - **Levels are numbers, not steps.** A level can be 2.5. Each curve goes
-  between its keys as it says, so a `Constant` curve is the way to get steps.
-- **Easing goes from one key to the next.** `Ease(QuadraticIn)` starts slow
-  after every key, not once across the whole curve.
+  between its keys as it says, so a `constant` curve is the way to get steps.
+- **Easing goes from one key to the next.** `ease = EaseFunction::QuadraticIn`
+  starts slow after every key, not once across the whole curve.
+- **Tuning by the right key.** Data tunes a curve by its key, the type's
+  name in `snake_case`. A misspelled key adds a new curve that nothing
+  scales by, and leaves the code curve as it is.
 
+[`ScalingCurve`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/trait.ScalingCurve.html
 [`CurveData`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveData.html
 [`MettleContent`]: https://docs.rs/bevy_mettle/latest/bevy_mettle/struct.MettleContent.html
 [`CurveRegistry::build`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveRegistry.html#method.build
+[`CurveRegistry::at`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveRegistry.html#method.at
 [`CurveId`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/registry/type.CurveId.html
 [`CurveRegistry::id`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveRegistry.html#method.id
-[`CurveRegistry::rebuild`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveRegistry.html#method.rebuild
 [`CurveRegistry::curve`]: https://docs.rs/bevy_mettle_core/latest/bevy_mettle_core/curve/struct.CurveRegistry.html#method.curve
 [`Curve<f32>`]: https://docs.rs/bevy/latest/bevy/curve/trait.Curve.html

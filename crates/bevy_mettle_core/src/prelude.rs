@@ -10,7 +10,7 @@
 #[doc(no_inline)]
 pub use crate::condition::{Condition, ConditionOver};
 #[doc(no_inline)]
-pub use crate::curve::{CurveData, CurveRegistry, Interpolation};
+pub use crate::curve::{CurveApp, CurveData, CurveRegistry, Interpolation, ScalingCurve};
 #[doc(no_inline)]
 pub use crate::net::NetRole;
 #[doc(no_inline)]

@@ -3,13 +3,15 @@
 use bevy_mettle_core::registry::{AnyEffect, Key};
 use serde::{Deserialize, Serialize};
 
+use crate::Effect;
+
 /// How an effect applied again onto its target stacks, up to a limit.
 ///
 /// Into one active effect, its modifiers' amounts counted once per stack, up to
 /// `limit`.
 ///
-/// A stack is a count on the effect as first applied: its spec (level, params,
-/// source) and what it captured stay as they were, and applying again adds a
+/// A stack is a count on the effect as first applied: its spec (level, source,
+/// context) and what it captured stay as they were, and applying again adds a
 /// stack and, as `reapply` says, its time; the new spec goes only to the
 /// effects it chains. Stack `by` source to keep each source's applications
 /// apart. At the limit, applying again applies `overflow` instead of the
@@ -18,6 +20,14 @@ use serde::{Deserialize, Serialize};
 /// Its overflow effects are named (`E`, a `Key<AnyEffect>`) in data, and
 /// numbered (an [`EffectId`](bevy_mettle_core::registry::EffectId)) once
 /// checked.
+///
+/// ```
+/// # use bevy_mettle_effect::prelude::*;
+/// # #[derive(Effect)] struct Detonate;
+/// let poison = Stacking::up_to(5)
+///     .by(StackBy::Source)
+///     .overflow::<Detonate>();
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Stacking<E = Key<AnyEffect>> {
@@ -102,4 +112,55 @@ pub enum Expire {
     RemoveOne,
     /// Starts the time over, keeping every stack.
     Refresh,
+}
+
+impl Stacking {
+    /// Up to `limit` stacks, everyone's one, each refreshing the time, all
+    /// taken off as it runs out.
+    #[must_use]
+    pub fn up_to(limit: u32) -> Self {
+        Self {
+            by: StackBy::Target,
+            limit,
+            reapply: Reapply::Refresh,
+            reset_period: false,
+            expire: Expire::ClearAll,
+            overflow: Vec::new(),
+        }
+    }
+
+    /// Whose stacks are one, as `by` says.
+    #[must_use]
+    pub fn by(mut self, by: StackBy) -> Self {
+        self.by = by;
+        self
+    }
+
+    /// Applying again doing to the time left as `reapply` says.
+    #[must_use]
+    pub fn reapply(mut self, reapply: Reapply) -> Self {
+        self.reapply = reapply;
+        self
+    }
+
+    /// Applying again starting the period over.
+    #[must_use]
+    pub fn reset_period(mut self) -> Self {
+        self.reset_period = true;
+        self
+    }
+
+    /// Running out of time doing as `expire` says.
+    #[must_use]
+    pub fn expire(mut self, expire: Expire) -> Self {
+        self.expire = expire;
+        self
+    }
+
+    /// Applying `E` in its place at its limit, too.
+    #[must_use]
+    pub fn overflow<E: Effect>(mut self) -> Self {
+        self.overflow.push(Key::of::<E>());
+        self
+    }
 }

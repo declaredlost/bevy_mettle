@@ -3,9 +3,10 @@
 //! What cues and abilities observe.
 
 use bevy::prelude::*;
-use bevy_mettle_core::registry::{AttributeId, EffectId};
+use bevy_mettle_core::registry::{AnyEffect, AttributeId, EffectId, Key};
 use serde::{Deserialize, Serialize};
 
+use crate::Effect;
 use crate::code::RouteId;
 use crate::context::EffectContext;
 
@@ -18,6 +19,8 @@ pub struct EffectApplied {
     pub effect: Entity,
     /// Which effect.
     pub id: EffectId,
+    /// Which effect, by key: what [`is`](Self::is) checks.
+    pub key: Key<AnyEffect>,
 }
 
 /// Triggered as an effect on an actor gains a stack, or loses one.
@@ -32,6 +35,8 @@ pub struct EffectStacked {
     pub effect: Entity,
     /// Which effect.
     pub id: EffectId,
+    /// Which effect, by key: what [`is`](Self::is) checks.
+    pub key: Key<AnyEffect>,
     /// How many stacks it has now.
     pub stacks: u32,
 }
@@ -43,6 +48,8 @@ pub struct EffectBlocked {
     pub entity: Entity,
     /// Which effect.
     pub id: EffectId,
+    /// Which effect, by key: what [`is`](Self::is) checks.
+    pub key: Key<AnyEffect>,
     /// Why.
     pub reason: Blocked,
 }
@@ -87,6 +94,8 @@ pub struct EffectExecuted {
     pub entity: Entity,
     /// Which effect.
     pub id: EffectId,
+    /// Which effect, by key: what [`is`](Self::is) checks.
+    pub key: Key<AnyEffect>,
     /// What it was applied with: who applied it, what struck, where.
     pub context: EffectContext,
     /// What it changed the actor's bases by, each attribute once, in the
@@ -110,6 +119,29 @@ pub struct EffectRemoved {
     pub effect: Entity,
     /// Which effect.
     pub id: EffectId,
+    /// Which effect, by key: what [`is`](Self::is) checks.
+    pub key: Key<AnyEffect>,
     /// Whether it ran out of time.
     pub expired: bool,
 }
+
+/// `is::<E>()` on each effect event.
+macro_rules! is {
+    ($($event:ty),*) => {$(
+        impl $event {
+            /// Whether it's of the effect `E`.
+            #[must_use]
+            pub fn is<E: Effect>(&self) -> bool {
+                self.key == Key::of::<E>()
+            }
+        }
+    )*};
+}
+
+is!(
+    EffectApplied,
+    EffectStacked,
+    EffectBlocked,
+    EffectExecuted,
+    EffectRemoved
+);

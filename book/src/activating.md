@@ -6,15 +6,16 @@ work and ends it.
 
 ## Granting
 
-Code names an ability by its type, `#[derive(Ability)] struct Fireball;`,
-added with `app.add_ability::<Fireball>()`: see [Defining
-abilities](abilities.md#naming-abilities-in-code). Grant the fireball to the
-mage:
+An ability is a type, `#[derive(Ability)] struct Fireball;`, added with
+`app.add_ability::<Fireball>()`: see [Defining abilities](abilities.md).
+Grant the fireball to the mage:
 
 ```rust
 # use bevy::prelude::*;
 # use bevy_mettle::prelude::*;
+# #[derive(Component, Default, Behaviour)] struct CastFireball;
 #[derive(Ability)]
+#[ability(behaviour::<CastFireball>)]
 struct Fireball;
 
 fn spawn_mage(mut commands: Commands) {
@@ -58,9 +59,8 @@ Aim(at))`. [Input and targets](input.md) covers that. Mettle checks, in this ord
 
 1. **Granted.** The mage has a fireball, and it isn't active already.
    Otherwise `Failure::NotGranted` or `Failure::Active`.
-2. **Not cooling down.** The mage owns none of the cooldown effect's owner
-   tags.
-   Otherwise `Failure::Cooldown`.
+2. **Not cooling down.** The mage doesn't own the fireball's cooldown tag,
+   `cooldown.fireball`. Otherwise `Failure::Cooldown`.
 3. **Affordable.** Paying the cost leaves no attribute below 0. Otherwise
    `Failure::Cost`.
 4. **Not blocked.** No other active ability `blocks` the fireball's tags.
@@ -89,35 +89,31 @@ Here's the whole round, run on the world directly:
 # use bevy_mettle::prelude::*;
 # #[derive(Tag)] struct State;
 # #[derive(Tag)] #[tag(parent = State)] struct Casting;
-# #[derive(Tag)] struct Cooldown;
-# #[derive(Tag)] #[tag(parent = Cooldown, name = "fireball")] struct FireballCooldown;
 # #[derive(Attribute)]
 # #[attribute(base = 100.0, min = 0.0)]
 # struct Mana;
 # #[derive(Component, Default, Behaviour)]
 # struct CastFireball;
-# #[derive(Ability)] struct Fireball;
 # use core::time::Duration;
 # use bevy::time::TimeUpdateStrategy;
-# let mut app = App::new();
-# app.add_plugins((MinimalPlugins, MettlePlugins))
-#     .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(100)))
-#     .add_attribute::<Mana>()
-#     .add_behaviour::<CastFireball>()
-#     .add_ability::<Fireball>();
-# let fireball = AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>())
-#     .cost("fireball.cost")
-#     .cooldown("fireball.cooldown")
-#     .owner_tag("state.casting");
-# app.insert_resource(MettleContent {
-#     tags: ["state", "state.casting", "cooldown", "cooldown.fireball"].map(TagKey::named).to_vec(),
-#     effects: vec![
-#         EffectData::instant("fireball.cost").modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-#         EffectData::lasting("fireball.cooldown", 2.0).owner_tag("cooldown.fireball"),
-#     ],
-#     abilities: vec![fireball],
-#     ..default()
-# });
+#[derive(Ability)]
+#[ability(behaviour::<CastFireball>, owner_tag = Casting)]
+#[ability(cost = Cost::of::<Mana>(20.0), cooldown = 2.0)]
+struct Fireball;
+
+/// The tag its cooldown grants: `cooldown.fireball`.
+#[derive(Tag)]
+#[tag(parent = Cooldown, name = "fireball")]
+struct FireballCooldown;
+# #[derive(Tag)] struct Cooldown;
+
+let mut app = App::new();
+app.add_plugins((MinimalPlugins, MettlePlugins))
+#   .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(100)))
+    .add_attribute::<Mana>()
+    .add_behaviour::<CastFireball>()
+#   .add_tag::<Casting>()
+    .add_ability::<Fireball>();
 let mage = app.world_mut().spawn(Base::<Mana>::default()).id();
 // A tick, so its attributes are worked out.
 app.update();
@@ -213,10 +209,9 @@ fn hit(fireballs: Query<(&ActiveAbility, &Fireball)>, mut commands: Commands) {
 }
 ```
 
-It takes the effect by type, and the builders set more after:
-another level, params, what struck. Apply what an ability does this way, not
-with a spec of your own. Under the
-activation, a client's prediction of it is taken back if the server rejects
+It takes the effect by type, and the builders set more after: another
+level, context data, what struck. Apply what an ability does this way, not
+with a spec of your own. Under the activation, a client's prediction of it is taken back if the server rejects
 the activation ([Prediction](prediction.md)); one applied without it stays.
 The ability's cost and cooldown are applied the same way.
 
@@ -268,7 +263,8 @@ On the actor, the commands are `grant_ability`, `activate_ability`,
 ability tagged any of `tags` cancelled, or every one, as the actor dies.
 In an exclusive system or a test, [`AbilityWorld`] does the same on the
 `World` at once, and says how it went: `activate_ability` returns the
-ability or the [`Failure`], `commit_ability` whether it could pay;
+ability or the [`Failure`], `activate_tagged` those that activated,
+`commit_ability` whether it could pay;
 `end_ability` and `cancel_ability` end an ability as the commands do.
 
 ## Asking
@@ -315,10 +311,8 @@ ability's own tags and its owner's.
 # #[derive(Attribute)] #[attribute(base = 100.0, min = 0.0)] struct Mana;
 # #[derive(Component, Default, Behaviour)] struct CastFireball;
 #[derive(Ability)]
+#[ability(behaviour::<CastFireball>, end_if = Condition::owner_has(Stunned))]
 struct Fireball;
-
-let fireball = AbilityData::new(Key::of::<Fireball>(), Key::of::<CastFireball>())
-    .end_if(Condition::owner_has("state.stunned"));
 
 # use std::time::Duration;
 # use bevy::time::TimeUpdateStrategy;
@@ -328,15 +322,8 @@ app.add_plugins((MinimalPlugins, MettlePlugins))
 #   .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(1.0 / 64.0)))
     .add_attribute::<Mana>()
     .add_behaviour::<CastFireball>()
-    .add_ability::<Fireball>()
-    .insert_resource(MettleContent {
-        tags: ["state", "state.stunned"]
-            .into_iter()
-            .map(TagKey::named)
-            .collect(),
-        abilities: vec![fireball],
-        ..default()
-    });
+    .add_tag::<Stunned>()
+    .add_ability::<Fireball>();
 app.update();
 let mage = app.world_mut().spawn(Base::<Mana>::default()).id();
 app.world_mut().grant_ability(mage, Fireball).unwrap();
@@ -359,7 +346,7 @@ assert_eq!(
 ```
 
 It's weighed whenever its owner's tags change, once however many changed,
-so an `end_if` of `!Condition::owner_has("state.raging")` ends a rage as the
+so an `end_if` of `!Condition::owner_has(Raging)` ends a rage as the
 raging stops. It's weighed as the ability activates too, past its owner
 tags and what it ends, and as its definition is replaced. An interrupted
 ability is cancelled: [`AbilityEnded`] says so, its cost stays paid and its

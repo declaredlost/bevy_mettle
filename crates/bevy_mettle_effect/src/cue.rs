@@ -237,7 +237,7 @@ pub struct Burst {
     /// What it was played under, if an activation.
     pub activation: Option<Activation>,
     /// The effect that played it, if one did.
-    pub effect: Option<EffectId>,
+    pub effect_id: Option<EffectId>,
 }
 
 /// On an actor: the one-shot cues its server played lately, replicated.
@@ -343,7 +343,7 @@ pub struct CueExecuted {
     /// What it was played under, if an activation.
     pub activation: Option<Activation>,
     /// The effect that played it, if one did.
-    pub effect: Option<EffectId>,
+    pub effect_id: Option<EffectId>,
 }
 
 impl CueExecuted {
@@ -511,7 +511,7 @@ pub(crate) fn execute(
         level: cue.level,
         context: cue.context.clone(),
         activation,
-        effect,
+        effect_id: effect,
     });
 }
 
@@ -555,7 +555,7 @@ fn burst(
         level: cue.level,
         context: ContextReplica::of(&cue.context, &data),
         activation,
-        effect,
+        effect_id: effect,
     });
 }
 
@@ -694,7 +694,7 @@ pub(crate) fn play(
                 level: burst.level,
                 context: burst.context.context(&data),
                 activation: burst.activation,
-                effect: burst.effect,
+                effect_id: burst.effect_id,
             });
         }
     }

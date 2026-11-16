@@ -1,36 +1,47 @@
 # Effects in code
 
-Most of an effect is data. Some numbers can't be: fire damage that grows with
-the caster's spell power and shrinks with the target's fire resistance, or a
-burn that lasts longer the stronger its caster. Those are code, named in the
-data. Mettle has two kinds:
+An effect's keys say most of what it does. Some numbers they can't: fire
+damage that grows with the caster's spell power and shrinks with the
+target's fire resistance, or a burn that lasts longer the stronger its
+caster. Those are code too, named by the effect. Mettle has three kinds:
 
 - **Executions** are formulas run as an effect executes. They return the
   changes to make to the target's bases. Unreal calls them execution
   calculations.
 - **Calculations** work out one number, a [`Magnitude`] of `Custom`. They can
   stand in for any magnitude: a modifier's value, a duration, a period.
+- **Routes** take an amount no actor holds, such as incoming damage, and turn
+  it into changes to attributes actors do hold: see [Routes](#routes).
 
-## Registering code
+What none of them can do, such as spawning something or playing a sound,
+goes in an observer of the effect's events: see [What's
+told](applying-effects.md#whats-told).
 
-Code names an execution or a calculation by its type, as it does an
-[effect](effects.md#naming-effects-in-code): derive [`Execution`] or
-[`Calculation`] on a struct, its name its type's in `snake_case` unless
-`#[execution(name = "..")]` or `#[calculation(name = "..")]` says otherwise.
-What it runs is a trait on the same type: [`ExecutionFn::execute`] returns
-the changes, [`CalculationFn::calculate`] the number, each with `&self`, so
-the struct's fields are what it's set up with. Register a value of it with
-[`add_execution`] and [`add_calculation`] from [`EffectApp`], as attributes
-and behaviours are; it's numbered as it's registered, in the
-[`ExecutionRegistry`] or the [`CalculationRegistry`], and registering its
-type again replaces it. The derive also declares the attributes it
-[captures](#captures), `source(..)` and `target(..)`. Data names it by that name, a `Key<AnyExecution>`
-or a `Key<AnyCalculation>`; checking the content resolves the name to its
-number, and rejects a name that isn't registered:
+## Adding code
+
+Derive [`Execution`] or [`Calculation`] on a struct, its name its type's in
+`snake_case` unless `#[execution(name = "..")]` or
+`#[calculation(name = "..")]` says otherwise. What it runs is a trait on the
+same type: [`ExecutionFn::execute`] returns the changes,
+[`CalculationFn::calculate`] the number, each with `&self`, so the struct's
+fields are what it's set up with. Add a value of it with [`add_execution`]
+and [`add_calculation`] from [`EffectApp`], as attributes and behaviours
+are; it's numbered as it's added, in the [`ExecutionRegistry`] or the
+[`CalculationRegistry`], and adding its type again replaces it. The derive
+also declares the attributes it [captures](#captures), `source(..)` and
+`target(..)`.
+
+An effect names it by type: the key `execution::<FireDamage>` runs an
+execution, and `Magnitude::calculation::<BurnTime>()` is a calculation's
+magnitude. Checking the effects resolves each to its number, and rejects
+one the app didn't add:
 
 ```rust
 # use bevy::prelude::*;
+# use bevy::ecs::entity::MapEntities;
 # use bevy_mettle::prelude::*;
+# use bevy_mettle::effect::code::ExecutionRegistry;
+# use serde::{Deserialize, Serialize};
 # #[derive(Attribute)]
 # #[attribute(base = 100.0, min = 0.0, max = MaxLife)]
 # struct Life;
@@ -46,11 +57,12 @@ number, and rejects a name that isn't registered:
 # #[derive(Attribute)]
 # #[attribute(base = 10.0)]
 # struct SpellPower;
-#[derive(Tag)]
-struct Param;
-#[derive(Tag)]
-#[tag(parent = Param, name = "damage")]
-struct DamageParam; // "param.damage", set by the code applying it
+/// How hard a hit is, set by the code applying it.
+#[derive(Reflect, Clone, PartialEq, Serialize, Deserialize, MapEntities)]
+#[reflect(ContextData)]
+struct Damage {
+    amount: f32,
+}
 
 /// The spec's damage, more with the caster's spell power, less with the
 /// target's fire resistance, scaled by the stacks of it.
@@ -60,7 +72,7 @@ struct FireDamage; // "fire_damage"
 
 impl ExecutionFn for FireDamage {
     fn execute(&self, effect: &ExecutionContext) -> Vec<BaseChange> {
-        let damage = effect.param(DamageParam).unwrap_or_default();
+        let damage = effect.get::<Damage>().map_or(0.0, |damage| damage.amount);
         let power = effect.captured::<SpellPower>(Side::Source).unwrap_or_default();
         let resisted = effect.captured::<Resistance>(Side::Target).unwrap_or_default();
         let dealt = damage * (1.0 + power / 100.0) * (1.0 - resisted) * effect.stacks as f32;
@@ -93,17 +105,16 @@ assert_eq!(executions.id("fire_damage"), Some(id));
 assert_eq!(executions.name(id), Some("fire_damage"));
 ```
 
-The effects name them by name: an effect lists its `executions`, and a
-`Custom` magnitude names its calculation, as the next example's effects do.
-
 ## The fireball hits
 
 A caster with 25 spell power hits a mage with 50% fire resistance for 20:
 
 ```rust
 # use bevy::prelude::*;
+# use bevy::ecs::entity::MapEntities;
 # use bevy::time::TimeUpdateStrategy;
 # use bevy_mettle::prelude::*;
+# use serde::{Deserialize, Serialize};
 # #[derive(Attribute)]
 # #[attribute(base = 100.0, min = 0.0, max = MaxLife)]
 # struct Life;
@@ -119,26 +130,24 @@ A caster with 25 spell power hits a mage with 50% fire resistance for 20:
 # #[derive(Attribute)]
 # #[attribute(base = 10.0)]
 # struct SpellPower;
-# #[derive(Tag)] struct Param;
-# #[derive(Tag)] #[tag(parent = Param, name = "damage")] struct DamageParam;
+# #[derive(Tag)] #[tag(name = "damage")] struct DamageTag;
+# #[derive(Tag)] #[tag(parent = DamageTag)] struct Elemental;
+# #[derive(Tag)] #[tag(parent = Elemental)] struct Fire;
+# #[derive(Tag)] #[tag(name = "effect")] struct Effects;
+# #[derive(Tag)] #[tag(parent = Effects)] struct Affliction;
+# #[derive(Tag)] #[tag(parent = Affliction, name = "burning")] struct Burns;
+# #[derive(Reflect, Clone, PartialEq, Serialize, Deserialize, MapEntities)]
+# #[reflect(ContextData)] struct Damage { amount: f32 }
 # #[derive(Execution)]
 # #[execution(source(SpellPower), target(Resistance, tagged("damage.elemental.fire")))]
 # struct FireDamage;
 # #[derive(Calculation)] #[calculation(source(SpellPower))] struct BurnTime { per: f32 }
-# #[derive(Effect)] #[effect(name = "fireball.hit")] struct FireballHit;
-# #[derive(Effect)] struct Burning;
-# fn code(app: &mut App) {
-#     app.add_execution(FireDamage)
-#         .add_calculation(BurnTime { per: 25.0 })
-#         .add_effect::<FireballHit>()
-#         .add_effect::<Burning>();
-# }
 # fn power(effect: &ExecutionContext) -> f32 {
 #     effect.captured::<SpellPower>(Side::Source).unwrap_or_default()
 # }
 # impl ExecutionFn for FireDamage {
 #     fn execute(&self, effect: &ExecutionContext) -> Vec<BaseChange> {
-#         let damage = effect.param(DamageParam).unwrap_or_default();
+#         let damage = effect.get::<Damage>().map_or(0.0, |damage| damage.amount);
 #         let resisted = effect.captured::<Resistance>(Side::Target).unwrap_or_default();
 #         let dealt = damage * (1.0 + power(effect) / 100.0) * (1.0 - resisted) * effect.stacks as f32;
 #         vec![BaseChange::of::<Life>(Operation::Flat, -dealt)]
@@ -149,27 +158,14 @@ A caster with 25 spell power hits a mage with 50% fire resistance for 20:
 #         2.0 + power(effect) / self.per
 #     }
 # }
-# fn tags() -> Vec<TagKey> {
-#     [
-#         "damage", "damage.elemental", "damage.elemental.fire",
-#         "effect", "effect.affliction", "effect.affliction.burning",
-#         "param", "param.damage",
-#     ]
-#     .into_iter()
-#     .map(TagKey::named)
-#     .collect()
-# }
-fn effects() -> Vec<EffectData> {
-    vec![
-        EffectData::instant(Key::of::<FireballHit>())
-            .tag("damage.elemental.fire")
-            .execution(Key::of::<FireDamage>()),
-        EffectData::lasting(Key::of::<Burning>(), Magnitude::Custom(Key::of::<BurnTime>()))
-            .tag("effect.affliction.burning")
-            .period(0.5, false)
-            .execution(Key::of::<FireDamage>()),
-    ]
-}
+#[derive(Effect)]
+#[effect(name = "fireball.hit", tag = Fire, execution::<FireDamage>)]
+struct FireballHit;
+
+#[derive(Effect)]
+#[effect(lasting = Magnitude::calculation::<BurnTime>(), period = 0.5)]
+#[effect(tag = Burns, execution::<FireDamage>)]
+struct Burning;
 # let mut app = App::new();
 # app.add_plugins((MinimalPlugins, MettlePlugins))
 #     .add_attribute::<Life>()
@@ -177,9 +173,13 @@ fn effects() -> Vec<EffectData> {
 #     .add_attribute::<Resistance>()
 #     .add_attribute::<MaxResistance>()
 #     .add_attribute::<SpellPower>()
+#     .add_tag::<Fire>()
+#     .add_tag::<Burns>()
+#     .register_type::<Damage>()
+#     .add_execution(FireDamage)
+#     .add_calculation(BurnTime { per: 25.0 })
+#     .add_effects::<(FireballHit, Burning)>()
 #     .insert_resource(TimeUpdateStrategy::FixedTimesteps(1));
-# code(&mut app);
-# app.insert_resource(MettleContent { tags: tags(), effects: effects(), ..default() });
 # app.finish();
 # app.cleanup();
 # app.update();
@@ -196,12 +196,12 @@ let mage = app
 // One fixed step, for their attributes to be worked out.
 app.update();
 
-let hit = FireballHit.param("param.damage", 20.0).source(caster);
+let hit = FireballHit.with(Damage { amount: 20.0 }).source(caster);
 app.world_mut().apply_effect(mage, hit);
 // 20, 25% more, half resisted.
 assert_eq!(app.world().get::<Base<Life>>(mage).unwrap().get(), 87.5);
 
-let burn = Burning.param("param.damage", 2.0).source(caster);
+let burn = Burning.with(Damage { amount: 2.0 }).source(caster);
 app.world_mut().apply_effect(mage, burn);
 let effect = app.world().get::<ActiveEffects>(mage).unwrap().iter().next().unwrap();
 let remaining = app.world().get::<ActiveEffect>(effect).unwrap().remaining();
@@ -221,9 +221,9 @@ only, and what's being applied.
 | `effect()` | The effect's number, an `EffectId` |
 | `spec` | The [`EffectSpec`] applied |
 | `stacks` | How many stacks of it there are: 1 unless it stacks |
-| `level()`, `param(..)` | The spec's level, and a param it set |
+| `level()` | The spec's level |
 | `context()`, `source()` | What the spec carries, and its source: see [Context](applying-effects.md#context) |
-| `get::<C>()` | What the game put on the context of type `C`, a [`ContextData`] |
+| `get::<C>()` | What the applying code put on the context of type `C`, a [`ContextData`]: how hard it hits, what struck |
 | `captured::<A>(from)` | What it declared it [captures](#captures) of the source's or the target's `A` |
 | `owned(entity)` | What an entity owns: its [`OwnedTags`] |
 | `breakdown::<A>(entity, read)` | An entity's attribute's modifiers, summed but not applied: read now, never snapshotted or predicted |
@@ -262,7 +262,7 @@ Declared, a capture is the effect's like any other. A snapshot of the
 source's goes in the spec's [snapshot](applying-effects.md#snapshots), so a
 fireball landing late hits with its caster's spell power as it was cast. It
 goes with the effect's replica to clients. Its tags are checked with the
-content. Captures are how effect code reads attributes. `breakdown` reads
+effect. Captures are how effect code reads attributes. `breakdown` reads
 the world as it is, captured by nothing; so does `world`, for what no
 capture can name, such as a third actor's.
 
@@ -290,6 +290,7 @@ impl ExecutionFn for Sear {
 }
 
 #[derive(Effect)]
+#[effect(lasting = 10.0, period = 1.0, execute_on_apply, execution::<Sear>)]
 struct Searing;
 
 let mut app = App::new();
@@ -299,11 +300,7 @@ app.add_plugins((MinimalPlugins, MettlePlugins))
     .add_attribute::<Life>()
     .add_attribute::<Resistance>()
     .add_execution(Sear)
-    .add_effect::<Searing>()
-    .insert_resource(MettleContent {
-        effects: vec![EffectData::lasting(Key::of::<Searing>(), 10.0).period(1.0, true).execution(Key::of::<Sear>())],
-        ..default()
-    });
+    .add_effect::<Searing>();
 app.update();
 let mage = app
     .world_mut()
@@ -402,6 +399,7 @@ struct Shield;
 struct IncomingDamage;
 
 #[derive(Effect)]
+#[effect(route::<IncomingDamage>(40.0))]
 struct Hit;
 
 /// The shield takes what it can and life the rest; the attacker steals back a
@@ -428,11 +426,7 @@ app.add_plugins((MinimalPlugins, MettlePlugins))
     .add_attribute::<MaxLife>()
     .add_attribute::<Shield>()
     .add_route(IncomingDamage)
-    .add_effect::<Hit>()
-    .insert_resource(MettleContent {
-        effects: vec![EffectData::instant(Key::of::<Hit>()).modifier(EffectModifier::route::<IncomingDamage>(40.0))],
-        ..default()
-    });
+    .add_effect::<Hit>();
 app.update();
 let base = |app: &App, entity| app.world().get::<Base<Life>>(entity).unwrap().get();
 let mage = app
@@ -451,10 +445,10 @@ assert_eq!(base(&app, attacker), 52.0, "a fifth stolen back");
 ```
 
 A route's router is [`RouteFn::route`] on its type, and a value of it is
-registered with [`add_route`], numbered in the [`RouteRegistry`]. In data, a
-modifier routes into a route by naming it, `"incoming_damage"`, a
-`Key<AnyRoute>`, in place of an attribute. An execution routes into the
-routes it declares on its derive, by type:
+added with [`add_route`], numbered in the [`RouteRegistry`]. An effect
+routes into it with the key `route::<IncomingDamage>(amount)`, in place of an
+attribute's modifier. An execution routes into the routes it declares on its
+derive, by type:
 
 ```rust
 # use bevy_mettle::prelude::*;
@@ -508,15 +502,16 @@ from them.
 ## Calculations
 
 A calculation is a `Custom` magnitude. Anywhere a [`Magnitude`] goes, so can
-`Magnitude::Custom("burn_time".into())`, naming the calculation by name. In
-data, it's written the same: the variant, with the calculation's name.
+`Magnitude::calculation::<BurnTime>()`: a modifier's value, a duration, a
+period. Data writes it as the variant, with the calculation's name,
+`"burn_time"`.
 
 When a calculation runs depends on what it stands for:
 
 - A duration or a period is worked out once, as the effect applies.
 - An executing modifier's value is worked out each time the effect executes.
 - A lasting modifier's value is worked out as the effect starts counting, and
-  again whenever its stacks change or it's reloaded.
+  again whenever its stacks change or its definition is rebuilt.
 
 What a calculation declares it [captures](#captures) is captured with the
 effect's other captures: a snapshot is kept, and a live read followed, so a
@@ -537,13 +532,10 @@ it's worked out.
   on it. Use a modifier, or give the effect a period.
 - **Code has no side effects.** It reads the world and returns numbers. To
   spawn something or play a sound as an effect executes, observe
-  [`EffectExecuted`].
-- **Data names code by string.** The types are for code; content still
-  says `"fire_damage"`. A name that doesn't match a registered type's is
-  caught as content is checked.
-- **Register code before content.** Content is checked against the code the
-  app has: content naming code registered later is rejected. Registered
-  code stays, for every reload.
+  [`EffectExecuted`], checking `is::<E>()` for the effect.
+- **Add code as the app is built.** Effects are checked as the app starts,
+  against the code the app has then: an effect naming an execution, a
+  calculation or a route added later is rejected.
 - **Previews run code too.** [`EffectWorld::preview_effect`], which abilities
   use to check a cost, runs executions and calculations without applying
   anything.

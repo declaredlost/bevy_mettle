@@ -9,8 +9,8 @@ That's stacking.
 
 Burning stacks up to three times. A fourth application ignites the mage
 instead. Its `stacking` sets a limit of 3, has a stack run out one at a
-time, and applies `ignited` on overflow. In data, a stacking can say just
-those three, and the rest take their defaults.
+time, and applies `Ignited` on overflow. [`Stacking`]'s builders start from
+`Stacking::up_to(limit)`, and the rest take their defaults unless it says.
 
 A stacking effect applied to a target that already has it doesn't spawn a
 second active effect. The one there gains a stack, and its amounts count once
@@ -18,43 +18,32 @@ per stack:
 
 ```rust
 # use bevy::prelude::*;
+# use bevy::ecs::entity::MapEntities;
 # use bevy::time::TimeUpdateStrategy;
 # use bevy_mettle::prelude::*;
+# use serde::{Deserialize, Serialize};
 # #[derive(Attribute)]
 # #[attribute(base = 100.0, min = 0.0)]
 # struct Life;
-# fn tags() -> Vec<TagKey> {
-#     ["effect", "effect.affliction", "effect.affliction.burning", "param", "param.damage"]
-#         .map(TagKey::named)
-#         .to_vec()
-# }
-fn effects() -> Vec<EffectData> {
-    vec![
-        EffectData::lasting(Key::of::<Burning>(), 4.0)
-            .tag("effect.affliction.burning")
-            .period(0.5, false)
-            .modifier(EffectModifier::new::<Life>(
-                Operation::Flat,
-                Magnitude::param("param.damage"),
-            ))
-            .stacking(Stacking {
-                by: StackBy::Target,
-                limit: 3,
-                reapply: Reapply::Refresh,
-                reset_period: false,
-                expire: Expire::RemoveOne,
-                overflow: vec!["ignited".into()],
-            }),
-        EffectData::instant("ignited")
-            .modifier(EffectModifier::new::<Life>(Operation::Flat, -20.0)),
-    ]
-}
-# #[derive(Effect)] struct Burning;
+# #[derive(Reflect, Clone, PartialEq, Serialize, Deserialize, MapEntities)]
+# #[reflect(ContextData)]
+# struct Damage { amount: f32 }
+/// Fire damage every half second, up to three stacks of it.
+#[derive(Effect)]
+#[effect(lasting = 4.0, period = 0.5)]
+#[effect(flat::<Life>(Magnitude::context::<Damage>("amount").times(-1.0)))]
+#[effect(stacking = Stacking::up_to(3).expire(Expire::RemoveOne).overflow::<Ignited>())]
+struct Burning;
+
+/// What a fourth burn does instead.
+#[derive(Effect)]
+#[effect(flat::<Life>(-20.0))]
+struct Ignited;
 # let mut app = App::new();
 # app.add_plugins((MinimalPlugins, MettlePlugins))
 #     .add_attribute::<Life>()
-#     .add_effect::<Burning>()
-#     .insert_resource(MettleContent { tags: tags(), effects: effects(), ..default() })
+#     .register_type::<Damage>()
+#     .add_effects::<(Burning, Ignited)>()
 #     .insert_resource(TimeUpdateStrategy::FixedTimesteps(1));
 # app.finish();
 # app.cleanup();
@@ -66,7 +55,7 @@ fn effects() -> Vec<EffectData> {
 # }
 # let mage = app.world_mut().spawn(Base::<Life>::default()).id();
 # let life = |app: &App| app.world().get::<Base<Life>>(mage).unwrap().get();
-let burn = Burning.param("param.damage", -2.0);
+let burn = Burning.with(Damage { amount: 2.0 });
 for _ in 0..4 {
     app.world_mut().apply_effect(mage, burn.clone());
 }
@@ -89,16 +78,16 @@ assert_eq!(active.remaining(), Some(4.0));
 ## Settings
 
 A [`Stacking`] has a `limit`, which has to be more than 0. Everything else has
-a default:
+a default, and a builder to change it:
 
-| Field | What it does | Unless it says |
-|---|---|---|
-| `by` | Whose applications stack together: `Target`, everyone's on the target, or `Source`, each source's apart | `Target` |
-| `limit` | The most stacks | required |
-| `reapply` | What a new application does to the time left: `Refresh` starts it over, `Keep` leaves it | `Refresh` |
-| `reset_period` | Whether a new application starts the period over | `false` |
-| `expire` | What running out of time does: `ClearAll`, `RemoveOne`, or `Refresh` | `ClearAll` |
-| `overflow` | Effects applied in its place when it's at its limit | none |
+| Field | Builder | What it does | Unless it says |
+|---|---|---|---|
+| `by` | `.by(StackBy::Source)` | Whose applications stack together: `Target`, everyone's on the target, or `Source`, each source's apart | `Target` |
+| `limit` | `Stacking::up_to(limit)` | The most stacks | required |
+| `reapply` | `.reapply(Reapply::Keep)` | What a new application does to the time left: `Refresh` starts it over, `Keep` leaves it | `Refresh` |
+| `reset_period` | `.reset_period()` | Whether a new application starts the period over | `false` |
+| `expire` | `.expire(Expire::RemoveOne)` | What running out of time does: `ClearAll`, `RemoveOne`, or `Refresh` | `ClearAll` |
+| `overflow` | `.overflow::<E>()` | Effects applied in its place when it's at its limit | none |
 
 With `by` set to `Source`, two mages burning the same target each have their own
 stacks, each its own active effect. Set to `Target`, they share one.
@@ -127,7 +116,7 @@ period. A `Base` or an `Override` is a value, not an amount, so it counts
 once however many stacks there are.
 
 The active effect keeps the spec it was first applied with. A later
-application adds a stack, not its own level, params or source: a stronger
+application adds a stack, not its own level, context or source: a stronger
 second burn makes three stacks of the first burn's damage. Its
 [captures](effects.md#captures) are likewise taken once, as the effect is
 first applied, unless they're read live.

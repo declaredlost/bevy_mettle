@@ -1,0 +1,5 @@
+error: an effect is a unit struct, a marker: what changes as it's applied goes on its spec's context
+ --> tests/derives/effect_fields.rs:7:8
+  |
+7 | struct Burn {
+  |        ^^^^

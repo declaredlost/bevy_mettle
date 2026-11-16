@@ -4,8 +4,9 @@ use bevy::prelude::*;
 use bevy_mettle_core::Activation;
 use bevy_mettle_core::registry::AbilityId;
 use bevy_mettle_core::tag::TagKey;
+use bevy_mettle_effect::context::{ContextData, EffectContext};
 
-/// A gameplay event sent to an actor: a tag, and who and how much.
+/// A gameplay event sent to an actor: a tag, about whom, carrying what.
 ///
 /// Sent by triggering it, `commands.trigger(GameplayEvent::new(actor, tag))`:
 /// the abilities with an `Event` trigger for it activate with it, and the
@@ -19,29 +20,50 @@ pub struct GameplayEvent {
     pub entity: Entity,
     /// What it is: `event.hit.parried`.
     pub tag: TagKey,
-    /// Who caused it.
-    pub instigator: Option<Entity>,
     /// Who it's about.
     pub target: Option<Entity>,
-    /// How much.
-    pub magnitude: f32,
+    /// What it carries: who caused it (its source), and context data, as an
+    /// effect's application does. An effect the ability it triggers applies
+    /// can be applied with it, its magnitudes reading what it carries.
+    pub context: EffectContext,
     /// The activation it was sent under, if an ability running sent it:
     /// what a predicted ability it triggers is predicted under.
     pub activation: Option<Activation>,
 }
 
 impl GameplayEvent {
-    /// `tag`, sent to `entity`, by no one, of nothing, under no activation.
+    /// `tag`, sent to `entity`, by no one, about no one, carrying nothing,
+    /// under no activation.
     #[must_use]
     pub fn new(entity: Entity, tag: impl Into<TagKey>) -> Self {
         Self {
             entity,
             tag: tag.into(),
-            instigator: None,
             target: None,
-            magnitude: 0.0,
+            context: EffectContext::default(),
             activation: None,
         }
+    }
+
+    /// Caused by `source`.
+    #[must_use]
+    pub fn source(mut self, source: Entity) -> Self {
+        self.context = self.context.source(source);
+        self
+    }
+
+    /// About `target`.
+    #[must_use]
+    pub fn target(mut self, target: Entity) -> Self {
+        self.target = Some(target);
+        self
+    }
+
+    /// Carrying `data`, in place of any of its type.
+    #[must_use]
+    pub fn with<C: ContextData>(mut self, data: C) -> Self {
+        self.context = self.context.with(data);
+        self
     }
 
     /// Sent under `activation`: the running ability's, as its behaviour sends

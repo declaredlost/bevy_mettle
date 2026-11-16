@@ -4,8 +4,8 @@
 
 **A gameplay framework for Bevy in the spirit of Unreal's Gameplay Ability System.**
 
-Attributes, effects and abilities, with content as data and prediction over
-the network.
+Attributes, effects and abilities, defined in code, added to by data, and
+predicted over the network.
 
 [![Build](https://img.shields.io/github/actions/workflow/status/declaredlost/bevy_mettle/build.yml?branch=main&label=build&style=flat-square)](https://github.com/declaredlost/bevy_mettle/actions/workflows/build.yml)
 [![Security](https://img.shields.io/github/actions/workflow/status/declaredlost/bevy_mettle/security.yml?branch=main&label=security&style=flat-square)](https://github.com/declaredlost/bevy_mettle/actions/workflows/security.yml)
@@ -19,11 +19,12 @@ the network.
 Attributes are your game's own types, each a marker with its rules derived,
 kept on each actor as a `Base` and a `Current`. Effects change them, grant
 tags and stack; abilities are what an actor can do, paid for with effects.
-Everything but attributes is data, as in GAS: gameplay tags, curves,
-effects and abilities are named by tags and ids, handed over as one
-`MettleContent` resource, and checked as a whole: change it and it's
-reloaded, or rejected with every error while the content before stays.
-Mettle doesn't load anything: your game reads its files. A client predicts its own abilities
+Effects, abilities and curves are your types too, each defining itself on
+its derive. Data adds more, a mod's or a server's, and tunes curves: handed
+over as one `MettleContent` resource, and checked as a whole with what code
+defines: change it and it's reloaded, or rejected with every error while
+the content before stays. Mettle doesn't load anything: your game reads its
+files. A client predicts its own abilities
 and the server decides, with an adapter for
 [lightyear](https://github.com/cBournhonesque/lightyear).
 
@@ -42,12 +43,12 @@ and the server decides, with an adapter for
 - **Reads in context**: one attribute per kind of value, a resistance read
   tagged with a hit's damage type, with a breakdown of where it came from.
 - **Effects**: instant, timed, infinite or periodic, their numbers small
-  expressions of levels, curves, params and attributes captured as the spec
-  is made or read live; stacking, granting tags, immunity, requirements to
+  expressions of levels, curves, context data and attributes captured as
+  the spec is made or read live; stacking, granting tags, immunity, requirements to
   apply and to count, executions in code, and chained effects.
 - **Abilities**: granted, activated, paid for, cooled down and ended, by
-  hand or by triggers; what blocks and cancels what is data, what one does
-  is your component and systems.
+  hand or by triggers; what blocks and cancels what is declared on its
+  derive, what one does is your component and systems.
 - **Input and targets**: an aim, a target or a charge, given as an ability
   activates or while it runs, checked by your systems, predicted on the
   client and checked again on the server.
@@ -56,8 +57,10 @@ and the server decides, with an adapter for
 - **Cues**: what's shown of effects and abilities, lasting ones as entities
   to hang your effects on, one-shots with what they dealt, each run by the
   handler for its most specific tag.
-- **Content as data**: one resource of definitions, checked as a whole and
-  reloaded as it changes; your game reads the files, mettle checks them.
+- **Code first, data adds**: effects, abilities and curves defined on their
+  derives; one resource of content adds more and tunes curves, checked as a
+  whole and reloaded as it changes; your game reads the files, mettle checks
+  them.
 - **Prediction**: a client activates at once and the server confirms or
   rejects, with effects and attributes shown as the server serves them;
   effects go to their owner alone, and everyone else sees the cues.
@@ -90,19 +93,10 @@ struct Mana;
 #[derive(Component, Default, Behaviour)]
 struct CastFireball;
 
-/// The fireball, as code names it: content defines it as `"fireball"`.
+/// The fireball: 20 mana, then 2 seconds before it's cast again.
 #[derive(Ability)]
+#[ability(behaviour::<CastFireball>, cost = Cost::of::<Mana>(20.0), cooldown = 2.0)]
 struct Fireball;
-
-/// The game's content: in a game, read from its files.
-fn content() -> MettleContent {
-    MettleContent {
-        effects: vec![EffectData::instant("fireball.cost")
-            .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0))],
-        abilities: vec![AbilityData::new("fireball", "cast_fireball").cost("fireball.cost")],
-        ..default()
-    }
-}
 
 fn spawn(mut commands: Commands) {
     commands
@@ -124,7 +118,6 @@ fn main() {
         .add_attribute::<Mana>()
         .add_behaviour::<CastFireball>()
         .add_ability::<Fireball>()
-        .insert_resource(content())
         .add_systems(Startup, spawn)
         .add_systems(Update, cast)
         .run();

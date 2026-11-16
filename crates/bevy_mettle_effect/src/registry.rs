@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use bevy_mettle_attribute::modifier::{Operation, Per};
 use bevy_mettle_attribute::registry::AttributeRegistry;
 use bevy_mettle_core::curve::CurveRegistry;
-use bevy_mettle_core::registry::{AnyEffect, EffectId, Key, Registry};
+use bevy_mettle_core::registry::{AnyEffect, Definitions, EffectId, Key, Registry};
 use bevy_mettle_core::tag::TagRegistry;
 use bevy_mettle_core::{Error, Errors};
 
@@ -17,6 +17,7 @@ use crate::code::{
     AnyExecution, AnyRoute, CalculationFn, CalculationId, CalculationRegistry, Changes, Code,
     ExecutionRegistry, RouteId, RouteRegistry,
 };
+use crate::context::ContextDataRegistry;
 use crate::data::{
     AttributeRead, CaptureDef, EffectData, EffectDef, EffectDuration, EffectModifier, ExecutionDef,
     Magnitude, MagnitudeDef, ModifierDef, Period, Side, Stacking,
@@ -29,16 +30,17 @@ use crate::data::{
 ///
 /// Made by checking their definitions: every name they use defined, every
 /// number one that can be. Each effect is numbered, an [`EffectId`], in order
-/// of name. A resource: in an app with `bevy_mettle`, its content loads it, and
-/// active effects take the new definitions.
+/// of name. A resource: in an app with `bevy_mettle`, it's built as the app
+/// starts and as content changes, and active effects take the new
+/// definitions.
 ///
-/// An app's registry also holds the effect types code names
-/// ([`add_effect`](crate::code::EffectApp::add_effect)), which content has to
-/// define. So an app's content is checked by [`rebuild`](Self::rebuild)ing its
-/// registry, which keeps those types and the numbers effects had: what a load
-/// or a hot reload does. [`build`](Self::build) makes a registry from nothing,
-/// knowing no types: for tools and tests outside an app. Inserted into an app,
-/// it would forget what code names.
+/// An app's registry also holds the effect types code defines
+/// ([`add_effect`](crate::code::EffectApp::add_effect)). So an app's effects
+/// are checked by [`rebuild`](Self::rebuild)ing its registry, which defines
+/// those types again, adds content's, and keeps the numbers effects had: what
+/// a load, a reload or a hot patch does. [`build`](Self::build) makes a
+/// registry of content alone, knowing no types: for tools and tests outside
+/// an app. Inserted into an app, it would forget what code defines.
 ///
 /// Read as a [`Registry`]: `get(id)`, `id(name)`, `id_of::<E>()`, `name(id)`,
 /// `iter()`.
@@ -46,6 +48,7 @@ use crate::data::{
 pub struct EffectRegistry {
     #[deref]
     registry: Registry<AnyEffect, Arc<EffectDef>>,
+    definitions: Definitions<AnyEffect, EffectData>,
     curves: CurveRegistry,
     executions: ExecutionRegistry,
     calculations: CalculationRegistry,
@@ -56,6 +59,7 @@ impl std::fmt::Debug for EffectRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EffectRegistry")
             .field("effects", &self.registry)
+            .field("definitions", &self.definitions)
             .field("executions", &self.executions)
             .field("calculations", &self.calculations)
             .field("routes", &self.routes)
@@ -78,6 +82,8 @@ pub struct EffectScope<'a> {
     pub calculations: &'a CalculationRegistry,
     /// The routes the app added.
     pub routes: &'a RouteRegistry,
+    /// The types registered as context data, which magnitudes read.
+    pub context: &'a ContextDataRegistry,
 }
 
 /// What compiling one effect reads: what it can name, and where errors go.
@@ -91,8 +97,8 @@ struct Compile<'a> {
 
 impl EffectRegistry {
     /// A registry of `definitions`, from nothing, checked against what they
-    /// can name and compiled: knowing no effect types code names. For tools
-    /// and tests; an app's content goes through [`rebuild`](Self::rebuild).
+    /// can name and compiled: knowing no effect types code defines. For tools
+    /// and tests; an app's effects go through [`rebuild`](Self::rebuild).
     ///
     /// # Errors
     ///
@@ -105,38 +111,44 @@ impl EffectRegistry {
         Self::default().rebuild(definitions, against)
     }
 
-    /// The registry of `definitions`, as [`build`](Self::build) makes it, each
-    /// effect here keeping its number: new ones numbered after the last, in
-    /// order of name. What a reload does, so what holds an effect's number
-    /// still names it. The effect types code names here are kept.
+    /// The registry of the effect types code defines here and `content`'s,
+    /// as [`build`](Self::build) makes it, each effect here keeping its
+    /// number: new ones numbered after the last, in order of name. What a
+    /// load, a reload or a hot patch does, so what holds an effect's number
+    /// still names it. Each type's `define` is run again.
     ///
     /// # Errors
     ///
-    /// As `build`'s, and an effect code names that content doesn't define.
+    /// As `build`'s, and content defining an effect code defines.
     pub fn rebuild(
         &self,
-        definitions: &[EffectData],
+        content: &[EffectData],
         against: EffectScope<'_>,
     ) -> Result<Self, Errors> {
         let mut errors = Vec::new();
-        let mut names: HashSet<&str> = HashSet::default();
-        for def in definitions {
-            if !names.insert(def.name.as_str()) {
+        let mut definitions = self.definitions.definitions(EffectData::new);
+        let mut names: HashSet<String> =
+            definitions.iter().map(|def| def.name.to_string()).collect();
+        for def in content {
+            if self.definitions.defines(def.name.as_str()) {
+                errors.push(Error::DefinedInCode {
+                    kind: "effect",
+                    name: def.name.to_string(),
+                });
+            } else if !names.insert(def.name.to_string()) {
                 errors.push(Error::Duplicate {
                     kind: "effect",
                     name: def.name.to_string(),
                 });
+            } else {
+                definitions.push(def.clone());
             }
         }
-        let mut names: Vec<&str> = names.into_iter().collect();
+        let mut names: Vec<String> = names.into_iter().collect();
         names.sort_unstable();
         let mut registry = self.registry.renumbered(names);
-        errors.extend(registry.unnumbered().map(|name| Error::NotInContent {
-            kind: "effect",
-            name: name.to_owned(),
-        }));
         let mut compiled = Vec::new();
-        for def in definitions {
+        for def in &definitions {
             let mut compile = Compile {
                 registry: &registry,
                 checks: against,
@@ -154,6 +166,7 @@ impl EffectRegistry {
         if errors.is_empty() {
             Ok(Self {
                 registry,
+                definitions: self.definitions.clone(),
                 curves: against.curves.clone(),
                 executions: against.executions.clone(),
                 calculations: against.calculations.clone(),
@@ -164,8 +177,9 @@ impl EffectRegistry {
         }
     }
 
-    /// Notes that code names the effect `E`: content has to define it.
-    pub fn name_type<E: Effect>(&mut self) {
+    /// Adds the effect `E` code defines: compiled as the registry's rebuilt.
+    pub fn add<E: Effect>(&mut self) {
+        self.definitions.add::<E>(E::define);
         self.registry.name_type(TypeId::of::<E>(), E::KEY);
     }
 
@@ -366,7 +380,7 @@ impl Compile<'_> {
         &mut self,
         def: &EffectData,
         within: &str,
-    ) -> Option<(EffectDuration<MagnitudeDef>, Option<Period<MagnitudeDef>>)> {
+    ) -> Option<(EffectDuration<MagnitudeDef>, Option<Period>)> {
         let duration = match &def.duration {
             EffectDuration::Instant => Some(EffectDuration::Instant),
             EffectDuration::Infinite => Some(EffectDuration::Infinite),
@@ -376,13 +390,18 @@ impl Compile<'_> {
         };
         // Both worked out, so what's wrong with either is noted.
         let period = match &def.period {
-            None => Ok(None),
-            Some(period) => self
-                .positive(&period.every, "a period", within)
+            None => {
+                if def.execute_on_apply {
+                    self.invalid("executing on apply with no period".to_owned(), within);
+                }
+                Ok(None)
+            }
+            Some(every) => self
+                .positive(every, "a period", within)
                 .map(|every| {
                     Some(Period {
                         every,
-                        on_apply: period.on_apply,
+                        execute_on_apply: def.execute_on_apply,
                     })
                 })
                 .ok_or(()),
@@ -509,10 +528,13 @@ impl Compile<'_> {
                 .finite(*value, "a value", within)
                 .map(MagnitudeDef::Value),
             Magnitude::Level => Some(MagnitudeDef::Level),
-            Magnitude::Param(param) => {
-                self.push(self.checks.tags.resolve(*param, Some(within)).map(drop));
-                Some(MagnitudeDef::Param(*param))
-            }
+            Magnitude::Context { data, field } => match self.checks.context.field(data, field) {
+                Ok((type_id, index)) => Some(MagnitudeDef::Context(type_id, index)),
+                Err(what) => {
+                    self.invalid(what, within);
+                    None
+                }
+            },
             Magnitude::Attribute(read) => self.capture(read, within).map(MagnitudeDef::Attribute),
             Magnitude::Custom(calculation) => {
                 let id = self.checks.calculations.resolve(calculation, Some(within));

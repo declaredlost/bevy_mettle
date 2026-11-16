@@ -166,7 +166,7 @@ assert_eq!(falloff.weight(&Hit { flown: 1.0, target: immune }), 0.0);
 [`Condition::check`] checks every tag a condition names against the
 [tag registry](tags.md#the-tag-registry), and that its numbers can be: comparisons with finite
 values, a ramp whose ends differ, `FactEvery` of more than 0. Mettle checks
-the conditions in effects and abilities as content is loaded, so
+the conditions in effects and abilities as it builds their registries, so
 you only call it for conditions of your own.
 
 ```rust
@@ -183,8 +183,8 @@ assert!(Condition::fact_set("fact.behind").check(&tags, None).is_err());
 
 ## Tags by name or by number
 
-A `Condition` names its tags by [`TagKey`]: what content holds and what
-mettle weighs. Over a network, a tag goes as its number in the
+A `Condition` names its tags by [`TagKey`]: what effects and abilities
+hold and what mettle weighs. Over a network, a tag goes as its number in the
 [tag registry](tags.md#the-tag-registry), so a condition goes as a
 [`ConditionOver<TagId>`][ConditionOver]: the same terms over tag numbers.
 `Condition` is `ConditionOver<TagKey>`. [`ConditionOver::map_tags`] goes

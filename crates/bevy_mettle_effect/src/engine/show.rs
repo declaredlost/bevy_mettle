@@ -111,7 +111,7 @@ pub(crate) fn show(
     }
     world.entity_mut(entity).insert((
         ActiveEffect {
-            spec: replica.spec(tags, &data),
+            spec: replica.spec(&data),
             def,
             stacks: replica.stacks,
             duration: replica.duration,

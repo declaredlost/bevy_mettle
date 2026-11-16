@@ -7,23 +7,140 @@ use std::sync::{Arc, Mutex};
 use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
 use bevy_harness::TestApp;
+use bevy_mettle::effect::EffectScope;
+use bevy_mettle::effect::code::{CalculationRegistry, ExecutionRegistry, RouteRegistry};
+use bevy_mettle::effect::context::ContextDataRegistry;
 use bevy_mettle::effect::data::MagnitudeDef;
 use bevy_mettle::prelude::*;
 
 use crate::common::{
-    AttackSpeed, Damage, FIRE, Life, Mana, Strength, actor, attributes, close, get, own, set_base,
+    AttackSpeed, Cooldown, Damage, FIRE, Life, Mana, Strength, actor, attributes, close, get, own,
+    set_base,
 };
 
+/// 1 for 1.
+#[derive(ScalingCurve)]
+#[curve(keys = [(1.0, 1.0), (11.0, 11.0)])]
+struct Growth;
+
+/// Diminishing returns: 1 for 1 up to 10, then 1 for 2.
+#[derive(ScalingCurve)]
+#[curve(keys = [(0.0, 0.0), (10.0, 10.0), (30.0, 20.0)])]
+struct Softcap;
+
+/// Twice [`Growth`] at its level, as damage.
 #[derive(Effect)]
+#[effect(flat::<Damage>(Magnitude::scaled::<Growth>(2.0)))]
+struct Scaled;
+
+/// [`Softcap`] at its caster's strength, as damage.
+#[derive(Effect)]
+#[effect(flat::<Damage>(Magnitude::curve_at::<Softcap>(Magnitude::source::<Strength>())))]
+struct Softcapped;
+
+/// Half the caster's strength, plus the level, kept within 1 and 8, as
+/// damage.
+#[derive(Effect)]
+#[effect(flat::<Damage>(
+    Magnitude::source::<Strength>()
+        .times(0.5)
+        .plus(Magnitude::Level)
+        .clamp(Some(1.0), Some(8.0))
+))]
+struct Composed;
+
+/// Its level, as damage.
+#[derive(Effect)]
+#[effect(flat::<Damage>(Magnitude::Level))]
+struct Leveled;
+
+/// Lasts twice its level; takes 1 life every quarter of the caster's
+/// cooldown.
+#[derive(Effect)]
+#[effect(
+    lasting = Magnitude::Level.times(2.0),
+    period = Magnitude::source::<Cooldown>().times(0.25),
+    flat::<Life>(-1.0),
+)]
+struct Ticking;
+
+/// The caster's strength as damage, its base as mana, its bonus as attack
+/// speed.
+#[derive(Effect)]
+#[effect(
+    flat::<Damage>(Magnitude::source::<Strength>()),
+    flat::<Mana>(Magnitude::source::<Strength>().base()),
+    flat::<AttackSpeed>(Magnitude::source::<Strength>().bonus()),
+)]
+struct Reading;
+
+/// The caster's strength as damage, its strength in fire as mana, and its
+/// bonus in fire as attack speed.
+#[derive(Effect)]
+#[effect(
+    flat::<Damage>(Magnitude::source::<Strength>()),
+    flat::<Mana>(Magnitude::source::<Strength>().tagged(FIRE)),
+    flat::<AttackSpeed>(Magnitude::source::<Strength>().tagged(FIRE).bonus()),
+)]
+struct TaggedReading;
+
+/// A fire hit, reading its caster's strength with nothing more said, as
+/// damage.
+#[derive(Effect)]
+#[effect(tag = FIRE, flat::<Damage>(Magnitude::source::<Strength>()))]
+struct FireBlast;
+
+/// The caster's strength, as damage.
+#[derive(Effect)]
+#[effect(flat::<Damage>(Magnitude::source::<Strength>()))]
 struct Blast;
 
+/// The caster's strength bonus as damage, and the target's strength as mana.
 #[derive(Effect)]
+#[effect(
+    flat::<Damage>(Magnitude::source::<Strength>().bonus()),
+    flat::<Mana>(Magnitude::target::<Strength>()),
+)]
+struct Sapping;
+
+/// The caster's strength, snapshotted, as damage.
+#[derive(Effect)]
+#[effect(infinite, flat::<Damage>(Magnitude::source::<Strength>()))]
 struct Might;
 
+/// The caster's strength, live, as mana.
 #[derive(Effect)]
+#[effect(infinite, flat::<Mana>(Magnitude::source::<Strength>().live()))]
 struct Aura;
 
+/// The target's strength, snapshotted, as damage.
 #[derive(Effect)]
+#[effect(infinite, flat::<Damage>(Magnitude::target::<Strength>()))]
+struct Grit;
+
+/// The target's strength, live, as mana.
+#[derive(Effect)]
+#[effect(infinite, flat::<Mana>(Magnitude::target::<Strength>().live()))]
+struct Resolve;
+
+/// Runs [`Siphon`] every second, for 10.
+#[derive(Effect)]
+#[effect(lasting = 10.0, period = 1.0, execution::<Siphon>)]
+struct Drain;
+
+/// What [`Kept`] works out, as damage.
+#[derive(Effect)]
+#[effect(infinite, flat::<Damage>(Magnitude::calculation::<Kept>()))]
+struct Steady;
+
+/// What [`Following`] works out, as mana.
+#[derive(Effect)]
+#[effect(infinite, flat::<Mana>(Magnitude::calculation::<Following>()))]
+struct Swaying;
+
+/// Half the caster's strength, live, as strength.
+#[derive(Effect)]
+#[effect(infinite, flat::<Strength>(Magnitude::source::<Strength>().live().times(0.5)))]
 struct Mirror;
 
 /// The tags the effects name.
@@ -32,21 +149,17 @@ const TAGS: &[&str] = &["damage", "damage.elemental", FIRE, "state", BURNING];
 /// A target burning.
 const BURNING: &str = "state.burning";
 
-fn curves() -> CurveRegistry {
-    CurveRegistry::build(&[
-        CurveData {
-            name: Key::from_static("growth"),
-            interpolation: Interpolation::Linear,
-            keys: vec![(1.0, 1.0), (11.0, 11.0)],
-        },
-        // Diminishing returns: 1 for 1 up to 10, then 1 for 2.
-        CurveData {
-            name: Key::from_static("softcap"),
-            interpolation: Interpolation::Linear,
-            keys: vec![(0.0, 0.0), (10.0, 10.0), (30.0, 20.0)],
-        },
-    ])
-    .unwrap()
+/// The tags and curves, added to `app`.
+fn tags_and_curves(app: &mut App) {
+    app.insert_resource(TagRegistry::build(TAGS.iter().map(|&name| TagKey::named(name))).unwrap())
+        .add_curve::<Growth>()
+        .add_curve::<Softcap>();
+    let curves = app
+        .world()
+        .resource::<CurveRegistry>()
+        .rebuild(std::iter::empty())
+        .unwrap();
+    app.insert_resource(curves);
 }
 
 /// What effects are checked against: what `world` has.
@@ -58,20 +171,18 @@ fn scope(world: &World) -> EffectScope<'_> {
         executions: world.resource(),
         calculations: world.resource(),
         routes: world.resource(),
+        context: world.resource(),
     }
 }
 
-/// An app with the attributes, tags and curves, what `code` adds, and
-/// `effects` checked into its registry.
+/// An app with the attributes, tags and curves, the effects `code` adds,
+/// and `effects` checked into its registry with them.
 fn app(effects: &[EffectData], code: impl FnOnce(&mut App)) -> TestApp {
     TestApp::builder()
         .with(attributes)
         .plugins(EffectPlugin)
         .with(|app| {
-            app.insert_resource(
-                TagRegistry::build(TAGS.iter().map(|&name| TagKey::named(name))).unwrap(),
-            )
-            .insert_resource(curves());
+            tags_and_curves(app);
             code(app);
             let world = app.world();
             let registry = world
@@ -83,28 +194,22 @@ fn app(effects: &[EffectData], code: impl FnOnce(&mut App)) -> TestApp {
         .build()
 }
 
-/// What checking `effects` in an app with `code` rejects, in words.
-fn errors(effects: &[EffectData], code: impl FnOnce(&mut App)) -> String {
+/// What checking `effects` rejects, in words.
+fn errors(effects: &[EffectData]) -> String {
     let mut app = App::new();
     attributes(&mut app);
     app.init_resource::<ExecutionRegistry>()
         .init_resource::<CalculationRegistry>()
         .init_resource::<RouteRegistry>()
-        .init_resource::<EffectRegistry>()
-        .insert_resource(TagRegistry::build(TAGS.iter().map(|&name| TagKey::named(name))).unwrap())
-        .insert_resource(curves());
-    code(&mut app);
+        .init_resource::<ContextDataRegistry>()
+        .init_resource::<EffectRegistry>();
+    tags_and_curves(&mut app);
     let world = app.world();
     world
         .resource::<EffectRegistry>()
         .rebuild(effects, scope(world))
         .unwrap_err()
         .to_string()
-}
-
-/// `effect` adding `value` to the target's `A`.
-fn adding<A: Attribute>(effect: EffectData, value: impl Into<Magnitude>) -> EffectData {
-    effect.modifier(EffectModifier::new::<A>(Operation::Flat, value))
 }
 
 fn apply(app: &mut TestApp, target: Entity, spec: impl Into<EffectSpec>) {
@@ -128,36 +233,28 @@ fn checked(effect: EffectData) -> MagnitudeDef {
 
 #[test]
 fn a_scalable_float_is_a_value_times_a_curve_at_the_level() {
-    let blast = adding::<Damage>(
-        EffectData::instant(Key::of::<Blast>()),
-        Magnitude::scaled(2.0, "growth"),
-    );
-    let mut app = app(&[blast], |app| {
-        app.add_effect::<Blast>();
+    let mut app = app(&[], |app| {
+        app.add_effect::<Scaled>();
     });
     let npc = actor(&mut app, []);
     // 2 × the curve at 3.
-    apply(&mut app, npc, Blast.level(3.0));
+    apply(&mut app, npc, Scaled.level(3.0));
     assert!(close(get::<Damage>(&app, npc), 16.0));
 }
 
 #[test]
 fn a_curve_at_an_attribute_gives_diminishing_returns() {
-    let blast = adding::<Damage>(
-        EffectData::instant(Key::of::<Blast>()),
-        Magnitude::curve_at("softcap", Magnitude::source::<Strength>()),
-    );
-    let mut app = app(&[blast], |app| {
-        app.add_effect::<Blast>();
+    let mut app = app(&[], |app| {
+        app.add_effect::<Softcapped>();
     });
     let npc = actor(&mut app, []);
     let weak = actor(&mut app, []);
     let strong = actor(&mut app, []);
     set_base::<Strength>(&mut app, strong, 30.0);
     app.tick();
-    apply(&mut app, npc, Blast.source(weak));
+    apply(&mut app, npc, Softcapped.source(weak));
     assert!(close(get::<Damage>(&app, npc), 20.0), "10 strength: 10");
-    apply(&mut app, npc, Blast.source(strong));
+    apply(&mut app, npc, Softcapped.source(strong));
     assert!(
         close(get::<Damage>(&app, npc), 40.0),
         "30 strength: 20, not 30: {}",
@@ -167,43 +264,34 @@ fn a_curve_at_an_attribute_gives_diminishing_returns() {
 
 #[test]
 fn sums_products_and_clamps_compose() {
-    // Half the caster's strength, plus the level, kept within 1 and 8.
-    let blast = adding::<Damage>(
-        EffectData::instant(Key::of::<Blast>()),
-        Magnitude::source::<Strength>()
-            .times(0.5)
-            .plus(Magnitude::Level)
-            .clamp(Some(1.0), Some(8.0)),
-    );
-    let mut app = app(&[blast], |app| {
-        app.add_effect::<Blast>();
+    let mut app = app(&[], |app| {
+        app.add_effect::<Composed>();
     });
     let npc = actor(&mut app, []);
     let caster = actor(&mut app, []);
-    apply(&mut app, npc, Blast.source(caster).level(2.0));
+    apply(&mut app, npc, Composed.source(caster).level(2.0));
     assert!(close(get::<Damage>(&app, npc), 17.0), "5 + 2");
-    apply(&mut app, npc, Blast.source(caster).level(5.0));
+    apply(&mut app, npc, Composed.source(caster).level(5.0));
     assert!(close(get::<Damage>(&app, npc), 25.0), "5 + 5, at most 8");
     set_base::<Strength>(&mut app, caster, 0.0);
     app.tick();
-    apply(&mut app, npc, Blast.source(caster).level(0.0));
+    apply(&mut app, npc, Composed.source(caster).level(0.0));
     assert!(close(get::<Damage>(&app, npc), 26.0), "0 + 0, at least 1");
 }
 
 #[test]
 fn the_level_is_a_magnitude() {
-    let blast = adding::<Damage>(EffectData::instant(Key::of::<Blast>()), Magnitude::Level);
-    let mut app = app(&[blast], |app| {
-        app.add_effect::<Blast>();
+    let mut app = app(&[], |app| {
+        app.add_effect::<Leveled>();
     });
     let npc = actor(&mut app, []);
-    apply(&mut app, npc, Blast.level(4.0));
+    apply(&mut app, npc, Leveled.level(4.0));
     assert!(close(get::<Damage>(&app, npc), 14.0));
 }
 
 #[test]
 fn constants_are_folded_as_theyre_checked() {
-    let blast = |value: Magnitude| adding::<Damage>(EffectData::instant(Key::of::<Blast>()), value);
+    let blast = |value: Magnitude| EffectData::new("blast").flat::<Damage>(value);
     assert_eq!(
         checked(blast(Magnitude::Product(vec![
             Magnitude::Value(2.0),
@@ -246,20 +334,13 @@ fn constants_are_folded_as_theyre_checked() {
 
 #[test]
 fn durations_and_periods_are_expressions() {
-    // Lasts twice the level; executes every quarter of the caster's cooldown.
-    let blast = EffectData::lasting(Key::of::<Blast>(), Magnitude::Level.times(2.0))
-        .period(
-            Magnitude::source::<crate::common::Cooldown>().times(0.25),
-            false,
-        )
-        .modifier(EffectModifier::new::<Life>(Operation::Flat, -1.0));
-    let mut app = app(&[blast], |app| {
-        app.add_effect::<Blast>();
+    let mut app = app(&[], |app| {
+        app.add_effect::<Ticking>();
     });
     let npc = actor(&mut app, []);
     let caster = actor(&mut app, []);
     app.world_mut()
-        .apply_effect(npc, Blast.source(caster).level(1.5));
+        .apply_effect(npc, Ticking.source(caster).level(1.5));
     let effect = app
         .entity(npc)
         .get::<ActiveEffects>()
@@ -294,24 +375,12 @@ fn durations_and_periods_are_expressions() {
 
 #[test]
 fn a_read_takes_the_current_value_the_base_or_the_bonus() {
-    let blast = adding::<Damage>(
-        EffectData::instant(Key::of::<Blast>()),
-        Magnitude::source::<Strength>(),
-    )
-    .modifier(EffectModifier::new::<Mana>(
-        Operation::Flat,
-        Magnitude::source::<Strength>().base(),
-    ))
-    .modifier(EffectModifier::new::<AttackSpeed>(
-        Operation::Flat,
-        Magnitude::source::<Strength>().bonus(),
-    ));
-    let mut app = app(&[blast], |app| {
-        app.add_effect::<Blast>();
+    let mut app = app(&[], |app| {
+        app.add_effect::<Reading>();
     });
     let npc = actor(&mut app, []);
     let caster = actor(&mut app, [ModifierSpec::flat::<Strength>(5.0)]);
-    apply(&mut app, npc, Blast.source(caster));
+    apply(&mut app, npc, Reading.source(caster));
     assert!(close(get::<Damage>(&app, npc), 25.0), "current: 15");
     assert!(close(get::<Mana>(&app, npc), 40.0), "base: 10");
     assert!(close(get::<AttackSpeed>(&app, npc), 6.0), "bonus: 5");
@@ -319,27 +388,15 @@ fn a_read_takes_the_current_value_the_base_or_the_bonus() {
 
 #[test]
 fn a_tagged_read_counts_the_modifiers_that_count_in_its_tags() {
-    let blast = adding::<Damage>(
-        EffectData::instant(Key::of::<Blast>()),
-        Magnitude::source::<Strength>(),
-    )
-    .modifier(EffectModifier::new::<Mana>(
-        Operation::Flat,
-        Magnitude::source::<Strength>().tagged(FIRE),
-    ))
-    .modifier(EffectModifier::new::<AttackSpeed>(
-        Operation::Flat,
-        Magnitude::source::<Strength>().tagged(FIRE).bonus(),
-    ));
-    let mut app = app(&[blast], |app| {
-        app.add_effect::<Blast>();
+    let mut app = app(&[], |app| {
+        app.add_effect::<TaggedReading>();
     });
     let npc = actor(&mut app, []);
     let caster = actor(
         &mut app,
         [ModifierSpec::flat::<Strength>(7.0).read_tagged(FIRE)],
     );
-    apply(&mut app, npc, Blast.source(caster));
+    apply(&mut app, npc, TaggedReading.source(caster));
     assert!(close(get::<Damage>(&app, npc), 20.0), "untagged: 10");
     assert!(close(get::<Mana>(&app, npc), 47.0), "in fire: 17");
     assert!(
@@ -350,13 +407,8 @@ fn a_tagged_read_counts_the_modifiers_that_count_in_its_tags() {
 
 #[test]
 fn a_capture_is_read_as_the_hit_its_part_of() {
-    // A fire hit, reading its caster's strength with nothing more said.
-    let blast = adding::<Damage>(
-        EffectData::instant(Key::of::<Blast>()).tag(FIRE),
-        Magnitude::source::<Strength>(),
-    );
-    let mut app = app(&[blast], |app| {
-        app.add_effect::<Blast>();
+    let mut app = app(&[], |app| {
+        app.add_effect::<FireBlast>();
     });
     let npc = actor(&mut app, []);
     let burning = actor(&mut app, []);
@@ -370,18 +422,18 @@ fn a_capture_is_read_as_the_hit_its_part_of() {
         ],
     );
     app.tick();
-    apply(&mut app, npc, Blast.source(caster));
+    apply(&mut app, npc, FireBlast.source(caster));
     assert!(
         close(get::<Damage>(&app, npc), 27.0),
         "its fire bonus counts for a fire hit: 17"
     );
-    apply(&mut app, burning, Blast.source(caster));
+    apply(&mut app, burning, FireBlast.source(caster));
     assert!(
         close(get::<Damage>(&app, burning), 32.0),
         "and against a burning target: 22"
     );
     // The same as the spec's made: the target's not known yet.
-    let made = app.world().snapshot(Blast.source(caster));
+    let made = app.world().snapshot(FireBlast.source(caster));
     assert_eq!(
         made.snapshot.first().map(|taken| taken.amount),
         Some(17.0),
@@ -389,13 +441,11 @@ fn a_capture_is_read_as_the_hit_its_part_of() {
     );
 }
 
-/// An app with `might`, snapshotting the caster's strength, and `aura`,
-/// reading it live; and an npc and a caster.
-fn snapshot_and_live(from: fn() -> AttributeRead) -> (TestApp, Entity, Entity) {
-    let might = adding::<Damage>(EffectData::infinite(Key::of::<Might>()), from());
-    let aura = adding::<Mana>(EffectData::infinite(Key::of::<Aura>()), from().live());
-    let mut app = app(&[might, aura], |app| {
-        app.add_effect::<Might>().add_effect::<Aura>();
+/// An app with `S`, snapshotting a strength, and `L`, reading it live; and
+/// an npc and a caster.
+fn snapshot_and_live<S: Effect, L: Effect>() -> (TestApp, Entity, Entity) {
+    let mut app = app(&[], |app| {
+        app.add_effects::<(S, L)>();
     });
     let npc = actor(&mut app, []);
     let caster = actor(&mut app, []);
@@ -404,7 +454,7 @@ fn snapshot_and_live(from: fn() -> AttributeRead) -> (TestApp, Entity, Entity) {
 
 #[test]
 fn a_snapshot_keeps_its_value_and_a_live_read_follows_the_source() {
-    let (mut app, npc, caster) = snapshot_and_live(Magnitude::source::<Strength>);
+    let (mut app, npc, caster) = snapshot_and_live::<Might, Aura>();
     apply(&mut app, npc, Might.source(caster));
     apply(&mut app, npc, Aura.source(caster));
     assert!(close(get::<Damage>(&app, npc), 20.0));
@@ -426,9 +476,9 @@ fn a_snapshot_keeps_its_value_and_a_live_read_follows_the_source() {
 
 #[test]
 fn a_snapshot_keeps_its_value_and_a_live_read_follows_the_target() {
-    let (mut app, npc, _) = snapshot_and_live(Magnitude::target::<Strength>);
-    apply(&mut app, npc, Might);
-    apply(&mut app, npc, Aura);
+    let (mut app, npc, _) = snapshot_and_live::<Grit, Resolve>();
+    apply(&mut app, npc, Grit);
+    apply(&mut app, npc, Resolve);
     assert!(close(get::<Damage>(&app, npc), 20.0));
     assert!(close(get::<Mana>(&app, npc), 40.0));
     set_base::<Strength>(&mut app, npc, 25.0);
@@ -443,11 +493,7 @@ fn a_snapshot_keeps_its_value_and_a_live_read_follows_the_target() {
 
 #[test]
 fn a_spec_snapshotted_as_its_made_applies_with_its_snapshot() {
-    let blast = adding::<Damage>(
-        EffectData::instant(Key::of::<Blast>()),
-        Magnitude::source::<Strength>(),
-    );
-    let mut app = app(&[blast], |app| {
+    let mut app = app(&[], |app| {
         app.add_effect::<Blast>();
     });
     let npc = actor(&mut app, []);
@@ -468,24 +514,16 @@ fn a_spec_snapshotted_as_its_made_applies_with_its_snapshot() {
 
 #[test]
 fn a_system_snapshots_a_spec_through_snapshots() {
-    let blast = adding::<Damage>(
-        EffectData::instant(Key::of::<Blast>()),
-        Magnitude::source::<Strength>().bonus(),
-    )
-    .modifier(EffectModifier::new::<Mana>(
-        Operation::Flat,
-        Magnitude::target::<Strength>(),
-    ));
-    let mut app = app(&[blast], |app| {
-        app.add_effect::<Blast>();
+    let mut app = app(&[], |app| {
+        app.add_effect::<Sapping>();
     });
     let npc = actor(&mut app, []);
     let caster = actor(&mut app, [ModifierSpec::flat::<Strength>(4.0)]);
     let made = app
         .world_mut()
-        .run_system_once(move |snapshots: Snapshots| snapshots.take(Blast.source(caster)))
+        .run_system_once(move |snapshots: Snapshots| snapshots.take(Sapping.source(caster)))
         .unwrap();
-    assert_eq!(made, app.world().snapshot(Blast.source(caster)), "alike");
+    assert_eq!(made, app.world().snapshot(Sapping.source(caster)), "alike");
     assert_eq!(made.snapshot.len(), 1, "the source's alone");
     modify(&mut app, caster, []);
     set_base::<Strength>(&mut app, npc, 7.0);
@@ -503,11 +541,7 @@ fn a_system_snapshots_a_spec_through_snapshots() {
 
 #[test]
 fn a_snapshotted_spec_outlives_its_source() {
-    let blast = adding::<Damage>(
-        EffectData::instant(Key::of::<Blast>()),
-        Magnitude::source::<Strength>(),
-    );
-    let mut app = app(&[blast], |app| {
+    let mut app = app(&[], |app| {
         app.add_effect::<Blast>();
     });
     let npc = actor(&mut app, []);
@@ -526,11 +560,7 @@ fn a_snapshotted_spec_outlives_its_source() {
 
 #[test]
 fn what_a_snapshot_cant_read_yet_is_captured_as_it_applies() {
-    let blast = adding::<Damage>(
-        EffectData::instant(Key::of::<Blast>()),
-        Magnitude::source::<Strength>(),
-    );
-    let mut app = app(&[blast], |app| {
+    let mut app = app(&[], |app| {
         app.add_effect::<Blast>();
     });
     let npc = actor(&mut app, []);
@@ -554,25 +584,22 @@ fn what_a_snapshot_cant_read_yet_is_captured_as_it_applies() {
 
 #[test]
 fn content_rejects_magnitudes_that_cant_be() {
-    let blast =
-        |name: &'static str, value: Magnitude| adding::<Damage>(EffectData::infinite(name), value);
-    let errors = errors(
-        &[
-            blast("sum", Magnitude::Sum(Vec::new())),
-            blast("product", Magnitude::Product(Vec::new())),
-            blast("clamp", Magnitude::Level.clamp(Some(5.0), Some(1.0))),
-            blast("nan", Magnitude::Value(f32::NAN)),
-            blast(
-                "infinite",
-                Magnitude::Level.clamp(None, Some(f32::INFINITY)),
-            ),
-            adding::<Strength>(
-                EffectData::infinite("itself"),
-                Magnitude::target::<Strength>().live(),
-            ),
-        ],
-        |_| {},
-    );
+    let blast = |name: &'static str, value: Magnitude| {
+        EffectData::new(name).infinite().flat::<Damage>(value)
+    };
+    let errors = errors(&[
+        blast("sum", Magnitude::Sum(Vec::new())),
+        blast("product", Magnitude::Product(Vec::new())),
+        blast("clamp", Magnitude::Level.clamp(Some(5.0), Some(1.0))),
+        blast("nan", Magnitude::Value(f32::NAN)),
+        blast(
+            "infinite",
+            Magnitude::Level.clamp(None, Some(f32::INFINITY)),
+        ),
+        EffectData::new("itself")
+            .infinite()
+            .flat::<Strength>(Magnitude::target::<Strength>().live()),
+    ]);
     for expected in [
         "a sum of nothing (in `sum`)",
         "a product of nothing (in `product`)",
@@ -591,20 +618,15 @@ fn content_accepts_reads_that_dont_follow_themselves() {
     let app = app(
         &[
             // Snapshotted: read once.
-            adding::<Strength>(
-                EffectData::infinite(Key::of::<Might>()),
-                Magnitude::target::<Strength>(),
-            ),
+            EffectData::new("snapshotted")
+                .infinite()
+                .flat::<Strength>(Magnitude::target::<Strength>()),
             // The source's: not what it changes.
-            adding::<Strength>(
-                EffectData::infinite(Key::of::<Aura>()),
-                Magnitude::source::<Strength>().live(),
-            ),
+            EffectData::new("sourced")
+                .infinite()
+                .flat::<Strength>(Magnitude::source::<Strength>().live()),
             // Instant: nothing to follow.
-            adding::<Strength>(
-                EffectData::instant(Key::of::<Blast>()),
-                Magnitude::target::<Strength>().live(),
-            ),
+            EffectData::new("instant").flat::<Strength>(Magnitude::target::<Strength>().live()),
         ],
         |_| {},
     );
@@ -651,16 +673,13 @@ impl ExecutionFn for Siphon {
 #[test]
 fn an_execution_reads_what_it_declares_it_captures() {
     let reads = Reads::default();
-    let siphon = EffectData::lasting(Key::of::<Blast>(), 10.0)
-        .period(1.0, false)
-        .execution(Key::of::<Siphon>());
-    let mut app = app(&[siphon], |app| {
-        app.add_effect::<Blast>()
+    let mut app = app(&[], |app| {
+        app.add_effect::<Drain>()
             .add_execution(Siphon(reads.clone()));
     });
     let npc = actor(&mut app, []);
     let caster = actor(&mut app, []);
-    apply(&mut app, npc, Blast.source(caster));
+    apply(&mut app, npc, Drain.source(caster));
     app.secs(1.0);
     assert_eq!(reads.take(), [[Some(10.0), Some(10.0), None]]);
     set_base::<Strength>(&mut app, caster, 30.0);
@@ -704,24 +723,15 @@ impl CalculationFn for Kept {
 #[test]
 fn a_calculation_reads_what_it_declares_it_captures() {
     let reads = Reads::default();
-    let might = adding::<Damage>(
-        EffectData::infinite(Key::of::<Might>()),
-        Magnitude::Custom(Key::of::<Kept>()),
-    );
-    let aura = adding::<Mana>(
-        EffectData::infinite(Key::of::<Aura>()),
-        Magnitude::Custom(Key::of::<Following>()),
-    );
-    let mut app = app(&[might, aura], |app| {
-        app.add_effect::<Might>()
-            .add_effect::<Aura>()
+    let mut app = app(&[], |app| {
+        app.add_effects::<(Steady, Swaying)>()
             .add_calculation(Kept)
             .add_calculation(Following(reads.clone()));
     });
     let npc = actor(&mut app, []);
     let caster = actor(&mut app, []);
-    apply(&mut app, npc, Might.source(caster));
-    apply(&mut app, npc, Aura.source(caster));
+    apply(&mut app, npc, Steady.source(caster));
+    apply(&mut app, npc, Swaying.source(caster));
     assert!(close(get::<Damage>(&app, npc), 20.0));
     assert!(close(get::<Mana>(&app, npc), 40.0));
     let read = reads.take();
@@ -742,7 +752,7 @@ fn a_calculation_reads_what_it_declares_it_captures() {
 
 #[test]
 fn a_live_read_follows_what_the_hit_owns() {
-    let (mut app, npc, caster) = snapshot_and_live(Magnitude::source::<Strength>);
+    let (mut app, npc, caster) = snapshot_and_live::<Might, Aura>();
     modify(
         &mut app,
         caster,
@@ -771,7 +781,7 @@ struct Told(Vec<f32>);
 
 #[test]
 fn a_live_read_is_followed_and_published_once_in_the_step_it_moved() {
-    let (mut app, npc, caster) = snapshot_and_live(Magnitude::source::<Strength>);
+    let (mut app, npc, caster) = snapshot_and_live::<Might, Aura>();
     app.world_mut().apply_effect(npc, Aura.source(caster));
     app.tick();
     app.init_resource::<Told>();
@@ -796,11 +806,7 @@ fn a_live_read_is_followed_and_published_once_in_the_step_it_moved() {
 #[test]
 fn effects_reading_each_other_live_settle() {
     // Each adds half the other's strength to its own: both come to 20.
-    let mirror = adding::<Strength>(
-        EffectData::infinite(Key::of::<Mirror>()),
-        Magnitude::source::<Strength>().live().times(0.5),
-    );
-    let mut app = app(&[mirror], |app| {
+    let mut app = app(&[], |app| {
         app.add_effect::<Mirror>();
     });
     let a = actor(&mut app, []);

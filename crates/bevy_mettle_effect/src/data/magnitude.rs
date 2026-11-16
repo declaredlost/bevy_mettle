@@ -1,29 +1,39 @@
 //! How much: a number in an effect's definition, as a small expression.
 
 use bevy_mettle_attribute::Attribute;
+use bevy_mettle_core::curve::ScalingCurve;
 use bevy_mettle_core::registry::{AnyAttribute, AnyCurve, Key};
 use bevy_mettle_core::tag::{TagKey, Tags};
 use serde::{Deserialize, Serialize};
 
-use crate::code::AnyCalculation;
+use crate::code::{AnyCalculation, Calculation};
+use crate::context::{AnyContextData, ContextData};
 
 /// How much: a modifier's value, a duration or a period, from the spec.
 ///
-/// A small expression: terms (a value, the level, a param, an attribute, a
-/// calculation), a curve at any of them, and sums, products and clamps of
-/// them. Unreal's `FGameplayEffectModifierMagnitude`, its kinds composed
-/// rather than each with its own extras: a scalable float is a value times a
-/// curve at the level; an attribute-based magnitude's coefficient and
-/// additions, a product and a sum; an attribute curve, a curve at an
-/// attribute.
+/// A small expression: terms (a value, the level, a number the spec's
+/// context carries, an attribute, a calculation), a curve at any of them, and
+/// sums, products and clamps of them. Unreal's
+/// `FGameplayEffectModifierMagnitude`, its kinds composed rather than each with
+/// its own extras: a scalable float is a value times a curve at the level; an
+/// attribute-based magnitude's coefficient and additions, a product and a sum;
+/// an attribute curve, a curve at an attribute.
 ///
 /// ```
+/// # use bevy::prelude::*;
+/// # use bevy::ecs::entity::MapEntities;
 /// # use bevy_mettle_attribute::prelude::*;
+/// # use bevy_mettle_core::prelude::*;
 /// # use bevy_mettle_effect::prelude::*;
+/// # use serde::{Deserialize, Serialize};
 /// # #[derive(Attribute)] struct SpellPower;
+/// # #[derive(ScalingCurve)] #[curve(keys = [(1.0, 1.0)])] struct FireballDamage;
+/// # #[derive(Reflect, Clone, PartialEq, Serialize, Deserialize, MapEntities)]
+/// # #[reflect(ContextData)] struct Damage { amount: f32 }
 /// let four = Magnitude::from(4.0);
-/// let by_level = Magnitude::scaled(10.0, "fireball.damage");
-/// let set_by_code = Magnitude::param("param.damage");
+/// let by_level = Magnitude::scaled::<FireballDamage>(10.0);
+/// // What the code applying it put on its spec: `.with(Damage { amount: 40.0 })`.
+/// let set_by_code = Magnitude::context::<Damage>("amount");
 /// // Half the caster's bonus spell power, plus 10.
 /// let power = Magnitude::source::<SpellPower>()
 ///     .bonus()
@@ -39,9 +49,15 @@ pub enum Magnitude {
     Value(f32),
     /// The spec's level.
     Level,
-    /// What the code applying it set, by a tag (`param.damage`: Unreal's
-    /// `SetByCaller`); 0, with a warning, if it didn't.
-    Param(TagKey),
+    /// A number field of a type the spec's context carries: what the code
+    /// applying it set, as Unreal's `SetByCaller` is. 0, with a warning, if
+    /// the context doesn't carry it.
+    Context {
+        /// The context data type, by its type path.
+        data: Key<AnyContextData>,
+        /// The field: an `f32`.
+        field: String,
+    },
     /// An attribute of the source's or the target's, captured as it says.
     Attribute(AttributeRead),
     /// Worked out by a calculation registered in code.
@@ -95,34 +111,45 @@ impl Magnitude {
         AttributeRead::new::<A>(Side::Target)
     }
 
-    /// What the code applying it set as `param`.
+    /// The `f32` field `field` of the `C` the spec's context carries: what
+    /// the code applying it set, `.with(C { .. })`.
     #[must_use]
-    pub fn param(param: impl Into<TagKey>) -> Self {
-        Self::Param(param.into())
+    pub fn context<C: ContextData>(field: &str) -> Self {
+        Self::Context {
+            data: Key::new(C::type_path()),
+            field: field.to_owned(),
+        }
     }
 
-    /// `curve` at the spec's level.
+    /// The curve `C` at the spec's level.
     #[must_use]
-    pub fn curve(curve: impl Into<Key<AnyCurve>>) -> Self {
+    pub fn curve<C: ScalingCurve>() -> Self {
         Self::Curve {
-            curve: curve.into(),
+            curve: Key::of::<C>(),
             at: level(),
         }
     }
 
-    /// `curve` at `at`: an attribute's value, for diminishing returns.
+    /// The curve `C` at `at`: an attribute's value, for diminishing returns.
     #[must_use]
-    pub fn curve_at(curve: impl Into<Key<AnyCurve>>, at: impl Into<Magnitude>) -> Self {
+    pub fn curve_at<C: ScalingCurve>(at: impl Into<Magnitude>) -> Self {
         Self::Curve {
-            curve: curve.into(),
+            curve: Key::of::<C>(),
             at: Box::new(at.into()),
         }
     }
 
-    /// `base` times `curve` at the spec's level: Unreal's scalable float.
+    /// `base` times the curve `C` at the spec's level: Unreal's scalable
+    /// float.
     #[must_use]
-    pub fn scaled(base: f32, curve: impl Into<Key<AnyCurve>>) -> Self {
-        Self::Product(vec![Self::Value(base), Self::curve(curve)])
+    pub fn scaled<C: ScalingCurve>(base: f32) -> Self {
+        Self::Product(vec![Self::Value(base), Self::curve::<C>()])
+    }
+
+    /// Worked out by the calculation `C`.
+    #[must_use]
+    pub fn calculation<C: Calculation>() -> Self {
+        Self::Custom(Key::of::<C>())
     }
 
     /// It times `by`.

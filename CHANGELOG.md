@@ -53,10 +53,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   adds (`TagApp::add_tag`). `Tags`, a set of them. `TagCounts` and
   `OwnedTags`, what an actor owns by count, told by `TagAdded` and
   `TagRemoved`, with the `owns` guard.
-- Curves: `CurveData`, keys `(at, value)` and an `Interpolation`
-  (`Constant`, `Linear`, `Ease`), built into a `CurveRegistry` as Bevy's
-  curves: values by key, read at the level or at what else a magnitude
-  says.
+- Curves defined in code: `#[derive(ScalingCurve)]` on a marker type,
+  `#[curve(keys = [(1.0, 10.0), (10.0, 85.0)], ease = ..)]`, added with
+  `add_curve::<C>()` (`CurveApp`). A `CurveData` is keys `(at, value)` and
+  an `Interpolation` (`Constant`, `Linear`, `Ease`), built with
+  `CurveData::new`, `key`, `keys`, `constant` and `ease`, into a
+  `CurveRegistry` as Bevy's curves: values by key, read at the level or at
+  what else a magnitude says. Content defining a curve with a code curve's
+  key replaces it: what tuning is, as Unreal's curve tables are.
+- Self-defining types: effects, abilities and curves define themselves,
+  each derive key the builder method of the same name (`lasting = 4.0` is
+  `.lasting(4.0)`, `flat::<Life>(5.0)` is `.flat::<Life>(5.0)`), or a
+  function, `define = burning`. Each kind's registry keeps its types
+  (`Definitions`) and defines them again as it's rebuilt; with the
+  `hotpatching` feature, through Bevy's hot patching, so a patched
+  definition is the one loaded. Content defining a key code defines is
+  rejected (`Error::DefinedInCode`), but for a curve.
 - Conditions: `Condition` (`ConditionOver<TagKey>`), an expression over a
   read's tags, what its owner, target and source own, and the facts it
   supplies (`fact_above`, `fact_below`, `fact_ramp`, `fact_every`), weighed
@@ -115,40 +127,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### `bevy_mettle_effect`
 
-- Effects as content, `EffectData`: `instant`, `lasting` or `infinite`
-  (`EffectDuration`), a `period`, `modifiers` (`EffectModifier`),
-  `executions` in code, the tags its owner holds while it lasts
+- Effects defined in code: `#[derive(Effect)]` on a marker type, its keys
+  `EffectData`'s builder methods, added with `add_effect::<E>()` or
+  `add_effects::<(A, B)>()` (`EffectApp`, `EffectGroup`). An effect is a
+  marker: the derive rejects fields, and what changes from one application
+  to the next goes on its spec's context. Content adds effects by keys code
+  doesn't define, as `EffectData`, a serde type.
+- What an effect is, `EffectData`: instant unless it's `lasting` or
+  `infinite` (`EffectDuration`), a `period` (and `execute_on_apply`),
+  `modifiers` (`EffectModifier`; `flat::<A>` and `route::<R>` for those
+  counting always), `executions` in code (`execution::<E>()`), the tags its owner holds while it lasts
   (`owner_tags`, `owner_tag(..)`), its `cues`, what it needs to apply
   (`require`) and to count (`ongoing`: inhibited while it doesn't, its time
   standing still), what ends it (`end_if`), the effects it `ends` as it
   applies and `blocks` while it lasts (Unreal's immunity), its `stacking`,
-  and the effects it chains `on_apply`, `on_remove` and `on_expire`.
-- Stacking (`Stacking`): one stack for everyone or per source (`StackBy`),
+  and the effects it chains `on_apply`, `on_remove` and `on_expire`, each
+  by type.
+- Stacking (`Stacking::up_to(limit)`): one stack for everyone or per
+  source (`StackBy`),
   a `limit`, what applying again does to the time left (`Reapply`) and the
   period (`reset_period`), what running out does (`Expire`), and the
   `overflow` effects applied at the limit. A stack keeps the spec its
-  effect was first applied with; a new application's level, params and
+  effect was first applied with; a new application's level, context and
   source go only to what it chains.
-- `#[derive(Effect)] struct Burning;` is the effect content defines as
-  `burning`, added with `add_effect::<Burning>()` (`EffectApp`). Content
-  without an effect code adds fails its check (`Error::NotInContent`).
-- `EffectRegistry`: content checked against the tags, curves, attributes,
-  executions, calculations and routes (`EffectScope`), every error at
-  once, and compiled into `EffectDef`s, names resolved to numbers.
-  `EffectRegistry::build` makes one for tools and tests; `rebuild` keeps
-  the numbers. Executions on a lasting effect with no period are
+- `EffectRegistry`: the effects code defines and content adds, checked
+  against the tags, curves, attributes, executions, calculations, routes
+  and context data types (`EffectScope`), every error at once, and
+  compiled into `EffectDef`s, names resolved to numbers.
+  `EffectRegistry::build` makes one of content alone for tools and tests;
+  `rebuild` defines the types again and keeps the numbers. Executions on a lasting effect with no period are
   rejected. Active effects take new definitions as they're replaced.
 - Magnitudes as small expressions (`Magnitude`): terms `Value`, `Level`,
-  `Param`, `Attribute` (an `AttributeRead`), `Custom` and `Curve { curve,
-  at }` (at the level unless it says), combined by `Sum`, `Product` and
-  `Clamp`. Unreal's magnitude kinds are compositions of them: a scalable
+  `Context` (an `f32` field of a type the spec's context carries,
+  Unreal's SetByCaller: `Magnitude::context::<Damage>("amount")`),
+  `Attribute` (an `AttributeRead`), `Custom` (`calculation::<C>()`) and
+  `Curve { curve, at }` (at the level unless it says), combined by `Sum`,
+  `Product` and `Clamp`. Unreal's magnitude kinds are compositions of them: a scalable
   float is a value times a curve at the level; an attribute-based
   magnitude's coefficient and additions, a product and a sum, each part
   any magnitude; an attribute curve, a curve at an attribute; a custom
-  calculation's coefficient, a product. Builders: `Magnitude::curve`,
-  `curve_at`, `times`, `plus` and `clamp`. Checked into a `MagnitudeDef`
-  of numbers, its constants folded. Content is rejected for a sum or
-  product of nothing or a clamp whose least is above its most.
+  calculation's coefficient, a product. Builders: `Magnitude::curve::<C>()`,
+  `curve_at::<C>(..)`, `scaled::<C>(..)`, `times`, `plus` and `clamp`.
+  Checked into a `MagnitudeDef` of numbers, its constants folded. Content
+  is rejected for a sum or product of nothing, a clamp whose least is above
+  its most, or a context field that isn't a registered type's `f32`.
 - `AttributeRead`: which attribute an `Attribute` magnitude reads, whose
   (`Side`: `Source`, the default, or `Target`), which of its values (`Read`: `Current`,
   `Base`, or `Bonus`, its current value less its base), in what tags
@@ -173,9 +195,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with its source's snapshot captures taken now, in its `Snapshot`, for a
   projectile to carry its caster's attributes as it was cast.
 - Effect specs, `EffectSpec`: an `Effect` type is its own spec
-  (`apply_effect(Burning.level(3.0))`), or `EffectSpec::of::<E>()`. Its
-  `level`, its params (`param`, Unreal's SetByCaller), its context, and the
-  activation it's predicted under.
+  (`apply_effect(Burn.level(3.0).with(Damage { amount: 5.0 }))`), or
+  `EffectSpec::of::<E>()`. Its `level`, its context, and the activation
+  it's predicted under.
 - An effect spec's context, Unreal's `FGameplayEffectContext`:
   `EffectContext`, of its `source`, and context data, one of each type,
   `.with(..)` and `get::<C>()`. Mettle's own: `Causer` (what struck),
@@ -183,17 +205,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   level), `Hit` (point and normal) and `Origin`, registered by
   `EffectPlugin`. A game adds its own with a `ContextData` type, by
   reflection (`#[reflect(ContextData)]`, `register_type`;
-  `ReflectContextData`, `ContextDataRegistry`). Executions and
-  calculations read it; chained effects carry it; `EffectExecuted` and
+  `ReflectContextData`, `ContextDataRegistry`). Magnitudes, executions
+  and calculations read it; chained effects carry it; `EffectExecuted` and
   `CueExecuted` are told it. It's replicated with an effect's replica and
   a one-shot cue's burst (`ContextReplica`), entities mapped, those in a
   game's types too.
-- Applying and removing: `apply_effect` and `remove_effects` (by tags),
-  on `EffectCommands` and `EffectWorld`, and `remove_activation` on
-  `EffectCommands`; `preview_effect`, what an instant effect would change
+- Applying and removing: `apply_effect`, `remove_effects` (by tags) and
+  `remove_effects_under` (an activation), on `EffectCommands` and
+  `EffectWorld`; `preview_effect`, what an instant effect would change
   without changing it. A lasting effect is an entity (`ActiveEffect`)
   `EffectOf` its target (`ActiveEffects`), with its `stacks`, `remaining`
-  time and whether it `is_inhibited`. Removing one is despawning it: its
+  time, whether it `is_inhibited`, and whether it `is::<E>()`. Removing one is despawning it: its
   tags and cues taken back, `EffectRemoved` told, its `on_remove`
   chained.
 - Events on the target: `EffectApplied`, `EffectStacked`, `EffectBlocked`
@@ -201,7 +223,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `EffectRemoved` (`expired`). `EffectExecuted` says what came of it:
   its `context`, the `changes` to the target's bases after routing and
   limits (`Delta`), `source_changes` to its source's, and what it routed
-  into each route (`routed`, `Routed`).
+  into each route (`routed`, `Routed`). Each carries its effect's `key`, so
+  an observer asks `is::<Burn>()`: an effect's own logic is an observer.
 - Effect code: `#[derive(Execution)]` and `#[derive(Calculation)]`, their
   `ExecutionFn::execute` and `CalculationFn::calculate` taking `&self`, a
   value registered with `add_execution(FireDamage)` and
@@ -228,7 +251,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declare. A route whose captures can't be rejects only the effects
   routing into it.
 - `ExecutionContext`, what executions, calculations and routers see: the
-  effect, its `level`, `param`s, `context`, `source`, the actors' `owned`
+  effect, its `level`, its `context` (`get::<C>()`), `source`, the actors' `owned`
   tags, and `captured::<A>(Side)`, what the code declared it captures, as
   Unreal's `AttemptCalculateCapturedAttributeMagnitude`. `breakdown::<A>`
   and the `world` field read past captures, unsnapshotted and
@@ -258,30 +281,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one-shot played once however often it was predicted. Played in
   `PostUpdate`, in `CueSystems`.
 - Prediction: a server keeps each active effect's `EffectReplica`, its
-  effect, params and source's tags by number, for a client to show
+  effect, context and source's tags by number, for a client to show
   (`Proxy`). A client predicts its own effects (`PredictedUnder`), kept
   or undone with `confirm_prediction` and `reject_prediction`.
 
 #### `bevy_mettle_ability`
 
-- Abilities as content, `AbilityData`: the behaviour that runs it, its
-  `cost` and `cooldown` (effects), what it needs (`require`: kept from
+- Abilities defined in code: `#[derive(Ability)]` on a marker type, its
+  keys `AbilityData`'s builder methods, added with `add_ability::<A>()` or
+  `add_abilities::<(A, B)>()` (`AbilityApp`, `AbilityGroup`). Content adds
+  abilities by keys code doesn't define, as `AbilityData`.
+- What an ability is, `AbilityData`: the behaviour that runs it
+  (`behaviour::<B>()`), what it costs (`cost`, `Cost::of::<Mana>(20.0)`)
+  and how long it cools down (`cooldown`, `cooldown_tag` to share one),
+  the effects that grant it (`granted_by::<E>()`), what it needs (`require`: kept from
   activating while its owner owns a tag by `!Condition::owner_has(..)`),
   what it `ends` (cancels) as it starts and `blocks` while active,
   its `owner_tags` (`owner_tag(..)`), its `cue`s, its `trigger`s
   (`Trigger`: `Event`, `TagAdded`, `TagPresent`), when it commits
   (`Commit`: `OnActivate`, `Manual`), what interrupts it (`end_if`) and how
   it runs over a network (`net`).
-- `#[derive(Ability)] struct Fireball;`, added with
-  `add_ability::<Fireball>()` (`AbilityApp`). Granting takes an
+- Costs and cooldowns as effects mettle makes of them
+  (`AbilityRegistry::upkeep`): an instant `<ability>.cost`, and a lasting
+  `<ability>.cooldown` granting `cooldown.<ability>` unless it says,
+  its tags registered with it. Granting takes an
   `AbilitySpec`, Unreal's ability spec: `grant_ability(Fireball)`,
   `grant_ability(Fireball.level(2.0))`. `activate_ability` takes an
   `Ability` type; `activate` a granted ability's entity.
-- `AbilityRegistry`: content checked against the tags, effects and
-  behaviours (`AbilityScope`), every error at once, compiled into
-  `AbilityDef`s. A `Grant` says which abilities an effect grants while it
-  lasts, gear's skills (`granted_by`, `GrantedBy`). An ability whose
-  behaviour takes input can't have triggers.
+- `AbilityRegistry`: the abilities code defines and content adds, checked
+  against the tags, effects and behaviours (`AbilityScope`), every error at
+  once, compiled into `AbilityDef`s; `granted_by` the effects granting
+  each while they last, gear's skills (`GrantedBy`). An ability needs a
+  behaviour, and one whose behaviour takes input can't have triggers.
 - Behaviours: a component of yours, `#[derive(Behaviour)]`, added with
   `add_behaviour::<B>()` (`BehaviourApp`) into `BehaviourRegistry`. It's
   put on the ability's entity as it activates, for the game's systems to
@@ -323,7 +354,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`Failure::Input`).
 - Triggers: a `GameplayEvent` triggered on an actor (`commands.trigger`,
   `world.trigger`) activates what it triggers, as do tags it comes to
-  own. One sent under a running
+  own. It's about a `target`, and carries an `EffectContext` (its
+  `source`, and context data, `with(..)`) for what it triggers to apply
+  effects with. One sent under a running
   ability's activation (`GameplayEvent::under`) triggers a predicted
   ability under an activation derived from it, the same on a client and
   its server, undone with its parent while that awaits its answer.
@@ -376,12 +409,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### `bevy_mettle_macros`
 
-- The derives, each re-exported by its part: `Tag` by
+- The derives, each re-exported by its part: `Tag` and `ScalingCurve` by
   `bevy_mettle_core`; `Attribute` by `bevy_mettle_attribute`; `Effect`,
   `Route`, `Execution` and `Calculation` (the last three with what they
   capture, an execution with the routes it routes into) by
   `bevy_mettle_effect`; `Ability` and `Behaviour` by
-  `bevy_mettle_ability`.
+  `bevy_mettle_ability`. `Effect`, `Ability` and `ScalingCurve` take their
+  keys as builder calls, checked by the compiler as the methods they
+  call.
 
 #### `bevy_mettle`
 
@@ -389,18 +424,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   facade over `bevy_mettle_core` (always there, as `bevy_mettle::core`)
   and each part behind a feature: `attribute`, `effect` and `ability`, by
   default, and `lightyear`, as `bevy_mettle::attribute`, `effect`,
-  `ability` and `lightyear`. Its prelude has every enabled part's.
+  `ability` and `lightyear`; and `hotpatching`, Bevy's hot patching of
+  what code defines. Its prelude has every enabled part's.
 - `MettlePlugins`: the plugin of every part its features enable, with
   `MettleCorePlugin` first and `MettleContentPlugin`. Run mettle elsewhere
   with `MettlePlugins.set(MettleCorePlugin::new(..))`. With `lightyear`,
   it carries `MettleNetPlugin`, and goes after lightyear's plugins.
-- `MettleContent`: the game's content as one resource (tags, curves,
-  effects, abilities and grants), checked as a whole and loaded as it
-  changes (`PreStartup`, then `PreUpdate`) by `MettleContentPlugin`.
-  `ContentLoaded` and `ContentRejected` (with every error) are triggered;
-  rejected content leaves the content before in place.
-  `MettleContent::check` answers at once. Content is serde types, loaded
-  however a game likes.
+- `MettleContentPlugin` loads what code defines and `MettleContent` adds,
+  checked as a whole: in `PreStartup`, with or without content; in
+  `PreUpdate` as content changes; and, with the `hotpatching` feature, as
+  code is hot patched. `ContentLoaded` and `ContentRejected` (with every
+  error) are triggered; what's rejected leaves what was loaded in place.
+- `MettleContent`: what data adds as one resource (tags, curves, effects
+  and abilities), serde types loaded however a game likes; its curves tune
+  code's. `MettleContent::check` answers at once.
 - Benchmarks of mettle's hot paths (`cargo bench -p bevy_mettle`):
   attributes kept and read, tags and conditions, effects applied, routed
   and ticked, captures, and abilities, for 1000 actors.
@@ -408,5 +445,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### The book
 
 - The bevy_mettle book: a guide to every part, from your first attributes
-  to prediction over lightyear, loading data and testing, its examples
+  to prediction over lightyear, adding content in data and testing, its examples
   compiled as doctests.

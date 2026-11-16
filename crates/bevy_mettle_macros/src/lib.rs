@@ -1,4 +1,5 @@
-//! `#[derive(Tag)]`, re-exported by `bevy_mettle_core`;
+//! `#[derive(Tag)]` and `#[derive(ScalingCurve)]`, re-exported by
+//! `bevy_mettle_core`;
 //! `#[derive(Attribute)]`, by `bevy_mettle_attribute`;
 //! `#[derive(Effect)]`, `#[derive(Route)]`, `#[derive(Execution)]` and
 //! `#[derive(Calculation)]`, by `bevy_mettle_effect`; and
@@ -11,6 +12,8 @@ mod attribute;
 mod behaviour;
 mod calculation;
 mod captures;
+mod curve;
+mod defined;
 mod effect;
 mod execution;
 mod kind;
@@ -51,12 +54,14 @@ pub fn derive_route(input: TokenStream) -> TokenStream {
         .into()
 }
 
-/// An effect code names: a marker type, its name on `#[effect(..)]`.
+/// An effect: a marker type, defined by its keys on `#[effect(..)]`.
+///
+/// Each key is the `EffectData` builder method of its name.
 ///
 /// ```ignore
 /// #[derive(Effect)]
-/// #[effect(name = "burning")]
-/// pub struct Burning;
+/// #[effect(lasting = 4.0, period = 0.5, owner_tag = Burning)]
+/// pub struct Burn;
 /// ```
 #[proc_macro_derive(Effect, attributes(effect))]
 pub fn derive_effect(input: TokenStream) -> TokenStream {
@@ -97,10 +102,13 @@ pub fn derive_calculation(input: TokenStream) -> TokenStream {
         .into()
 }
 
-/// An ability code names: a marker type, its name on `#[ability(..)]`.
+/// An ability: a marker type, defined by its keys on `#[ability(..)]`.
+///
+/// Each key is the `AbilityData` builder method of its name.
 ///
 /// ```ignore
 /// #[derive(Ability)]
+/// #[ability(behaviour::<CastFireball>, cooldown = 2.0)]
 /// pub struct Fireball;
 /// ```
 #[proc_macro_derive(Ability, attributes(ability))]
@@ -122,6 +130,23 @@ pub fn derive_ability(input: TokenStream) -> TokenStream {
 pub fn derive_behaviour(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     behaviour::expand(&input)
+        .unwrap_or_else(Error::into_compile_error)
+        .into()
+}
+
+/// A curve: a marker type, defined by its keys on `#[curve(..)]`.
+///
+/// Each key is the `CurveData` builder method of its name.
+///
+/// ```ignore
+/// #[derive(ScalingCurve)]
+/// #[curve(keys = [(1.0, 10.0), (10.0, 85.0)])]
+/// pub struct FireballDamage;
+/// ```
+#[proc_macro_derive(ScalingCurve, attributes(curve))]
+pub fn derive_curve(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    curve::expand(&input)
         .unwrap_or_else(Error::into_compile_error)
         .into()
 }

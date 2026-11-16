@@ -8,33 +8,54 @@ use bevy::ecs::entity::{EntityHashMap, MapEntities};
 use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use bevy_harness::TestApp;
+use bevy_mettle::MettleContentPlugin;
+use bevy_mettle::ability::net::{
+    AbilityCancelRequest, AbilityEnd, AbilityInput, AbilityReplica, AbilityReply, AbilityRequest,
+};
 use bevy_mettle::effect::context::ContextReplica;
+use bevy_mettle::effect::net::{EffectReplica, PredictedUnder, Proxy};
 use bevy_mettle::prelude::*;
 
 use crate::common::{Mana, Strength, actor, attributes, close, get, own};
 
 #[derive(Ability)]
+#[ability(
+    behaviour::<Cast>,
+    cost = Cost::of::<Mana>(20.0),
+    cooldown = 1.0,
+    require = !Condition::owner_has("state.stunned"),
+    end_if = Condition::owner_has("state.stunned"),
+)]
 struct Fireball;
 
 #[derive(Ability)]
+#[ability(behaviour::<Cast>, cost = Cost::of::<Mana>(20.0), commit = Commit::Manual)]
 struct Charge;
 
+/// Costs half its caster's base mana.
 #[derive(Ability)]
+#[ability(behaviour::<Cast>, cost = Cost::of::<Mana>(Magnitude::target::<Mana>().base().times(0.5)))]
 struct Focus;
 
 #[derive(Ability)]
+#[ability(behaviour::<Shoot>, cost = Cost::of::<Mana>(20.0))]
 struct Shot;
 
+/// Pays its price as it starts.
 #[derive(Ability)]
+#[ability(behaviour::<Pricing>, require = !Condition::owner_has("state.stunned"))]
 struct Bolt;
 
 #[derive(Ability)]
+#[ability(behaviour::<Kindling>, require = !Condition::owner_has("state.stunned"))]
 struct Kindle;
 
 #[derive(Ability)]
+#[ability(behaviour::<Flaring>, cost = Cost::of::<Mana>(20.0))]
 struct Flare;
 
 #[derive(Ability)]
+#[ability(behaviour::<Sparking>, trigger = Trigger::Event(TagKey::named("event.spark")))]
 struct Spark;
 
 /// Sets its caster burning as it starts, through its activation.
@@ -65,17 +86,37 @@ fn flare(add: On<Add<Flaring>>, active: Query<&ActiveAbility>, mut commands: Com
 #[derive(Component, Default, Behaviour)]
 struct Sparking;
 
+/// Has its caster pay a [`Price`] as it starts, through its activation.
+#[derive(Component, Default, Behaviour)]
+struct Pricing;
+
+fn price(add: On<Add<Pricing>>, active: Query<&ActiveAbility>, mut commands: Commands) {
+    if let Ok(active) = active.get(add.entity) {
+        commands
+            .entity(active.actor)
+            .apply_effect(active.effect_spec::<BoltPrice>());
+    }
+}
+
+/// 20 mana, routed as a [`Price`].
 #[derive(Effect)]
-#[effect(name = "fireball.cooldown")]
-struct FireballCooldown;
+#[effect(route::<Price>(20.0))]
+struct BoltPrice;
 
 #[derive(Effect)]
+#[effect(lasting = 5.0, period = 0.5, flat::<Mana>(-1.0))]
 struct Burn;
 
 #[derive(Effect)]
+#[effect(lasting = 5.0, flat::<Mana>(1.0), stacking = Stacking::up_to(3))]
 struct Ward;
 
 #[derive(Effect)]
+#[effect(
+    infinite,
+    modifier = EffectModifier::new::<Mana>(Operation::Flat, 10.0)
+        .condition(Condition::source_has("state.stunned")),
+)]
 struct Blessed;
 
 #[derive(Component, Default, Behaviour)]
@@ -114,51 +155,17 @@ fn in_reach(In(check): In<InputCheck<Aim>>, reach: Res<Reach>) -> bool {
     check.input.0.abs() <= reach.0
 }
 
-const TAGS: &[&str] = &[
-    "damage",
-    "state",
-    "state.stunned",
-    "cooldown",
-    "cooldown.fireball",
-    "event",
-    "event.spark",
-];
+/// The tags data adds: those cooldowns grant come with the abilities.
+const TAGS: &[&str] = &["damage", "state", "state.stunned", "event", "event.spark"];
 
-fn tags() -> TagRegistry {
-    TagRegistry::build(TAGS.iter().map(|&name| TagKey::named(name))).unwrap()
-}
-
-/// Every ability both sides have, as data.
-fn abilities() -> [AbilityData; 8] {
-    let fireball = AbilityData::new(Key::of::<Fireball>(), Key::of::<Cast>())
-        .cost("fireball.cost")
-        .cooldown(Key::of::<FireballCooldown>())
-        .require(!Condition::owner_has("state.stunned"))
-        .end_if(Condition::owner_has("state.stunned"));
-    let charge = AbilityData::new(Key::of::<Charge>(), Key::of::<Cast>())
-        .cost("fireball.cost")
-        .commit(Commit::Manual);
-    let focus = AbilityData::new(Key::of::<Focus>(), Key::of::<Cast>()).cost("focus.cost");
-    let shot = AbilityData::new(Key::of::<Shot>(), Key::of::<Shoot>()).cost("fireball.cost");
-    let bolt = AbilityData::new(Key::of::<Bolt>(), Key::of::<Cast>())
-        .cost("bolt.cost")
-        .require(!Condition::owner_has("state.stunned"));
-    let kindle = AbilityData::new(Key::of::<Kindle>(), Key::of::<Kindling>())
-        .require(!Condition::owner_has("state.stunned"));
-    let flare = AbilityData::new(Key::of::<Flare>(), Key::of::<Flaring>()).cost("fireball.cost");
-    let spark = AbilityData::new(Key::of::<Spark>(), Key::of::<Sparking>())
-        .trigger(Trigger::Event(TagKey::named("event.spark")));
-    [fireball, charge, focus, shot, bolt, kindle, flare, spark]
-}
-
-/// A world playing as `role`, with fireball.
+/// A world playing as `role`, with every ability both sides have.
 fn world(role: NetRole) -> TestApp {
-    let mut app = TestApp::builder()
+    TestApp::builder()
         .with(attributes)
         .with(move |app| {
             app.insert_resource(role);
         })
-        .plugins((EffectPlugin, AbilityPlugin))
+        .plugins((EffectPlugin, AbilityPlugin, MettleContentPlugin))
         .with(move |app| {
             // The server knows a shot reaches only 10; the client, 100.
             let reach = if role == NetRole::Server { 10.0 } else { 100.0 };
@@ -169,79 +176,19 @@ fn world(role: NetRole) -> TestApp {
                 .add_behaviour::<Flaring>()
                 .add_behaviour::<Sparking>()
                 .add_observer(flare)
-                .add_ability::<Flare>()
-                .add_ability::<Spark>()
-                .add_ability::<Kindle>()
+                .add_behaviour::<Pricing>()
+                .add_observer(price)
                 .check_input::<Aim, _>(in_reach)
                 .insert_resource(Reach(reach))
-                .add_ability::<Fireball>()
-                .add_ability::<Charge>()
-                .add_ability::<Focus>()
-                .add_ability::<Shot>()
-                .add_ability::<Bolt>()
                 .add_route(Price)
-                .add_effect::<FireballCooldown>()
-                .add_effect::<Burn>()
-                .add_effect::<Ward>()
-                .add_effect::<Blessed>()
-                .insert_resource(tags());
+                .add_effects::<(BoltPrice, Burn, Ward, Blessed)>()
+                .add_abilities::<(Fireball, Charge, Focus, Shot, Bolt, Kindle, Flare, Spark)>()
+                .insert_resource(MettleContent {
+                    tags: TAGS.iter().map(|&name| TagKey::named(name)).collect(),
+                    ..default()
+                });
         })
-        .build();
-    let world = app.world_mut();
-    let effects = world
-        .resource::<EffectRegistry>()
-        .rebuild(
-            &[
-                EffectData::instant("fireball.cost")
-                    .modifier(EffectModifier::new::<Mana>(Operation::Flat, -20.0)),
-                EffectData::instant("bolt.cost").modifier(EffectModifier::route::<Price>(20.0)),
-                EffectData::lasting(Key::of::<FireballCooldown>(), 1.0)
-                    .owner_tag("cooldown.fireball"),
-                EffectData::instant("focus.cost")
-                    .modifier(EffectModifier::new::<Mana>(Operation::Additive, -0.5)),
-                EffectData::lasting(Key::of::<Burn>(), 5.0)
-                    .period(0.5, false)
-                    .modifier(EffectModifier::new::<Mana>(Operation::Flat, -1.0)),
-                EffectData::lasting(Key::of::<Ward>(), 5.0)
-                    .modifier(EffectModifier::new::<Mana>(Operation::Flat, 1.0))
-                    .stacking(Stacking {
-                        by: StackBy::Target,
-                        limit: 3,
-                        reapply: Reapply::Refresh,
-                        reset_period: false,
-                        expire: Expire::ClearAll,
-                        overflow: Vec::new(),
-                    }),
-                EffectData::infinite(Key::of::<Blessed>()).modifier(
-                    EffectModifier::new::<Mana>(Operation::Flat, 10.0)
-                        .condition(Condition::source_has("state.stunned")),
-                ),
-            ],
-            EffectScope {
-                tags: world.resource(),
-                curves: &CurveRegistry::default(),
-                attributes: world.resource(),
-                executions: world.resource(),
-                calculations: world.resource(),
-                routes: world.resource(),
-            },
-        )
-        .unwrap();
-    let abilities = world
-        .resource::<AbilityRegistry>()
-        .rebuild(
-            &abilities(),
-            &[],
-            AbilityScope {
-                tags: world.resource(),
-                effects: &effects,
-                behaviours: world.resource(),
-            },
-        )
-        .unwrap();
-    world.insert_resource(effects);
-    world.insert_resource(abilities);
-    app
+        .build()
 }
 
 /// A server and a client, the same mage in each, granted fireball by the
@@ -846,13 +793,12 @@ fn another_sources_effect_under_the_same_activation_isnt_taken_for_mine() {
         .client
         .world()
         .resource::<EffectRegistry>()
-        .id_of::<FireballCooldown>()
+        .id("fireball.cooldown")
         .unwrap();
     game.client.spawn((
         EffectReplica {
             effect: cooldown,
             level: 1.0,
-            params: Vec::new(),
             context: ContextReplica {
                 source: Some(elsewhere),
                 ..default()
